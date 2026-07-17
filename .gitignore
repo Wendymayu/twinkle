@@ -1,0 +1,51 @@
+# Python build artifacts
+*.egg-info/
+*.egg
+__pycache__/
+*.pyc
+*.pyo
+
+# Test / cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build
+build/
+dist/
+
+# Editable install metadata
+*.pth
+
+# SDD scratch
+.superpowers/
+
+# Claude Code / skill tooling
+.agents/
+skills-lock.json
+.deepeval/
+
+# Local editor / OS files
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Frontend
+node_modules/
+web/dist/
+web/.vite/
+
+# Logs
+*.log

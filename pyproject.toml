@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twinkle"
+version = "0.0.1"
+description = "Twinkle — personal AI assistant (learning reimplementation of jiuwenclaw core)"
+requires-python = ">=3.11"
+dependencies = [
+    "websockets>=14",
+    "pydantic>=2.11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["twinkle*"]
