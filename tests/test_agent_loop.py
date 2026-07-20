@@ -22,13 +22,12 @@ class _ScriptedLLM:
             yield ev
 
 
-def _env(query, rid="r1", session_id="s1", is_stream=True):
+def _env(query, rid="r1", session_id="s1"):
     return E2AEnvelope(
         request_id=rid,
         session_id=session_id,
         method="chat.send",
         params={"query": query},
-        is_stream=is_stream,
     )
 
 

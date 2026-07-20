@@ -1,10 +1,9 @@
 """AgentServer — the heavy execution core process.
 
 Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
-AgentLoop (ReAct: think -> tool -> result -> re-decide). echo is gone.
-
-make_handler(loop) lets tests inject a fake loop; build_default_loop()
-wires the real config-driven loop for production.
+AgentLoop (ReAct: think -> tool -> result -> re-decide). Stream-only; no
+unary mode. make_handler(loop) lets tests inject a fake loop;
+build_default_loop() wires the real config-driven loop for production.
 """
 from __future__ import annotations
 
@@ -72,11 +71,7 @@ def make_handler(loop: AgentLoop):
                 await _safe_send(ws, err)
                 continue
             try:
-                if env.is_stream:
-                    async for frame in loop.run_stream(env):
-                        await _safe_send(ws, frame)
-                else:
-                    frame = await loop.run_unary(env)
+                async for frame in loop.run_stream(env):
                     await _safe_send(ws, frame)
             except Exception as exc:
                 log.exception("agent loop failed for %s: %s", env.request_id, exc)

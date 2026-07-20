@@ -1,8 +1,12 @@
 """E2A (Envelope-to-Agent) — minimal wire protocol between Gateway and AgentServer.
 
 Subset of jiuwenclaw's E2A schema (e2a/models.py). We keep only the fields
-needed for a streaming/unary echo loop; the full codec (legacy fallback,
+needed for a streaming echo loop; the full codec (legacy fallback,
 wire_codec, gateway_normalize) is intentionally not reimplemented.
+
+Note: Twinkle uses stream-only mode — every request is implicitly streaming.
+The `is_stream` field on E2AEnvelope has been removed; responses always
+carry `is_stream=True`.
 """
 from __future__ import annotations
 
@@ -14,7 +18,11 @@ E2A_PROTOCOL_VERSION = "1.0"
 
 
 class E2AEnvelope(BaseModel):
-    """Gateway -> AgentServer request envelope."""
+    """Gateway -> AgentServer request envelope.
+
+    Twinkle is stream-only; there is no `is_stream` field — every request
+    is implicitly streaming.
+    """
 
     protocol_version: str = E2A_PROTOCOL_VERSION
     request_id: str
@@ -22,7 +30,6 @@ class E2AEnvelope(BaseModel):
     session_id: str | None = None
     method: str
     params: dict[str, Any] = Field(default_factory=dict)
-    is_stream: bool = False
     timestamp: float = 0.0
 
 

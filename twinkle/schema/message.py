@@ -1,6 +1,7 @@
 """Internal Message + EventType — subset of jiuwenclaw/schema/message.py.
 
 Only the chat.* and connection.ack events needed for Phase 0 are retained.
+Stream-only; no `is_stream` field — every request is implicitly streaming.
 """
 from __future__ import annotations
 
@@ -32,7 +33,6 @@ class Message:
     session_id: str | None = None
     method: str = "chat.send"
     params: dict[str, Any] = field(default_factory=dict)
-    is_stream: bool = True
     event_type: EventType | None = None
     payload: dict[str, Any] = field(default_factory=dict)
     ok: bool = True

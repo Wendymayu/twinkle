@@ -2,7 +2,7 @@
 
 Connects to the AgentServer ws endpoint, reads the connection.ack first frame,
 then demuxes inbound frames by request_id into per-request asyncio.Queues.
-Exposes send_request (unary) and send_request_stream (async generator).
+Exposes send_request_stream (async generator) — stream-only, no unary mode.
 
 Minimal mirror of jiuwenclaw/gateway/agent_client.py:153 / :205 / :336.
 """
@@ -74,7 +74,6 @@ class AgentClient:
             await self._ws.send(env.model_dump_json())
 
     async def send_request_stream(self, env: E2AEnvelope) -> AsyncIterator[E2AResponse]:
-        env.is_stream = True
         rid = env.request_id
         q: asyncio.Queue = asyncio.Queue()
         self._queues[rid] = q
@@ -86,18 +85,6 @@ class AgentClient:
                 yield resp
                 if resp.is_final:
                     break
-        finally:
-            self._queues.pop(rid, None)
-
-    async def send_request(self, env: E2AEnvelope, timeout: float = 60.0) -> E2AResponse:
-        env.is_stream = False
-        rid = env.request_id
-        q: asyncio.Queue = asyncio.Queue()
-        self._queues[rid] = q
-        await self._send(env)
-        try:
-            data = await asyncio.wait_for(q.get(), timeout=timeout)
-            return E2AResponse.model_validate(data)
         finally:
             self._queues.pop(rid, None)
 

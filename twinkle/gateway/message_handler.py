@@ -1,8 +1,10 @@
 """MessageHandler — inbound routing + stream fan-out (Gateway side).
 
 Inbound: a browser chat.send Message -> wrap as E2AEnvelope -> call the
-AgentClient. Outbound: each E2A chunk becomes a chat.delta Message (terminal
-chunk -> chat.final) published to the ChannelManager for browser broadcast.
+AgentClient stream. Outbound: each E2A chunk becomes a chat.delta Message
+(terminal chunk -> chat.final) published to the ChannelManager for browser
+broadcast. Stream-only; no unary mode.
+
 Minimal mirror of jiuwenclaw/gateway/message_handler.py:2408-2484 (process_stream).
 """
 from __future__ import annotations
@@ -30,12 +32,8 @@ class MessageHandler:
             session_id=msg.session_id,
             method=msg.method,
             params=msg.params,
-            is_stream=msg.is_stream,
         )
-        if msg.is_stream:
-            asyncio.create_task(self._process_stream(env, msg))
-        else:
-            asyncio.create_task(self._process_unary(env, msg))
+        asyncio.create_task(self._process_stream(env, msg))
 
     async def _process_stream(self, env: E2AEnvelope, msg: Message) -> None:
         try:
@@ -63,18 +61,3 @@ class MessageHandler:
             )
             await self._channel_manager.publish_robot_message(err)
 
-    async def _process_unary(self, env: E2AEnvelope, msg: Message) -> None:
-        try:
-            resp = await self._agent_client.send_request(env)
-            content = (resp.body.get("result") or {}).get("content", "")
-        except Exception as exc:
-            content = f"[error] {exc}"
-        out = Message(
-            id=msg.id,
-            type="event",
-            channel_id=msg.channel_id,
-            session_id=msg.session_id,
-            event_type=EventType.CHAT_FINAL,
-            content=content,
-        )
-        await self._channel_manager.publish_robot_message(out)

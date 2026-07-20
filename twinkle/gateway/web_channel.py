@@ -64,7 +64,6 @@ class WebChannel:
             session_id=session_id,
             method=method,
             params=params,
-            is_stream=True,
         )
         # immediate acceptance, like jiuwenclaw app_web_handlers _chat_send ACK
         await self._send_response(ws, rid, {"accepted": True, "session_id": session_id})

@@ -2,6 +2,7 @@
 
 > 状态：已实现并通过验收。对应 [roadmap](../roadmap.md) Phase 0。
 > 参考实现：`D:\opensource\gitcode\jiuwenclaw`。
+> **后置更新**：Phase 1 之后移除了 unary（单次）模式，系统改为流式专用。E2AEnvelope 的 `is_stream` 字段已删除，所有请求隐式流式；`run_unary` / `send_request` / `_process_unary` 均已移除。
 
 ## 1. 目标
 

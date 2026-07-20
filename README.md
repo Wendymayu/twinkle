@@ -35,7 +35,7 @@ python -m venv .venv
 python -m pytest tests/ -v
 ```
 
-含三个测试：agent_client↔agentserver echo（流式+unary）、坏包错误帧、**端到端** 浏览器→gateway→agentserver→回流 echo。
+含三个测试：agent_client↔agentserver echo（流式）、坏包错误帧、**端到端** 浏览器→gateway→agentserver→回流 echo。
 
 ## 手动验收
 

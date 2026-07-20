@@ -65,7 +65,7 @@ def test_valid_envelope_dispatches_to_loop() -> None:
                 await ws.recv()  # connection.ack
                 env = E2AEnvelope(
                     request_id="r1", session_id="s1", method="chat.send",
-                    params={"query": "hi"}, is_stream=True,
+                    params={"query": "hi"},
                 )
                 await ws.send(env.model_dump_json())
                 raw = await asyncio.wait_for(ws.recv(), timeout=5)

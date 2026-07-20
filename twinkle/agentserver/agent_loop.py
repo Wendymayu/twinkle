@@ -2,6 +2,8 @@
 
 run_stream is an async generator yielding E2AResponse frames so the
 ws send boundary stays in server.py (loop never touches the socket).
+
+Twinkle is stream-only; run_unary has been removed.
 """
 from __future__ import annotations
 
@@ -92,18 +94,3 @@ class AgentLoop:
             body={"error": f"agent loop exceeded max_steps={MAX_STEPS}"},
         )
 
-    async def run_unary(self, env: E2AEnvelope) -> E2AResponse:
-        env.is_stream = False
-        final = None
-        async for frame in self.run_stream(env):
-            final = frame
-        if final is None:
-            return E2AResponse(
-                request_id=env.request_id,
-                is_final=True,
-                status="failed",
-                response_kind="e2a.error",
-                body={"error": "no response"},
-            )
-        final.is_stream = False
-        return final
