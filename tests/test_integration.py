@@ -16,7 +16,7 @@ from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.server import make_handler
 from twinkle.agentserver.session_store import SessionStore
-from twinkle.agentserver.tools.registry import ToolRegistry
+from twinkle.agentserver.tools.decorator import tool
 from twinkle.gateway.agent_client import AgentClient
 from twinkle.gateway.channel_manager import ChannelManager
 from twinkle.gateway.message_handler import MessageHandler
@@ -36,17 +36,16 @@ class _ScriptedLLM:
 
 
 def _reg_with_echo():
-    reg = ToolRegistry()
+    from twinkle.agentserver.tools.manager import ToolManager
 
+    @tool
     async def echo(text: str) -> str:
+        """echo"""
         return f"TOOL:{text}"
 
-    reg.register(
-        "echo", "echo",
-        {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        echo,
-    )
-    return reg
+    m = ToolManager()
+    m.register(echo)
+    return m
 
 
 def _build_loop(scripts):

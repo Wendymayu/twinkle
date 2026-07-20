@@ -13,7 +13,7 @@ from typing import AsyncIterator
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
 from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.session_store import SessionStore
-from twinkle.agentserver.tools.registry import ToolRegistry
+from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 MAX_STEPS = 8
@@ -24,7 +24,7 @@ class AgentLoop:
         self,
         llm: LLMClient,
         store: SessionStore,
-        tools: ToolRegistry,
+        tools: ToolManager,
         memory: LongTermMemory,
     ) -> None:
         self._llm = llm
