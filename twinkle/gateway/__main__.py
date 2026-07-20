@@ -2,6 +2,11 @@
 
 Wires AgentClient -> MessageHandler -> ChannelManager -> WebChannel and runs
 the two async servers (browser ws + agentserver client) in one process.
+
+Dependency direction (aligned with jiuwenclaw, unidirectional):
+  MessageHandler(agent_client)                — only knows AgentClient
+  ChannelManager(message_handler)             — knows MessageHandler (inbound + outbound Queue)
+No circular reference at all.
 """
 import asyncio
 import logging
@@ -22,9 +27,8 @@ async def main() -> None:
     agent_client = AgentClient(f"ws://{AGENTSERVER_HOST}:{AGENTSERVER_PORT}")
     await agent_client.connect()
 
-    channel_manager = ChannelManager()
-    message_handler = MessageHandler(agent_client, channel_manager)
-    channel_manager.set_message_handler(message_handler)
+    message_handler = MessageHandler(agent_client)
+    channel_manager = ChannelManager(message_handler)
 
     web_channel = WebChannel(GATEWAY_HOST, GATEWAY_PORT)
     channel_manager.register_channel(web_channel)

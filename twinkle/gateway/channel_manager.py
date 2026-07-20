@@ -1,7 +1,13 @@
 """ChannelManager — registers channels and runs the outbound dispatch loop.
 
-Consumes outbound robot messages (chat.delta / chat.final events produced by
-MessageHandler) and delivers each to the channel owning its channel_id.
+Consumes outbound robot messages from MessageHandler's _robot_messages Queue
+and delivers each to the channel owning its channel_id.
+Inbound: each registered Channel's on_message callback routes to MessageHandler.
+
+Dependency direction (aligned with jiuwenclaw): ChannelManager holds
+MessageHandler (unidirectional). MessageHandler does NOT hold ChannelManager —
+it publishes to its own Queue, and ChannelManager consumes from it.
+
 Minimal mirror of jiuwenclaw/gateway/channel_manager.py:57-69 / :182-239.
 """
 from __future__ import annotations
@@ -9,37 +15,30 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from twinkle.gateway.message_handler import MessageHandler
 from twinkle.schema.message import Message
 
 log = logging.getLogger("twinkle.gateway.channel_manager")
 
 
 class ChannelManager:
-    def __init__(self) -> None:
-        self._message_handler = None  # set after MessageHandler is wired
-        self._channels: dict[str, object] = {}
-        self._outbound: asyncio.Queue[Message] = asyncio.Queue()
-        self._dispatch_task: asyncio.Task | None = None
-
-    def set_message_handler(self, message_handler) -> None:
+    def __init__(self, message_handler: MessageHandler) -> None:
         self._message_handler = message_handler
+        self._channels: dict[str, object] = {}
+        self._dispatch_task: asyncio.Task | None = None
 
     def register_channel(self, channel) -> None:
         self._channels[channel.channel_id] = channel
 
         async def _on_message(msg: Message) -> bool:
-            if self._message_handler is not None:
-                await self._message_handler.handle_message(msg)
+            await self._message_handler.handle_message(msg)
             return True
 
         channel.on_message(_on_message)
 
-    async def publish_robot_message(self, msg: Message) -> None:
-        await self._outbound.put(msg)
-
     async def _dispatch_loop(self) -> None:
         while True:
-            msg = await self._outbound.get()
+            msg = await self._message_handler.consume_robot_message()
             ch = self._channels.get(msg.channel_id)
             if ch is None:
                 continue

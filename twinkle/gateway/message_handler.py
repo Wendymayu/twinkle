@@ -2,10 +2,15 @@
 
 Inbound: a browser chat.send Message -> wrap as E2AEnvelope -> call the
 AgentClient stream. Outbound: each E2A chunk becomes a chat.delta Message
-(terminal chunk -> chat.final) published to the ChannelManager for browser
-broadcast. Stream-only; no unary mode.
+(terminal chunk -> chat.final) put into the _robot_messages Queue for
+ChannelManager dispatch. Stream-only; no unary mode.
 
-Minimal mirror of jiuwenclaw/gateway/message_handler.py:2408-2484 (process_stream).
+Dependency direction (aligned with jiuwenclaw): MessageHandler only holds
+AgentClient + its own outbound Queue. It does NOT hold ChannelManager.
+ChannelManager consumes from this Queue via consume_robot_message().
+
+Minimal mirror of jiuwenclaw/gateway/message_handler.py:2408-2484 (process_stream)
+and jiuwenclaw's publish_robot_messages / consume_robot_messages Queue pattern.
 """
 from __future__ import annotations
 
@@ -14,16 +19,15 @@ import logging
 
 from twinkle.e2a.models import E2AEnvelope
 from twinkle.gateway.agent_client import AgentClient
-from twinkle.gateway.channel_manager import ChannelManager
 from twinkle.schema.message import EventType, Message
 
 log = logging.getLogger("twinkle.gateway.message_handler")
 
 
 class MessageHandler:
-    def __init__(self, agent_client: AgentClient, channel_manager: ChannelManager) -> None:
+    def __init__(self, agent_client: AgentClient) -> None:
         self._agent_client = agent_client
-        self._channel_manager = channel_manager
+        self._robot_messages: asyncio.Queue[Message] = asyncio.Queue()
 
     async def handle_message(self, msg: Message) -> None:
         env = E2AEnvelope(
@@ -48,7 +52,7 @@ class MessageHandler:
                     event_type=event_type,
                     content=content,
                 )
-                await self._channel_manager.publish_robot_message(out)
+                await self.publish_robot_message(out)
         except Exception as exc:
             log.exception("process_stream failed for %s: %s", msg.id, exc)
             err = Message(
@@ -59,5 +63,15 @@ class MessageHandler:
                 event_type=EventType.CHAT_FINAL,
                 content=f"[error] {exc}",
             )
-            await self._channel_manager.publish_robot_message(err)
+            await self.publish_robot_message(err)
 
+    # --- outbound Queue (consumed by ChannelManager) ---
+    # Naming aligned with jiuwenclaw's publish_robot_messages / consume_robot_messages.
+
+    async def publish_robot_message(self, msg: Message) -> None:
+        """Put an Agent response message into the outbound Queue."""
+        await self._robot_messages.put(msg)
+
+    async def consume_robot_message(self) -> Message:
+        """Get the next outbound message from the Queue (blocking)."""
+        return await self._robot_messages.get()

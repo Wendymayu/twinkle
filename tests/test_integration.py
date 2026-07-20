@@ -93,9 +93,8 @@ def test_end_to_end_tool_round_trip(port_factory) -> None:
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
 
-            channel_manager = ChannelManager()
-            message_handler = MessageHandler(agent_client, channel_manager)
-            channel_manager.set_message_handler(message_handler)
+            message_handler = MessageHandler(agent_client)
+            channel_manager = ChannelManager(message_handler)
             web_channel = WebChannel("127.0.0.1", gateway_port)
             channel_manager.register_channel(web_channel)
             await channel_manager.start()
