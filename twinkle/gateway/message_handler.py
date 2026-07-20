@@ -30,18 +30,18 @@ class MessageHandler:
         self._robot_messages: asyncio.Queue[Message] = asyncio.Queue()
 
     async def handle_message(self, msg: Message) -> None:
-        env = E2AEnvelope(
+        envelope = E2AEnvelope(
             request_id=msg.id,
             channel=msg.channel_id,
             session_id=msg.session_id,
             method=msg.method,
             params=msg.params,
         )
-        asyncio.create_task(self._process_stream(env, msg))
+        asyncio.create_task(self._process_stream(envelope, msg))
 
-    async def _process_stream(self, env: E2AEnvelope, msg: Message) -> None:
+    async def _process_stream(self, envelope: E2AEnvelope, msg: Message) -> None:
         try:
-            async for resp in self._agent_client.send_request_stream(env):
+            async for resp in self._agent_client.send_request_stream(envelope):
                 content = (resp.body.get("result") or {}).get("content", "")
                 event_type = EventType.CHAT_FINAL if resp.is_final else EventType.CHAT_DELTA
                 out = Message(
@@ -52,7 +52,7 @@ class MessageHandler:
                     event_type=event_type,
                     content=content,
                 )
-                await self.publish_robot_message(out)
+                await self.enqueue_outbound(out)
         except Exception as exc:
             log.exception("process_stream failed for %s: %s", msg.id, exc)
             err = Message(
@@ -63,15 +63,15 @@ class MessageHandler:
                 event_type=EventType.CHAT_FINAL,
                 content=f"[error] {exc}",
             )
-            await self.publish_robot_message(err)
+            await self.enqueue_outbound(err)
 
     # --- outbound Queue (consumed by ChannelManager) ---
-    # Naming aligned with jiuwenclaw's publish_robot_messages / consume_robot_messages.
+    # outbound = Agent responses flowing toward the browser.
 
-    async def publish_robot_message(self, msg: Message) -> None:
-        """Put an Agent response message into the outbound Queue."""
+    async def enqueue_outbound(self, msg: Message) -> None:
+        """Put an outbound (Agent→browser) message into the Queue."""
         await self._robot_messages.put(msg)
 
-    async def consume_robot_message(self) -> Message:
+    async def dequeue_outbound(self) -> Message:
         """Get the next outbound message from the Queue (blocking)."""
         return await self._robot_messages.get()

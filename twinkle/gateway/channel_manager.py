@@ -38,7 +38,7 @@ class ChannelManager:
 
     async def _dispatch_loop(self) -> None:
         while True:
-            msg = await self._message_handler.consume_robot_message()
+            msg = await self._message_handler.dequeue_outbound()
             ch = self._channels.get(msg.channel_id)
             if ch is None:
                 continue

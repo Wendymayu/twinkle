@@ -69,15 +69,15 @@ class AgentClient:
         except Exception as exc:
             log.warning("recv loop ended: %s", exc)
 
-    async def _send(self, env: E2AEnvelope) -> None:
+    async def _send(self, envelope: E2AEnvelope) -> None:
         async with self._send_lock:
-            await self._ws.send(env.model_dump_json())
+            await self._ws.send(envelope.model_dump_json())
 
-    async def send_request_stream(self, env: E2AEnvelope) -> AsyncIterator[E2AResponse]:
-        rid = env.request_id
+    async def send_request_stream(self, envelope: E2AEnvelope) -> AsyncIterator[E2AResponse]:
+        rid = envelope.request_id
         q: asyncio.Queue = asyncio.Queue()
         self._queues[rid] = q
-        await self._send(env)
+        await self._send(envelope)
         try:
             while True:
                 data = await q.get()

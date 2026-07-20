@@ -60,7 +60,7 @@ def make_handler(loop: AgentLoop):
             return  # client closed before we even greeted
         async for raw in ws:
             try:
-                env = E2AEnvelope.model_validate_json(raw)
+                envelope = E2AEnvelope.model_validate_json(raw)
             except Exception as exc:
                 err = E2AResponse(
                     request_id="?",
@@ -71,12 +71,12 @@ def make_handler(loop: AgentLoop):
                 await _safe_send(ws, err)
                 continue
             try:
-                async for frame in loop.run_stream(env):
+                async for frame in loop.run_stream(envelope):
                     await _safe_send(ws, frame)
             except Exception as exc:
-                log.exception("agent loop failed for %s: %s", env.request_id, exc)
+                log.exception("agent loop failed for %s: %s", envelope.request_id, exc)
                 err = E2AResponse(
-                    request_id=env.request_id,
+                    request_id=envelope.request_id,
                     status="failed",
                     response_kind="e2a.error",
                     body={"error": str(exc)},

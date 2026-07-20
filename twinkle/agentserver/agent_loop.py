@@ -32,9 +32,9 @@ class AgentLoop:
         self._tools = tools
         self._memory = memory
 
-    async def run_stream(self, env: E2AEnvelope) -> AsyncIterator[E2AResponse]:
-        session_id = env.session_id
-        query = (env.params or {}).get("query", "")
+    async def run_stream(self, envelope: E2AEnvelope) -> AsyncIterator[E2AResponse]:
+        session_id = envelope.session_id
+        query = (envelope.params or {}).get("query", "")
         self._store.append(session_id, {"role": "user", "content": query})
         # long-term memory stub: recall is a no-op in Phase 1; shape preserved.
         self._memory.recall(query)
@@ -47,7 +47,7 @@ class AgentLoop:
                 if isinstance(ev, TextDelta):
                     full_text += ev.content
                     yield E2AResponse(
-                        request_id=env.request_id,
+                        request_id=envelope.request_id,
                         sequence=seq,
                         is_final=False,
                         status="in_progress",
@@ -76,7 +76,7 @@ class AgentLoop:
                             )
                         continue  # re-ask model with tool results
                     yield E2AResponse(
-                        request_id=env.request_id,
+                        request_id=envelope.request_id,
                         sequence=seq,
                         is_final=True,
                         status="succeeded",
@@ -86,7 +86,7 @@ class AgentLoop:
                     return
         # exceeded max_steps without converging
         yield E2AResponse(
-            request_id=env.request_id,
+            request_id=envelope.request_id,
             sequence=seq,
             is_final=True,
             status="failed",
