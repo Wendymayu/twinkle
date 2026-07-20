@@ -14,6 +14,7 @@ No per-param description parsing (YAGNI). Override via @tool(input_params=...).
 from __future__ import annotations
 
 import inspect
+import types
 import typing
 from typing import Any, Callable, get_args, get_origin, get_type_hints
 
@@ -30,7 +31,7 @@ _TYPES_NONE = (type(None),)
 def _unwrap_optional(tp: Any) -> tuple[Any, bool]:
     """Return (inner_type, is_optional). Detects Optional[X] / X | None."""
     origin = get_origin(tp)
-    if origin is typing.Union:
+    if origin is typing.Union or origin is types.UnionType:
         args = [a for a in get_args(tp) if a not in _TYPES_NONE]
         is_optional = len(args) < len(get_args(tp))
         inner = args[0] if args else str

@@ -86,3 +86,15 @@ def test_float_and_bool_types() -> None:
     assert props["rate"] == {"type": "number"}
     assert props["enabled"] == {"type": "boolean", "default": False}
     assert params["required"] == ["rate"]
+
+
+def test_pep604_union_none_unwrapped_and_not_required() -> None:
+    def _fn(a: str, b: int | None = None) -> str:
+        """pep 604 optional"""
+        return ""
+
+    _, _, params = extract(_fn)
+    props = params["properties"]
+    assert props["a"] == {"type": "string"}
+    assert props["b"] == {"type": "integer"}
+    assert params["required"] == ["a"]
