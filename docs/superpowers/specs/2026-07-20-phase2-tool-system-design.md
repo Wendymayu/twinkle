@@ -12,7 +12,6 @@
 - 引入 `@tool` 装饰器：把普通 Python 函数转成 `LocalFunction`，自动从签名 + docstring 抽取 OpenAI function-calling 的 JSON schema。
 - 引入四层结构：`ToolCard`（纯元数据）/ `Tool`（接口）/ `LocalFunction`（本地函数这一种实现）/ `ToolManager`（容器，存 `dict[str, Tool]`）。
 - 动态注册：`register(tool)` / `unregister(name)` / `list()` / `get(name)`，运行时用 Python 对象 add/remove 工具。
-- `tool_catalog()` 查询：列出 `[{name, description}]`，供 UI / 可观测使用。
 - 迁移 `web_fetch` / `web_search` 成 `@tool` 装饰的函数。
 
 ### 不做（明确砍，对齐 roadmap）
@@ -43,7 +42,7 @@ agent_loop 的调用面 `self._tools.schemas()` 与 `self._tools.execute(name, a
 │ ToolManager（容器）                                       │
 │   dict[str, Tool]          ← 类型是 Tool，不是 LocalFunction │
 │   register(tool) / unregister / list / get /             │
-│   schemas / execute / catalog                             │
+│   schemas / execute                                        │
 └──────────────────────────┬──────────────────────────────┘
                            │ 存（只认 Tool 接口：card + invoke）
                            ▼
@@ -74,7 +73,7 @@ agent_loop 的调用面 `self._tools.schemas()` 与 `self._tools.execute(name, a
 | `ToolCard` | 工具的**纯描述数据**：name + description + parameters JSON schema | 不持有函数引用、不能执行 |
 | `Tool` | "任何工具都得满足的接口"：有 `card` + `invoke` | 不是某个具体工具种类 |
 | `LocalFunction` | "本地 Python 函数工具"这个**具体执行机制**：ToolCard + Callable，`invoke` 一行调 func | 不负责管理多个工具、不持有其它工具 |
-| `ToolManager` | 工具的**容器与调度**：登记 / 查找 / 列举 / 执行 / 出 schema / 出 catalog | 不关心某个工具是本地函数还是别的——只认 `Tool` 接口 |
+| `ToolManager` | 工具的**容器与调度**：登记 / 查找 / 列举 / 执行 / 出 schema | 不关心某个工具是本地函数还是别的——只认 `Tool` 接口 |
 
 ### 3.3 关系
 
@@ -84,9 +83,9 @@ agent_loop 的调用面 `self._tools.schemas()` 与 `self._tools.execute(name, a
 
 ### 3.4 为什么分四层，而不是拍扁
 
-1. **`ToolCard` 单独存在 → "工具的描述"和"工具的执行"解耦。** schema 要发给模型、catalog 要列给 UI/可观测看；这些场景**只读元数据、不带执行体**。ToolCard 是"可以脱离函数单独流动"的那一份数据。把 func 塞进 ToolCard，就再没有"纯描述"对象可拿——`schemas()`/`catalog()` 都得从"持函数引用的对象"里摘字段，边界糊掉。
+1. **`ToolCard` 单独存在 → "工具的描述"和"工具的执行"解耦。** schema 要发给模型；这些场景**只读元数据、不带执行体**。ToolCard 是"可以脱离函数单独流动"的那一份数据。把 func 塞进 ToolCard，就再没有"纯描述"对象可拿——`schemas()` 都得从"持函数引用的对象"里摘字段，边界糊掉。
 
-2. **`Tool` 接口单独存在 → 让"manager 只认接口"字面成立。** manager 的三个方法全在 `Tool` 接口上操作：`schemas()` 走 `t.card.parameters`、`catalog()` 走 `t.card.name/description`、`execute()` 走 `t.invoke()`——没有一个 `isinstance(t, LocalFunction)` 分支。所以将来加 `McpTool(Tool)`（card 来自远端 schema、invoke 走子进程），manager 零改动直接存。没有 `Tool` 这层，manager 就得 `dict[str, LocalFunction]`，"只认接口"就是空头支票。
+2. **`Tool` 接口单独存在 → 让"manager 只认接口"字面成立。** manager 的方法全在 `Tool` 接口上操作：`schemas()` 走 `t.card.parameters`、`execute()` 走 `t.invoke()`——没有一个 `isinstance(t, LocalFunction)` 分支。所以将来加 `McpTool(Tool)`（card 来自远端 schema、invoke 走子进程），manager 零改动直接存。没有 `Tool` 这层，manager 就得 `dict[str, LocalFunction]`，"只认接口"就是空头支票。
 
 3. **`LocalFunction` 单独存在 → 它是"本地函数工具"这个工具种类的具名实体。** openjiuwen 还有 MCP 工具、REST API 工具——执行机制不同，但都实现 `Tool` 接口、都产出 `ToolCard`。`LocalFunction` 是"其中一种执行机制"，`invoke()` 是这一种的执行入口。twinkle Phase 2 只有这一种，但保留这层 = 给第二种工具（MCP）留接入点：加 `McpTool(Tool)` 喂给同一个 ToolManager 即可。
 
@@ -198,12 +197,13 @@ class ToolManager:
     def list(self) -> list[Tool]: ...                  # openjiuwen 对齐
     def schemas(self) -> list[dict]: ...               # ← agent_loop 调用面不变
     async def execute(self, name: str, args: dict) -> str: ...  # ← 不变
-    def catalog(self) -> list[dict]: ...               # [{name, description}]
 ```
 
 `schemas()` 产 OpenAI function-calling 格式（`{type:"function", function:{name,description,parameters}}`）——agent_loop 直接喂 LLM。
 `execute()` 保留现有契约：工具异常转成 `[tool error] {Type}: {msg}` 字符串，agent_loop 靠这个不崩。
-`catalog()` 只读 `card.name`/`card.description`——纯元数据流动，不带 func。
+`list()` 返回 `Tool` 对象——程序化枚举（读 name/description 走 `t.card`）由此覆盖，无需单独的 catalog 方法。
+
+> **`catalog()` 不做（YAGNI）。** 它在 openjiuwen 里的消费者是 UI/权限层，roadmap 已砍；Phase 2 零调用方。`list()` 已覆盖程序化枚举，`schemas()` 已覆盖给模型的视图。将来若出现工具列表 UI（如 Phase 2b/3 加前端工具面板），`catalog()` 是 3 行方法、零调用方，那时加不回炉。
 
 ### 5.6 `__init__.py` — 装配
 
@@ -228,13 +228,13 @@ class ToolManager:
 
 - `test_schema_extractor.py`（新）：纯函数单测——str/int/float/bool/list/dict/Optional/有默认值/无默认值/docstring 抽取/不认识类型兜底。
 - `test_tool_decorator.py`（新）：`@tool` / `@tool()` / `@tool(name=, input_params=)` 三种用法产出正确 `LocalFunction`。
-- `test_tool_manager.py`（从 `test_tool_registry.py` 演进）：register/unregister/list/get/catalog + execute 异常转字符串契约 + schemas 产 OpenAI 格式 + 动态 register 后 `schemas()`/`catalog()` 立刻可见。
+- `test_tool_manager.py`（从 `test_tool_registry.py` 演进）：register/unregister/list/get + execute 异常转字符串契约 + schemas 产 OpenAI 格式 + 动态 register 后 `schemas()` 立刻可见。
 - `test_local_function.py`（新）：`invoke()` 调透 func、参数透传。
 - `test_base.py`（新，可选）：ToolCard 数据类构造；`Tool` Protocol 结构性（LocalFunction 满足接口）。
 
 ### M3 验收（对齐 roadmap"多工具正确选择"）
 - 模型可见 ≥2 个工具的 schema、能选对、能执行。
-- 动态 register 一个新工具后 `schemas()` 立刻包含它、`catalog()` 能列。
+- 动态 register 一个新工具后 `schemas()` 立刻包含它。
 - agent_loop 零改动下全链路测试全绿（零回炉）。
 
 ---
@@ -247,6 +247,6 @@ class ToolManager:
 | `tools/local_function.py` | `foundation/tool/function/function.py` (`LocalFunction`) | 砍 `stream()` 生成器分支、schema 校验、trigger |
 | `tools/decorator.py` (`@tool`) | `foundation/tool/tool.py` (`@tool`) | 砍 `card`/`stateless`/Pydantic model 路径，只留 dict schema 覆盖 |
 | `tools/schema_extractor.py` | `foundation/tool/utils/callable_schema_extractor.py` | 最小手写版，不支持嵌套/Pydantic |
-| `tools/manager.py` (`ToolManager`) | `core/single_agent/ability_manager.py` (`AbilityManager`) | 砍多 agent 共享 / 权限 / OTel，保留 add/remove/list/schemas/execute/catalog 形状 |
+| `tools/manager.py` (`ToolManager`) | `core/single_agent/ability_manager.py` (`AbilityManager`) | 砍多 agent 共享 / 权限 / OTel / `list_tool_info`，保留 add/remove/list/schemas/execute 形状 |
 
 twinkle 是 openjiuwen 这几层的**最小子集 + 学习重写**：接口形状对齐（后续 plan_todo 等工具直接 `@tool` 落地、将来接 MCP 加 `McpTool(Tool)` 不回炉），实现砍到 twinkle 轻量定位够用为止。
