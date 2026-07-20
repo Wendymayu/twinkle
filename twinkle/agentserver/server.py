@@ -42,7 +42,7 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
 
 
 def build_default_loop() -> AgentLoop:
-    """Production wiring — config-driven LLM + default tool registry."""
+    """Production wiring — config-driven LLM + default tool manager."""
     llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     store = SessionStore()
     tools = build_default_manager()

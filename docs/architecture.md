@@ -390,13 +390,17 @@ Phase 1 不做落盘持久化；接口允许后续换 SQLite，不回炉。
 
 [llm_client.py](../twinkle/agentserver/llm_client.py) 是 OpenAI SDK 薄封装，`base_url` 可配兼容任意端点。`stream()` 返回 `AsyncIterator[TextDelta | ToolCalls | Finish]`。
 
-### 4.5 ToolRegistry — 最小版工具管理
+### 4.5 ToolManager — 四层工具系统（Phase 2）
 
-[tools/registry.py](../twinkle/agentserver/tools/registry.py) 静态注册了 `web_fetch` 和 `web_search` 两个只读工具：
-- `schemas()` → OpenAI function calling 格式
-- `execute(name, args)` → 返回文本结果
+[twinkle/agentserver/tools/](../twinkle/agentserver/tools/) 重写为 openjiuwen 风格四层：
 
-Phase 2 会演进为动态注册 + `tool_catalog`。
+- `base.py` — `ToolCard`（纯元数据：name/description/parameters）+ `Tool`（Protocol 接口：card + invoke）
+- `local_function.py` — `LocalFunction`（本地 Python 函数这一种 Tool 实现）
+- `decorator.py` — `@tool` 装饰器：函数 + docstring + 签名自动抽 schema 产 LocalFunction
+- `schema_extractor.py` — 最小手写抽取器（str/int/float/bool/list/dict/Optional → JSON schema）
+- `manager.py` — `ToolManager`：register/unregister/list/get/schemas/execute，存 `dict[str, Tool]`，只认 Tool 接口
+
+agent_loop 调用面 `self._tools.schemas()` / `self._tools.execute(name, args)` 不变——ToolManager 是旧 ToolRegistry 的超集。
 
 ### 4.6 LongTermMemory — stub
 
@@ -872,7 +876,11 @@ twinkle/
     session_store.py       # in-memory 对话记录
     memory.py              # 长期记忆 stub
     tools/
-      registry.py          # 最小版工具注册
+      base.py              # ToolCard + Tool(Protocol)
+      schema_extractor.py  # 签名/docstring → JSON schema
+      local_function.py    # LocalFunction（本地函数 Tool 实现）
+      decorator.py         # @tool 装饰器
+      manager.py           # ToolManager（容器，存 dict[str, Tool]）
       web_fetch.py          # URL → markdown/文本
       web_search.py         # DuckDuckGo Lite 搜索
   gateway/
@@ -893,7 +901,12 @@ tests/
   test_integration.py       # 端到端全链路
   test_llm_client.py        # LLM 客户端单测
   test_session_store.py     # 会话存储单测
-  test_tool_registry.py     # 工具注册单测
+  test_tool_manager.py      # ToolManager 单测
+  test_base.py              # ToolCard + Tool 单测
+  test_schema_extractor.py  # schema 抽取器单测
+  test_local_function.py    # LocalFunction 单测
+  test_tool_decorator.py   # @tool 装饰器单测
+  test_default_manager.py   # build_default_manager 单测
   test_memory_stub.py       # 记忆 stub 单测
   test_web_fetch.py         # web_fetch 单测
   test_web_search.py        # web_search 单测
@@ -914,6 +927,7 @@ scripts/
 | `gateway/channel_manager.py` | `gateway/channel_manager.py:57-239` | 基本对齐 |
 | `agentserver/server.py` | `agentserver/agent_ws_server.py` | 砺 legacy/heartbeat/cron |
 | `agentserver/agent_loop.py` | `agentserver/deep_agent/interface_deep.py` | 最小 ReAct，砍 skill/todo/command |
+| `tools/{base,local_function,decorator,schema_extractor,manager}` | openjiuwen foundation/tool/* + ability_manager.py | 四层最小子集，砍 MCP/Input/Output/触发器 |
 | `schema/message.py` | `schema/message.py:141-249` | 只保留 3 个 EventType |
 
 ---
