@@ -10,10 +10,10 @@ from twinkle.agentserver.tools.manager import ToolManager
 
 def build_default_manager() -> ToolManager:
     """Register the default read-only tools via the @tool decorator."""
-    m = ToolManager()
-    m.register(tool(web_fetch.web_fetch))
-    m.register(tool(web_search.web_search))
-    return m
+    tool_manager = ToolManager()
+    tool_manager.register(tool(web_fetch.web_fetch))
+    tool_manager.register(tool(web_search.web_search))
+    return tool_manager
 
 
 __all__ = [
