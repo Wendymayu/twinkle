@@ -10,11 +10,17 @@ export class WebClient {
   private onDelta: DeltaHandler = () => {}
   private onFinal: FinalHandler = () => {}
   private seq = 0
+  private sessionId = ''
 
   connect(onReady: () => void): void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     this.ws = new WebSocket(`${proto}://${location.host}/ws`)
-    this.ws.onopen = () => onReady()
+    this.ws.onopen = () => {
+      // mint a fresh conversation id per connection (browser-driven session,
+      // matches roadmap Phase 1: gateway stays a dumb relay)
+      this.sessionId = 'sess_' + crypto.randomUUID()
+      onReady()
+    }
     this.ws.onmessage = (ev) => {
       try {
         this.handle(JSON.parse(ev.data))
@@ -45,7 +51,8 @@ export class WebClient {
 
   send(method: string, params: Record<string, any>): string {
     const id = 'req_' + Date.now().toString(36) + '_' + (this.seq++).toString(36)
-    this.ws?.send(JSON.stringify({ type: 'req', id, method, params }))
+    const fullParams = { ...params, session_id: this.sessionId }
+    this.ws?.send(JSON.stringify({ type: 'req', id, method, params: fullParams }))
     return id
   }
 }

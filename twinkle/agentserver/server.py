@@ -1,10 +1,10 @@
 """AgentServer — the heavy execution core process.
 
-Phase 0: a `websockets` server (default :18000) that speaks the E2A subset
-and echoes inbound requests back as streaming chunks + a final frame. No real
-agent runtime yet — the echo handler is inline. This mirrors jiuwenclaw's
-agentserver/agent_ws_server.py connection.ack + stream/unary branches
-(agent_ws_server.py:339, :788, :821) in minimal form.
+Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
+AgentLoop (ReAct: think -> tool -> result -> re-decide). echo is gone.
+
+make_handler(loop) lets tests inject a fake loop; build_default_loop()
+wires the real config-driven loop for production.
 """
 from __future__ import annotations
 
@@ -14,14 +14,17 @@ import logging
 
 from websockets.asyncio.server import serve
 
-from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT
+from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.llm_client import LLMClient
+from twinkle.agentserver.memory import LongTermMemory
+from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.tools import build_default_registry
+from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
 
 log = logging.getLogger("twinkle.agentserver")
 
-# First frame sent on every new gateway connection (NOT E2A-shaped — a plain
-# event frame, exactly like jiuwenclaw agent_ws_server.py:339).
 ACK_FRAME = {
     "type": "event",
     "event": EventType.CONNECTION_ACK.value,
@@ -29,83 +32,67 @@ ACK_FRAME = {
 }
 
 
-def _echo_text(env: E2AEnvelope) -> str:
-    return "Echo: " + str(env.params.get("query", ""))
+async def _safe_send(ws, resp: E2AResponse) -> None:
+    """Send an E2AResponse; silently swallow ConnectionClosed (client gone)."""
+    try:
+        await ws.send(resp.model_dump_json())
+    except Exception:
+        # ConnectionClosedOK / ConnectionClosedError — client disconnected.
+        # No point logging at ERROR; this is a normal lifecycle event.
+        log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-async def _echo_stream(ws, env: E2AEnvelope) -> None:
-    text = _echo_text(env)
-    seq = 0
-    for ch in text:
-        chunk = E2AResponse(
-            request_id=env.request_id,
-            sequence=seq,
-            is_final=False,
-            status="in_progress",
-            response_kind="e2a.chunk",
-            body={"result": {"content": ch}},
-        )
-        await ws.send(chunk.model_dump_json())
-        seq += 1
-        # make streaming visible to the eye
-        await asyncio.sleep(0.02)
-    final = E2AResponse(
-        request_id=env.request_id,
-        sequence=seq,
-        is_final=True,
-        status="succeeded",
-        response_kind="e2a.complete",
-        body={"result": {"content": text}},
-    )
-    await ws.send(final.model_dump_json())
+def build_default_loop() -> AgentLoop:
+    """Production wiring — config-driven LLM + default tool registry."""
+    llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
+    store = SessionStore()
+    tools = build_default_registry()
+    memory = LongTermMemory()
+    return AgentLoop(llm, store, tools, memory)
 
 
-async def _echo_unary(ws, env: E2AEnvelope) -> None:
-    text = _echo_text(env)
-    resp = E2AResponse(
-        request_id=env.request_id,
-        sequence=0,
-        is_final=True,
-        status="succeeded",
-        response_kind="e2a.complete",
-        body={"result": {"content": text}},
-        is_stream=False,
-    )
-    await ws.send(resp.model_dump_json())
+def make_handler(loop: AgentLoop):
+    """Return a ws handler bound to the given AgentLoop."""
 
-
-async def handler(ws) -> None:
-    # greet the gateway so it knows the server is ready
-    await ws.send(json.dumps(ACK_FRAME, ensure_ascii=False))
-    async for raw in ws:
+    async def handler(ws) -> None:
         try:
-            env = E2AEnvelope.model_validate_json(raw)
-        except Exception as exc:  # malformed envelope
-            err = E2AResponse(
-                request_id="?",
-                status="failed",
-                response_kind="e2a.error",
-                body={"error": str(exc)},
-            )
-            await ws.send(err.model_dump_json())
-            continue
-        try:
-            if env.is_stream:
-                await _echo_stream(ws, env)
-            else:
-                await _echo_unary(ws, env)
-        except Exception as exc:
-            log.exception("echo failed for %s: %s", env.request_id, exc)
-            err = E2AResponse(
-                request_id=env.request_id,
-                status="failed",
-                response_kind="e2a.error",
-                body={"error": str(exc)},
-            )
-            await ws.send(err.model_dump_json())
+            await ws.send(json.dumps(ACK_FRAME, ensure_ascii=False))
+        except Exception:
+            return  # client closed before we even greeted
+        async for raw in ws:
+            try:
+                env = E2AEnvelope.model_validate_json(raw)
+            except Exception as exc:
+                err = E2AResponse(
+                    request_id="?",
+                    status="failed",
+                    response_kind="e2a.error",
+                    body={"error": str(exc)},
+                )
+                await _safe_send(ws, err)
+                continue
+            try:
+                if env.is_stream:
+                    async for frame in loop.run_stream(env):
+                        await _safe_send(ws, frame)
+                else:
+                    frame = await loop.run_unary(env)
+                    await _safe_send(ws, frame)
+            except Exception as exc:
+                log.exception("agent loop failed for %s: %s", env.request_id, exc)
+                err = E2AResponse(
+                    request_id=env.request_id,
+                    status="failed",
+                    response_kind="e2a.error",
+                    body={"error": str(exc)},
+                )
+                await _safe_send(ws, err)
+
+    return handler
 
 
 async def main() -> None:
+    h = make_handler(build_default_loop())
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
-    async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
+    async with serve(h, AGENTSERVER_HOST, AGENTSERVER_PORT):
         await asyncio.Future()  # run forever

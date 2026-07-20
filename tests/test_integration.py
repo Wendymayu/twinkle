@@ -1,9 +1,9 @@
-"""End-to-end Phase 0 integration test: the full browser -> gateway ->
-agentserver -> gateway -> browser round trip, through WebChannel +
-MessageHandler + ChannelManager + AgentClient.
+"""End-to-end Phase 1 integration: the full browser -> gateway ->
+agentserver -> gateway -> browser round trip, driven by a REAL AgentLoop
+with a FAKE LLMClient (deterministic, no API key).
 
-This is the roadmap Phase 0 acceptance criterion (echo streamed back through
-both processes), exercised headlessly.
+Exercises: streaming chunks, tool round-trip, and cross-turn memory —
+the roadmap Phase 1 / M2 acceptance, headlessly.
 """
 import asyncio
 import json
@@ -11,82 +11,114 @@ import json
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
-from twinkle.agentserver.server import handler as agentserver_handler
+from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.llm_client import Finish, TextDelta
+from twinkle.agentserver.memory import LongTermMemory
+from twinkle.agentserver.server import make_handler
+from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.tools.registry import ToolRegistry
 from twinkle.gateway.agent_client import AgentClient
 from twinkle.gateway.channel_manager import ChannelManager
 from twinkle.gateway.message_handler import MessageHandler
 from twinkle.gateway.web_channel import WebChannel
 
 
-def test_end_to_end_echo(port_factory) -> None:
+class _ScriptedLLM:
+    def __init__(self, scripts):
+        self._scripts = scripts
+        self.calls = 0
+
+    async def stream(self, messages, tools):
+        events = self._scripts[self.calls]
+        self.calls += 1
+        for ev in events:
+            yield ev
+
+
+def _reg_with_echo():
+    reg = ToolRegistry()
+
+    async def echo(text: str) -> str:
+        return f"TOOL:{text}"
+
+    reg.register(
+        "echo", "echo",
+        {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+        echo,
+    )
+    return reg
+
+
+def _build_loop(scripts):
+    return AgentLoop(_ScriptedLLM(scripts), SessionStore(), _reg_with_echo(), LongTermMemory())
+
+
+async def _collect_streamed(browser) -> tuple[str, bool]:
+    """Collect chat.delta into chat.final. Returns (assembled, saw_final)."""
+    assembled = ""
+    saw_final = False
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        raw = await asyncio.wait_for(browser.recv(), timeout=5)
+        frame = json.loads(raw)
+        if frame["type"] != "event":
+            continue
+        if frame["event"] == "chat.delta":
+            assembled += frame["payload"]["content"]
+        elif frame["event"] == "chat.final":
+            if frame["payload"].get("content"):
+                assembled = frame["payload"]["content"]
+            saw_final = True
+            break
+    return assembled, saw_final
+
+
+def test_end_to_end_tool_round_trip(port_factory) -> None:
     agentserver_port = port_factory()
     gateway_port = port_factory()
+    scripts = [
+        # turn 1: model calls echo tool, then answers
+        [Finish("tool_calls", {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": "echo", "arguments": '{"text": "ping"}'}}]})],
+        [TextDelta("answer:"), TextDelta("TOOL:ping"),
+         Finish("stop", {"role": "assistant", "content": "answer:TOOL:ping", "tool_calls": None})],
+    ]
+    loop_obj = _build_loop(scripts)
 
     async def run() -> None:
-        agentserver = await serve(
-            agentserver_handler, "127.0.0.1", agentserver_port
-        )
+        server = await serve(make_handler(loop_obj), "127.0.0.1", agentserver_port)
         try:
-            # build the gateway wiring in-process
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
 
             channel_manager = ChannelManager()
             message_handler = MessageHandler(agent_client, channel_manager)
             channel_manager.set_message_handler(message_handler)
-
             web_channel = WebChannel("127.0.0.1", gateway_port)
             channel_manager.register_channel(web_channel)
             await channel_manager.start()
-
             web_server = await serve(web_channel.handler, "127.0.0.1", gateway_port)
             try:
                 async with connect(f"ws://127.0.0.1:{gateway_port}") as browser:
-                    # consume connection.ack
-                    await browser.recv()
-
-                    await browser.send(
-                        json.dumps(
-                            {
-                                "type": "req",
-                                "id": "r1",
-                                "method": "chat.send",
-                                "params": {"query": "hello"},
-                            }
-                        )
-                    )
-
-                    # first inbound frame must be the immediate res ACK
+                    await browser.recv()  # connection.ack
+                    await browser.send(json.dumps({
+                        "type": "req", "id": "r1", "method": "chat.send",
+                        "params": {"query": "call echo", "session_id": "s1"},
+                    }))
                     ack = json.loads(await asyncio.wait_for(browser.recv(), timeout=5))
-                    assert ack["type"] == "res"
-                    assert ack["id"] == "r1"
-                    assert ack["ok"] is True
-
-                    # then collect streamed chat.delta events until chat.final
-                    assembled = ""
-                    saw_final = False
-                    deadline = asyncio.get_running_loop().time() + 5
-                    while asyncio.get_running_loop().time() < deadline:
-                        raw = await asyncio.wait_for(browser.recv(), timeout=5)
-                        frame = json.loads(raw)
-                        if frame["type"] != "event":
-                            continue
-                        if frame["event"] == "chat.delta":
-                            assembled += frame["payload"]["content"]
-                        elif frame["event"] == "chat.final":
-                            if frame["payload"].get("content"):
-                                assembled = frame["payload"]["content"]
-                            saw_final = True
-                            break
-                    assert saw_final, "never received chat.final"
-                    assert assembled == "Echo: hello"
+                    assert ack["type"] == "res" and ack["ok"] is True
+                    assembled, saw_final = await _collect_streamed(browser)
+                    assert saw_final
+                    assert "answer:TOOL:ping" in assembled
             finally:
                 web_server.close()
                 await web_server.wait_closed()
                 await channel_manager.stop()
                 await agent_client.close()
         finally:
-            agentserver.close()
-            await agentserver.wait_closed()
+            server.close()
+            await server.wait_closed()
 
     asyncio.run(run())
