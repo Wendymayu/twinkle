@@ -5,7 +5,7 @@ from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import TextDelta, Finish
 from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.session_store import SessionStore
-from twinkle.agentserver.tools.registry import ToolRegistry
+from twinkle.agentserver.tools.decorator import tool
 from twinkle.e2a.models import E2AEnvelope
 
 
@@ -32,18 +32,16 @@ def _env(query, rid="r1", session_id="s1"):
 
 
 def _reg_with_echo_tool():
-    reg = ToolRegistry()
+    from twinkle.agentserver.tools.manager import ToolManager
 
+    @tool
     async def echo(text: str) -> str:
+        """echo"""
         return f"tool-saw:{text}"
 
-    reg.register(
-        "echo",
-        "echo",
-        {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        echo,
-    )
-    return reg
+    m = ToolManager()
+    m.register(echo)
+    return m
 
 
 def test_plain_answer_streams_chunks_and_complete() -> None:

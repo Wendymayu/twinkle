@@ -17,7 +17,7 @@ from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.session_store import SessionStore
-from twinkle.agentserver.tools import build_default_registry
+from twinkle.agentserver.tools import build_default_manager
 from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
@@ -42,10 +42,10 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
 
 
 def build_default_loop() -> AgentLoop:
-    """Production wiring — config-driven LLM + default tool registry."""
+    """Production wiring — config-driven LLM + default tool manager."""
     llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     store = SessionStore()
-    tools = build_default_registry()
+    tools = build_default_manager()
     memory = LongTermMemory()
     return AgentLoop(llm, store, tools, memory)
 
