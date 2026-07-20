@@ -906,7 +906,7 @@ tests/
   test_schema_extractor.py  # schema 抽取器单测
   test_local_function.py    # LocalFunction 单测
   test_tool_decorator.py   # @tool 装饰器单测
-  test_default_manager.py   # build_default_manager 单测
+  test_default_manager.py   # default_tool_manager 单测
   test_memory_stub.py       # 记忆 stub 单测
   test_web_fetch.py         # web_fetch 单测
   test_web_search.py        # web_search 单测
