@@ -6,7 +6,7 @@ import json
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
-from twinkle.agentserver.server import make_handler
+from twinkle.agentserver.server import ws_handler
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 
@@ -39,7 +39,7 @@ def test_malformed_envelope_returns_error() -> None:
     loop_obj = _RecordingLoop()
 
     async def run() -> None:
-        server = await serve(make_handler(loop_obj), "127.0.0.1", port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
         try:
             async with connect(f"ws://127.0.0.1:{port}") as ws:
                 await ws.recv()  # connection.ack
@@ -59,7 +59,7 @@ def test_valid_envelope_dispatches_to_loop() -> None:
     loop_obj = _RecordingLoop()
 
     async def run() -> None:
-        server = await serve(make_handler(loop_obj), "127.0.0.1", port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
         try:
             async with connect(f"ws://127.0.0.1:{port}") as ws:
                 await ws.recv()  # connection.ack

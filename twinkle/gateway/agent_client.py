@@ -16,6 +16,7 @@ from typing import AsyncIterator
 from websockets.asyncio.client import connect
 
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
+from twinkle.schema.message import EventType
 
 log = logging.getLogger("twinkle.gateway.agent_client")
 
@@ -46,7 +47,7 @@ class AgentClient:
             data = json.loads(raw)
         except Exception:
             data = {}
-        if data.get("event") == "connection.ack":
+        if data.get("event") == EventType.CONNECTION_ACK.value:
             self._ready.set()
         else:
             log.warning("expected connection.ack, got: %s", raw)

@@ -1,5 +1,6 @@
 import asyncio
 
+from twinkle.agentserver.tools import tool_manager
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
 
@@ -73,3 +74,22 @@ def test_dynamic_register_visible_in_schemas_immediately() -> None:
     m.register(tool(_later))
     names = {s["function"]["name"] for s in m.schemas()}
     assert names == {"_echo", "_later"}
+
+
+def test_tool_manager_registers_web_fetch_and_web_search() -> None:
+    tm = tool_manager()
+    names = {t.card.name for t in tm.list()}
+    assert names == {"web_fetch", "web_search"}
+
+
+def test_tool_manager_schemas_have_required_url_or_query() -> None:
+    tm = tool_manager()
+    by_name = {s["function"]["name"]: s for s in tm.schemas()}
+    assert by_name["web_fetch"]["function"]["parameters"]["required"] == ["url"]
+    assert by_name["web_search"]["function"]["parameters"]["required"] == ["query"]
+    assert by_name["web_fetch"]["function"]["parameters"]["properties"]["max_chars"] == {
+        "type": "integer", "default": 8000
+    }
+    assert by_name["web_search"]["function"]["parameters"]["properties"]["max_results"] == {
+        "type": "integer", "default": 5
+    }

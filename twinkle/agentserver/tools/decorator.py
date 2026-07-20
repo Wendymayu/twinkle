@@ -4,7 +4,7 @@ Usage:
   @tool                       # bare
   @tool()                     # called, no args
   @tool(name=..., input_params=...)   # override
-  tool(fn)                    # non-decorator form (used by default_tool_manager)
+  tool(fn)                    # non-decorator form (used by tool_manager)
 """
 from __future__ import annotations
 

@@ -8,12 +8,12 @@ from twinkle.agentserver.tools.local_function import LocalFunction
 from twinkle.agentserver.tools.manager import ToolManager
 
 
-def default_tool_manager() -> ToolManager:
+def tool_manager() -> ToolManager:
     """Build a ToolManager pre-loaded with the default read-only tools."""
-    tool_manager = ToolManager()
-    tool_manager.register(tool(web_fetch.web_fetch))
-    tool_manager.register(tool(web_search.web_search))
-    return tool_manager
+    tm = ToolManager()
+    tm.register(tool(web_fetch.web_fetch))
+    tm.register(tool(web_search.web_search))
+    return tm
 
 
 __all__ = [
@@ -22,5 +22,5 @@ __all__ = [
     "LocalFunction",
     "tool",
     "ToolManager",
-    "default_tool_manager",
+    "tool_manager",
 ]

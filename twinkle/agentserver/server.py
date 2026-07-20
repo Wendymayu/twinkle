@@ -2,8 +2,8 @@
 
 Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
 AgentLoop (ReAct: think -> tool -> result -> re-decide). Stream-only; no
-unary mode. make_handler(loop) lets tests inject a fake loop;
-build_default_loop() wires the real config-driven loop for production.
+unary mode. ws_handler(loop) lets tests inject a fake loop;
+agent_loop() wires the real config-driven loop for production.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.session_store import SessionStore
-from twinkle.agentserver.tools import default_tool_manager
+from twinkle.agentserver.tools import tool_manager
 from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
@@ -41,16 +41,16 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
         log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-def build_default_loop() -> AgentLoop:
+def agent_loop() -> AgentLoop:
     """Production wiring — config-driven LLM + default tool manager."""
     llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     store = SessionStore()
-    tools = default_tool_manager()
+    tools = tool_manager()
     memory = LongTermMemory()
     return AgentLoop(llm, store, tools, memory)
 
 
-def make_handler(loop: AgentLoop):
+def ws_handler(loop: AgentLoop):
     """Return a ws handler bound to the given AgentLoop."""
 
     async def handler(ws) -> None:
@@ -87,7 +87,7 @@ def make_handler(loop: AgentLoop):
 
 
 async def main() -> None:
-    h = make_handler(build_default_loop())
+    handler = ws_handler(agent_loop())
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
-    async with serve(h, AGENTSERVER_HOST, AGENTSERVER_PORT):
+    async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
         await asyncio.Future()  # run forever

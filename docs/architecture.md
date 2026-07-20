@@ -353,7 +353,7 @@ LLMClient  SessionStore  ToolManager
 
 `_safe_send` 静默吞掉 `ConnectionClosed` — 客户端断连时不报错，这是正常生命周期事件。
 
-`make_handler(loop)` 让测试注入假 loop，`build_default_loop()` 用真实配置组建。
+`ws_handler(loop)` 让测试注入假 loop，`agent_loop()` 用真实配置组建。
 
 ### 4.2 AgentLoop — ReAct 核心闭环
 
@@ -906,7 +906,7 @@ tests/
   test_schema_extractor.py  # schema 抽取器单测
   test_local_function.py    # LocalFunction 单测
   test_tool_decorator.py   # @tool 装饰器单测
-  test_default_manager.py   # default_tool_manager 单测
+  test_tool_manager.py       # ToolManager + tool_manager 单测
   test_memory_stub.py       # 记忆 stub 单测
   test_web_fetch.py         # web_fetch 单测
   test_web_search.py        # web_search 单测

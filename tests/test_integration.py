@@ -14,7 +14,7 @@ from websockets.asyncio.server import serve
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.memory import LongTermMemory
-from twinkle.agentserver.server import make_handler
+from twinkle.agentserver.server import ws_handler
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.gateway.agent_client import AgentClient
@@ -87,7 +87,7 @@ def test_end_to_end_tool_round_trip(port_factory) -> None:
     loop_obj = _build_loop(scripts)
 
     async def run() -> None:
-        server = await serve(make_handler(loop_obj), "127.0.0.1", agentserver_port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", agentserver_port)
         try:
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
