@@ -60,9 +60,9 @@ def instrument_llm(tracer, metrics, cfg, *, llm_cls=None) -> bool:
             span.set_attribute(A.GEN_AI_REQUEST_MODEL, model)
             span.set_attribute(A.GEN_AI_OPERATION_NAME, "chat")
             try:
-                span.set_attribute(A.GEN_AI_INPUT_MESSAGES, _trunc(json.dumps(messages)))
+                span.set_attribute(A.GEN_AI_INPUT_MESSAGES, _trunc(json.dumps(messages, ensure_ascii=False)))
                 if tools:
-                    span.set_attribute(A.GEN_AI_TOOL_DEFINITIONS, _trunc(json.dumps(tools)))
+                    span.set_attribute(A.GEN_AI_TOOL_DEFINITIONS, _trunc(json.dumps(tools, ensure_ascii=False)))
             except Exception:
                 pass
             start = time.perf_counter()
@@ -90,7 +90,7 @@ def instrument_llm(tracer, metrics, cfg, *, llm_cls=None) -> bool:
                         try:
                             span.set_attribute(
                                 A.GEN_AI_OUTPUT_MESSAGES,
-                                _trunc(json.dumps([ev.assistant_message])),
+                                _trunc(json.dumps([ev.assistant_message], ensure_ascii=False)),
                             )
                         except Exception:
                             pass

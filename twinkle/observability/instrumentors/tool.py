@@ -20,7 +20,7 @@ def instrument_tool(tracer, metrics, cfg, *, tool_cls=None) -> bool:
             _stamp_ctx(span)
             span.set_attribute(A.GEN_AI_TOOL_NAME, name or "")
             try:
-                span.set_attribute(A.GEN_AI_TOOL_ARGUMENTS, _trunc(json.dumps(args)))
+                span.set_attribute(A.GEN_AI_TOOL_ARGUMENTS, _trunc(json.dumps(args, ensure_ascii=False)))
             except Exception:
                 pass
             start = time.perf_counter()
