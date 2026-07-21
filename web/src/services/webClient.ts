@@ -1,14 +1,26 @@
 // Minimal WebSocket client: sends {type:req,id,method,params}, correlates
-// streamed chat.delta / chat.final events by request_id.
-// Mirror of jiuwenclaw web/src/services/webClient.ts (request + normalize).
+// streamed chat.delta / chat.final events by request_id, and surfaces
+// todo.update events (structured todo snapshots) for the side panel.
 
 export type DeltaHandler = (delta: string, requestId: string) => void
 export type FinalHandler = (text: string, requestId: string) => void
+export type TodoUpdateHandler = (
+  todo: { tasks: TodoTask[]; remaining: number; total: number },
+  requestId: string,
+) => void
+
+export interface TodoTask {
+  idx: number
+  title: string
+  status: 'waiting' | 'running' | 'completed'
+  result: string
+}
 
 export class WebClient {
   private ws: WebSocket | null = null
   private onDelta: DeltaHandler = () => {}
   private onFinal: FinalHandler = () => {}
+  private onTodoUpdate: TodoUpdateHandler = () => {}
   private seq = 0
   private sessionId = ''
 
@@ -41,12 +53,14 @@ export class WebClient {
       const content = frame.payload?.content ?? ''
       if (frame.event === 'chat.delta') this.onDelta(content, rid)
       else if (frame.event === 'chat.final') this.onFinal(content, rid)
+      else if (frame.event === 'todo.update') this.onTodoUpdate(frame.payload ?? { tasks: [], remaining: 0, total: 0 }, rid)
     }
   }
 
-  setHandlers(onDelta: DeltaHandler, onFinal: FinalHandler): void {
+  setHandlers(onDelta: DeltaHandler, onFinal: FinalHandler, onTodoUpdate: TodoUpdateHandler): void {
     this.onDelta = onDelta
     this.onFinal = onFinal
+    this.onTodoUpdate = onTodoUpdate
   }
 
   send(method: string, params: Record<string, any>): string {
