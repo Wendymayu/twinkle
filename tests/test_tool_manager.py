@@ -79,7 +79,7 @@ def test_dynamic_register_visible_in_schemas_immediately() -> None:
 def test_tool_manager_registers_web_fetch_and_web_search() -> None:
     tm = tool_manager()
     names = {t.card.name for t in tm.list()}
-    assert names == {"web_fetch", "web_search"}
+    assert names == {"web_fetch", "web_search", "command_exec"}
 
 
 def test_tool_manager_schemas_have_required_url_or_query() -> None:

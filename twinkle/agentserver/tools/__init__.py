@@ -1,7 +1,7 @@
 """AgentServer tools package + default manager builder."""
 from __future__ import annotations
 
-from twinkle.agentserver.tools import web_fetch, web_search
+from twinkle.agentserver.tools import command_exec, web_fetch, web_search
 from twinkle.agentserver.tools.base import Tool, ToolCard
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.local_function import LocalFunction
@@ -13,6 +13,7 @@ def tool_manager() -> ToolManager:
     tm = ToolManager()
     tm.register(tool(web_fetch.web_fetch))
     tm.register(tool(web_search.web_search))
+    tm.register(tool(command_exec.command_exec))
     return tm
 
 

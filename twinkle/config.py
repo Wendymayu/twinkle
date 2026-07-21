@@ -42,6 +42,14 @@ AGENTSERVER_PORT = int(os.getenv("TWINKLE_AGENTSERVER_PORT", "18000"))
 GATEWAY_HOST = os.getenv("TWINKLE_GATEWAY_HOST", "127.0.0.1")
 GATEWAY_PORT = int(os.getenv("TWINKLE_GATEWAY_PORT", "19000"))
 
+# --- Workspace (sandbox root for the command_exec tool) ---
+# Defaults to the repo root (this file's parent.parent). Override with
+# TWINKLE_WORKSPACE_DIR to point elsewhere. command_exec confines `workdir`
+# under this root so the agent cannot escape the workspace.
+WORKSPACE_DIR = os.getenv("TWINKLE_WORKSPACE_DIR") or str(
+    Path(__file__).resolve().parent.parent
+)
+
 # --- LLM (OpenAI-compatible) ---
 # Point at any OpenAI-compatible endpoint by overriding these env vars
 # (or by setting them in .env at the repo root).
