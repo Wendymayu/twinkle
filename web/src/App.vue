@@ -50,7 +50,6 @@ function send() {
   <div class="chat">
     <header>
       <span class="title">✨ Twinkle</span>
-      <span class="subtitle">Phase 0 Echo</span>
       <span class="status" :class="{ on: connected }">{{ connected ? '已连接' : '连接中…' }}</span>
     </header>
     <ul ref="logEl" class="log">
@@ -92,7 +91,6 @@ header {
   background: #fff;
 }
 .title { font-weight: 700; font-size: 1.05rem; }
-.subtitle { font-size: .75rem; color: #94a3b8; }
 .status { margin-left: auto; font-size: .8rem; color: #ef4444; }
 .status.on { color: #10b981; }
 
