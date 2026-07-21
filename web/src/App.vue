@@ -7,6 +7,7 @@ interface Msg { role: 'user' | 'assistant'; content: string }
 const msgs = ref<Msg[]>([])
 const input = ref('')
 const connected = ref(false)
+const busy = ref(false)
 const logEl = ref<HTMLUListElement | null>(null)
 
 const client = new WebClient()
@@ -27,6 +28,7 @@ onMounted(() => {
       const last = msgs.value[msgs.value.length - 1]
       if (!last || last.role !== 'assistant') msgs.value.push({ role: 'assistant', content: text })
       else if (!last.content) last.content = text
+      busy.value = false
       scrollDown()
     },
   )
@@ -42,6 +44,7 @@ function send() {
   msgs.value.push({ role: 'user', content: q })
   input.value = ''
   currentId = client.send('chat.send', { query: q })
+  busy.value = true
   scrollDown()
 }
 </script>
@@ -55,6 +58,9 @@ function send() {
     <ul ref="logEl" class="log">
       <li v-for="(m, i) in msgs" :key="i" :class="['row', m.role]">
         <div class="bubble">{{ m.content }}</div>
+      </li>
+      <li v-if="busy" class="row assistant">
+        <div class="bubble processing">处理中…</div>
       </li>
     </ul>
     <footer>
@@ -126,6 +132,15 @@ header {
   color: #1e293b;
   border: 1px solid #e2e8f0;
   border-bottom-left-radius: 4px;
+}
+.bubble.processing {
+  color: #94a3b8;
+  font-style: italic;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
 }
 
 footer {
