@@ -158,9 +158,11 @@ def test_max_steps_emits_error() -> None:
 
 
 def test_todo_create_round_trip_through_loop() -> None:
-    """Model calls todo_create then answers — proves ContextVar is set
-    (todo tool could not resolve session_id otherwise) and the system
-    message is present."""
+    """Model calls todo_create then answers — verifies the ContextVar is set
+    to the envelope's session_id (via the store assertions below; without
+    PLAN_TODO_SESSION_ID.set the tool would fall back to "default" and the
+    "s-todo" store key would stay empty) and that the system message is
+    present."""
     from twinkle.agentserver.tools import tool_manager
 
     store = SessionStore()
@@ -190,3 +192,11 @@ def test_todo_create_round_trip_through_loop() -> None:
     assert "Created 2 todo tasks." in msgs[3]["content"]
     assert "step one" in msgs[3]["content"]
     assert msgs[4]["role"] == "assistant" and msgs[4]["content"] == "planned it"
+
+    # ContextVar was actually set to the envelope's session_id, not the
+    # "default" fallback — otherwise both store keys below would be empty
+    # except "default". This makes run_stream's PLAN_TODO_SESSION_ID.set(...)
+    # load-bearing rather than silently skippable.
+    from twinkle.agentserver.tools.todo_tools import _store
+    assert len(asyncio.run(_store.list_tasks("s-todo"))) == 2
+    assert asyncio.run(_store.list_tasks("default")) == []

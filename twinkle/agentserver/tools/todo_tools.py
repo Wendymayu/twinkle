@@ -13,14 +13,14 @@ from __future__ import annotations
 
 from twinkle.agentserver.plan_todo_context import get_plan_todo_session_id
 from twinkle.agentserver.tools.decorator import tool
-from twinkle.agentserver.todo_store import TodoError, TodoStore
+from twinkle.agentserver.todo_store import TodoError, TodoStore, TodoTask
 
 _store = TodoStore()  # 模块级单例;session 隔离靠 ContextVar 路由
 
 _ICON = {"waiting": "[ ]", "running": "[>]", "completed": "[x]"}
 
 
-def _format_tasks(tasks) -> str:
+def _format_tasks(tasks: list[TodoTask]) -> str:
     if not tasks:
         return "No todo tasks."
     lines = []
@@ -31,7 +31,7 @@ def _format_tasks(tasks) -> str:
     return "\n".join(lines)
 
 
-def _append_list(message: str, tasks) -> str:
+def _append_list(message: str, tasks: list[TodoTask]) -> str:
     return f"{message}\n\nCurrent todo list:\n{_format_tasks(tasks)}"
 
 
