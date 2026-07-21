@@ -84,8 +84,8 @@ Browser ──ws (req/res/event)──> Gateway (:19000) ──ws (E2A envelope)
 
 ### Message formats (the two wires)
 
-- **Browser ↔ Gateway**: `{type:req|res|event, id, method, event, params|payload, request_id}`. Defined in `web/src/services/webClient.ts` + `twinkle/schema/message.py` (`Message` dataclass + `EventType` of `connection.ack`/`chat.delta`/`chat.final`).
-- **Gateway ↔ AgentServer (E2A)**: Pydantic models in `twinkle/e2a/models.py` — `E2AEnvelope` (request, ~6 fields) and `E2AResponse` (streaming multi-frame: `e2a.chunk` / `e2a.complete` / `e2a.error`, with `sequence` strictly increasing per `request_id`, `is_final` on the last frame).
+- **Browser ↔ Gateway**: `{type:req|res|event, id, method, event, params|payload, request_id}`. Defined in `web/src/services/webClient.ts` + `twinkle/schema/message.py` (`Message` dataclass + `EventType` of `connection.ack`/`chat.delta`/`chat.final`/`todo.update` — the last carries the structured todo snapshot `{tasks, remaining, total}`).
+- **Gateway ↔ AgentServer (E2A)**: Pydantic models in `twinkle/e2a/models.py` — `E2AEnvelope` (request, ~6 fields) and `E2AResponse` (streaming multi-frame: `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` — the last carries a structured todo snapshot `{tasks, remaining, total}` that the gateway maps to a `todo.update` browser event; the rest map to `chat.delta`/`chat.final`, with `sequence` strictly increasing per `request_id`, `is_final` on the last frame).
 
 The system is **streaming-only** — unary/single-shot mode was removed in Phase 1. There is no `is_stream` field on `E2AEnvelope`; all requests are implicitly streaming.
 

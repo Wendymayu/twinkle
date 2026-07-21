@@ -91,7 +91,7 @@ def test_drain_without_reset_returns_empty() -> None:
     assert drain_todo_events() == []
 ```
 
-> 注:`test_publish_without_reset_is_noop` 与 `test_drain_without_reset_returns_empty` 依赖 ContextVar 在该测试上下文里未被 set 过(default None)。pytest 各 test 间不共享 ContextVar set(ContextVar 的 set 作用域是当前 context,pytest 默认每个 test 跑在主 context,`set` 会持续到被覆盖——所以 `test_publish_then_drain` 之后 TODO_EVENTS 可能非 None)。因此这两个「未 reset」用例必须能容忍前序测试的污染:`publish_todo_update` 在 `TODO_EVENTS.get()` 返回非 None list 时会 append——这会让 `test_publish_without_reset_is_noop` 实际上往一个旧 list 里 append。为避免测试间耦合,**在 `test_publish_without_reset_is_noop` 开头显式 `reset_todo_events()` 之前先清掉**。但那样就不是「未 reset」场景了。真正干净的写法:这两个用例用 `contextvars.copy_context().run(...)` 在隔离 context 里跑。改用如下更稳健形式:
+> 注:`test_publish_without_reset_is_noop` 与 `test_drain_without_reset_returns_empty` 要测「bus 未初始化(None)」的 no-op / 返回空契约。pytest 各 test 跑在主 context,而 `test_publish_then_drain` 调了 `reset_todo_events()`(`.set([])`),后续主 context 里 `TODO_EVENTS.get()` 是 `[]`(非 None),污染断言。用 `contextvars.Context().run(body)`(空 context,var 未 set → default None)隔离——**必须用 `Context()` 空上下文,不是 `copy_context()`**(后者复制的是同一 list 对象的引用,mutation 会泄漏回主 context)。最终用例形式:
 
 ```python
 import contextvars
@@ -103,17 +103,17 @@ def test_publish_without_reset_is_noop() -> None:
     def body():
         publish_todo_update({"tasks": [], "remaining": 0, "total": 0})
 
-    contextvars.copy_context().run(body)
+    contextvars.Context().run(body)
 
 
 def test_drain_without_reset_returns_empty() -> None:
     def body():
         assert drain_todo_events() == []
 
-    contextvars.copy_context().run(body)
+    contextvars.Context().run(body)
 ```
 
-> 把这两个用例的**第一版**(非 copy_context)删掉,只保留 copy_context 版。最终 `test_plan_todo_context.py` 新增三用例:`test_publish_then_drain`、`test_publish_without_reset_is_noop`(copy_context 版)、`test_drain_without_reset_returns_empty`(copy_context 版)。
+> 把这两个用例的**第一版**(直接调 publish / drain)删掉,只保留 `Context()` 版。最终 `test_plan_todo_context.py` 新增三用例:`test_publish_then_drain`、`test_publish_without_reset_is_noop`(`Context()` 空上下文版)、`test_drain_without_reset_returns_empty`(`Context()` 空上下文版)。
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -865,4 +865,4 @@ git add -A && git commit -m "Phase 2: todo progress UI — test suite + build gr
 - **Spec coverage**:spec §1 事件总线 → Task 1;§1 publish 快照 → Task 2;§2 MessageHandler 分支 + EventType + e2a 注释 → Task 3;§2 agent_loop drain → Task 4;§2 前端面板 → Task 5;§3 数据流 → Task 4 注释 + Task 4/5 测试覆盖;§4 错误处理(bus None no-op、错误路径不 publish、前端可选链)→ Task 1(no-op)+ Task 2(error 不 publish)+ Task 5(可选链 `todo.value?.tasks`);§5 测试 → Task 1-4 各自 + Task 6 全量。`todo_clear`/rail/前端单测明确不做。
 - **Placeholder scan**:无 TBD;每步有完整代码与断言。Task 5 无单测(前端无基建,spec 明确)。
 - **Type consistency**:`reset_todo_events`/`publish_todo_update`/`drain_todo_events` Task 1 定义,Task 2/4 调用名一致;`_snapshot` 返回 `{tasks, remaining, total}` 在 Task 2 定义、Task 4 body 断言、Task 5 `TodoState` 接口一致;`TodoTask` 字段(idx/title/status/result)Task 2/5 一致;`EventType.TODO_UPDATE` Task 3 定义、Task 3 测试 + Task 4 间接使用一致。
-- **关键风险已注**:Task 1 的「未 reset 时 no-op」用 `contextvars.copy_context()` 隔离测试,避免 ContextVar 跨测试污染(已在 Step 1 注释里说明并给出最终 copy_context 版)。Task 2 现有用例不挂(依赖 Task 1 no-op)。Task 3 fake AgentClient 匹配真实 `send_request_stream` 签名(async gen)。Task 4 drain 在 execute 后、store.append 前 yield。
+- **关键风险已注**:Task 1 的「未 reset 时 no-op」用 `contextvars.Context().run(body)`(空上下文,var=default None)隔离测试,避免 ContextVar 跨测试污染——**用 `Context()` 不是 `copy_context()`**(后者复制同一 list 引用,mutation 泄漏)。Task 2 现有用例不挂(依赖 Task 1 no-op)。Task 3 fake AgentClient 匹配真实 `send_request_stream` 签名(async gen)。Task 4 drain 在 execute 后、store.append 前 yield。

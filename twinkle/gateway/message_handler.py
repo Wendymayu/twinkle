@@ -42,16 +42,27 @@ class MessageHandler:
     async def _process_stream(self, envelope: E2AEnvelope, msg: Message) -> None:
         try:
             async for resp in self._agent_client.send_request_stream(envelope):
-                content = (resp.body.get("result") or {}).get("content", "")
-                event_type = EventType.CHAT_FINAL if resp.is_final else EventType.CHAT_DELTA
-                out = Message(
-                    id=msg.id,
-                    type="event",
-                    channel_id=msg.channel_id,
-                    session_id=msg.session_id,
-                    event_type=event_type,
-                    content=content,
-                )
+                if resp.response_kind == "e2a.todo_update":
+                    out = Message(
+                        id=msg.id,
+                        type="event",
+                        channel_id=msg.channel_id,
+                        session_id=msg.session_id,
+                        event_type=EventType.TODO_UPDATE,
+                        payload=dict(resp.body),
+                        content="",
+                    )
+                else:
+                    content = (resp.body.get("result") or {}).get("content", "")
+                    event_type = EventType.CHAT_FINAL if resp.is_final else EventType.CHAT_DELTA
+                    out = Message(
+                        id=msg.id,
+                        type="event",
+                        channel_id=msg.channel_id,
+                        session_id=msg.session_id,
+                        event_type=event_type,
+                        content=content,
+                    )
                 await self.enqueue_outbound(out)
         except Exception as exc:
             log.exception("process_stream failed for %s: %s", msg.id, exc)
