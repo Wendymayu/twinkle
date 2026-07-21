@@ -530,6 +530,54 @@ def test_instrument_agent_records_error_status_and_reraises(tracer_exporter, met
     assert span.status.status_code.name == "ERROR"
 
 
+class _E2AFrame:
+    """Minimal duck-typed E2AResponse for agent-instrumentor status tests."""
+
+    def __init__(self, response_kind: str, status: str):
+        self.response_kind = response_kind
+        self.status = status
+
+
+def test_instrument_agent_marks_failed_on_e2a_error_frame(tracer_exporter, meter_metricreader):
+    # MAX_STEPS -> agent loop yields e2a.error and returns normally (no exception);
+    # the span must reflect the real outcome (failed), not be mislabeled "succeeded".
+    class _FakeAgent:
+        async def run_stream(self, envelope):
+            yield _E2AFrame("e2a.error", "failed")
+
+    tracer, exp = tracer_exporter
+    meter, _ = meter_metricreader
+    metrics = Metrics(meter)
+    instrument_agent(tracer, metrics, _Cfg(), agent_cls=_FakeAgent)
+
+    async def run():
+        return [f async for f in _FakeAgent().run_stream(_FakeEnvelope())]
+
+    frames = asyncio.run(run())
+    assert len(frames) == 1
+    span = exp.spans[0]
+    assert span.attributes["twinkle.agent.status"] == "failed"
+    assert span.status.status_code.name == "ERROR"
+
+
+def test_instrument_agent_marks_succeeded_on_e2a_complete_frame(tracer_exporter, meter_metricreader):
+    class _FakeAgent:
+        async def run_stream(self, envelope):
+            yield _E2AFrame("e2a.complete", "succeeded")
+
+    tracer, exp = tracer_exporter
+    meter, _ = meter_metricreader
+    metrics = Metrics(meter)
+    instrument_agent(tracer, metrics, _Cfg(), agent_cls=_FakeAgent)
+
+    async def run():
+        return [f async for f in _FakeAgent().run_stream(_FakeEnvelope())]
+
+    asyncio.run(run())
+    span = exp.spans[0]
+    assert span.attributes["twinkle.agent.status"] == "succeeded"
+
+
 from twinkle.observability.provider import init_providers
 
 
