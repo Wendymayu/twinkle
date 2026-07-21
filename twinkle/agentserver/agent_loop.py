@@ -88,14 +88,14 @@ class AgentLoop:
                             except Exception:
                                 args = {}
                             result = await self._tools.execute(name, args)
-                            for ev in drain_todo_events():
+                            for snap in drain_todo_events():
                                 yield E2AResponse(
                                     request_id=envelope.request_id,
                                     sequence=seq,
                                     is_final=False,
                                     status="in_progress",
                                     response_kind="e2a.todo_update",
-                                    body=ev,
+                                    body=snap,
                                 )
                                 seq += 1
                             self._store.append(

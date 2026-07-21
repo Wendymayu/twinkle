@@ -16,12 +16,6 @@ class _FakeAgentClient:
             yield f
 
 
-def _envelope(rid="r1", session_id="s1") -> E2AEnvelope:
-    return E2AEnvelope(
-        request_id=rid, session_id=session_id, method="chat.send", params={"query": "q"}
-    )
-
-
 def test_todo_update_frame_becomes_todo_event() -> None:
     todo_body = {
         "tasks": [{"idx": 1, "title": "a", "status": "waiting", "result": ""}],
