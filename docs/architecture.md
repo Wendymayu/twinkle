@@ -871,10 +871,12 @@ twinkle/
   agentserver/
     __main__.py            # python -m 入口
     server.py              # ws server + AgentLoop 分发
-    agent_loop.py          # ReAct 核心闭环
+    agent_loop.py          # ReAct 核心闭环（入口 set plan-todo ContextVar + 首次插入 todo system message）
     llm_client.py          # OpenAI SDK 薄封装
     session_store.py       # in-memory 对话记录
     memory.py              # 长期记忆 stub
+    plan_todo_context.py   # ContextVar：当前请求的 todo session 路由
+    todo_store.py          # TodoStore：内存 dict[session_id, list[TodoTask]] + 每 session 一把 asyncio.Lock
     tools/
       base.py              # ToolCard + Tool(Protocol)
       schema_extractor.py  # 签名/docstring → JSON schema
@@ -883,6 +885,8 @@ twinkle/
       manager.py           # ToolManager（容器，存 dict[str, Tool]）
       web_fetch.py          # URL → markdown/文本
       web_search.py         # DuckDuckGo Lite 搜索
+      command_exec.py       # 跨平台 shell 执行（blocklist + workspace 收敛 + 超时 + 后台）
+      todo_tools.py         # @tool todo 工具：create / complete / list
   gateway/
     __main__.py            # python -m 入口，装配四件 + 起 web_channel
     agent_client.py         # ws client + demux + stream
@@ -926,7 +930,7 @@ scripts/
 | `gateway/message_handler.py` | `gateway/message_handler.py:2408-2484` | 砺 _process_unary |
 | `gateway/channel_manager.py` | `gateway/channel_manager.py:57-239` | 基本对齐 |
 | `agentserver/server.py` | `agentserver/agent_ws_server.py` | 砺 legacy/heartbeat/cron |
-| `agentserver/agent_loop.py` | `agentserver/deep_agent/interface_deep.py` | 最小 ReAct，砍 skill/todo/command |
+| `agentserver/agent_loop.py` | `agentserver/deep_agent/interface_deep.py` | 最小 ReAct；入口 set plan-todo ContextVar + 首次插入 todo system message（ReAct 主体未改；todo/command 已回补一部分，skill 仍砍） |
 | `tools/{base,local_function,decorator,schema_extractor,manager}` | openjiuwen foundation/tool/* + ability_manager.py | 四层最小子集，砍 MCP/Input/Output/触发器 |
 | `schema/message.py` | `schema/message.py:141-249` | 只保留 3 个 EventType |
 
