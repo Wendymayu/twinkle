@@ -88,13 +88,14 @@ def test_tool_call_round_trip_then_answer() -> None:
     assert final.response_kind == "e2a.complete"
     assert "good" in final.body["result"]["content"]
 
-    # session store now holds user, assistant(tool_calls), tool, assistant(answer)
+    # session store now holds: system, user, assistant(tool_calls), tool, assistant(answer)
     msgs = store.get_messages("s1")
-    assert msgs[0]["role"] == "user"
-    assert msgs[1]["role"] == "assistant" and msgs[1]["tool_calls"]
-    assert msgs[2]["role"] == "tool" and msgs[2]["tool_call_id"] == "c1"
-    assert msgs[2]["content"] == "tool-saw:hi"
-    assert msgs[3]["role"] == "assistant"
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+    assert msgs[2]["role"] == "assistant" and msgs[2]["tool_calls"]
+    assert msgs[3]["role"] == "tool" and msgs[3]["tool_call_id"] == "c1"
+    assert msgs[3]["content"] == "tool-saw:hi"
+    assert msgs[4]["role"] == "assistant"
 
 
 def test_cross_turn_remembers_context() -> None:
@@ -127,12 +128,13 @@ def test_cross_turn_remembers_context() -> None:
             pass
 
     asyncio.run(run())
-    # turn 2's messages include turn 1's user + assistant
-    assert len(seen_messages[0]) == 1   # [user]
-    assert len(seen_messages[1]) == 3   # [user, assistant, user]
-    assert seen_messages[1][0]["content"] == "turn1"
-    assert seen_messages[1][1]["content"] == "ack1"
-    assert seen_messages[1][2]["content"] == "turn2"
+    # turn 2's messages include turn 1's user + assistant, plus the system msg from turn 1
+    assert len(seen_messages[0]) == 2   # [system, user]
+    assert len(seen_messages[1]) == 4   # [system, user, assistant, user]
+    assert seen_messages[0][0]["role"] == "system"
+    assert seen_messages[1][1]["content"] == "turn1"
+    assert seen_messages[1][2]["content"] == "ack1"
+    assert seen_messages[1][3]["content"] == "turn2"
 
 
 def test_max_steps_emits_error() -> None:
@@ -153,3 +155,38 @@ def test_max_steps_emits_error() -> None:
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.error"
     assert frames[-1].status == "failed"
+
+
+def test_todo_create_round_trip_through_loop() -> None:
+    """Model calls todo_create then answers — proves ContextVar is set
+    (todo tool could not resolve session_id otherwise) and the system
+    message is present."""
+    from twinkle.agentserver.tools import tool_manager
+
+    store = SessionStore()
+    llm = _ScriptedLLM([
+        # turn 1: model calls todo_create
+        [Finish("tool_calls", {"role": "assistant", "content": None,
+              "tool_calls": [{"id": "tc1", "type": "function",
+                              "function": {"name": "todo_create",
+                                           "arguments": '{"tasks": ["step one", "step two"]}'}}]})],
+        # turn 2: model answers
+        [TextDelta("planned "), TextDelta("it"),
+         Finish("stop", {"role": "assistant", "content": "planned it", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, store, tool_manager(), LongTermMemory())
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("plan something", session_id="s-todo"))]
+
+    frames = asyncio.run(run())
+    assert frames[-1].response_kind == "e2a.complete"
+    # tool result was re-injected into the store
+    msgs = store.get_messages("s-todo")
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+    assert msgs[2]["role"] == "assistant" and msgs[2]["tool_calls"]
+    assert msgs[3]["role"] == "tool"
+    assert "Created 2 todo tasks." in msgs[3]["content"]
+    assert "step one" in msgs[3]["content"]
+    assert msgs[4]["role"] == "assistant" and msgs[4]["content"] == "planned it"

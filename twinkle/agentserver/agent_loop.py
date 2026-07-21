@@ -12,9 +12,19 @@ from typing import AsyncIterator
 
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
 from twinkle.agentserver.memory import LongTermMemory
+from twinkle.agentserver.plan_todo_context import PLAN_TODO_SESSION_ID
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
+
+TODO_SYSTEM_PROMPT = (
+    "You have todo tools to plan and track multi-step work: "
+    "todo_create, todo_complete, todo_list. For non-trivial multi-step "
+    "requests, first call todo_create with a list of sub-tasks, then work "
+    "through them calling todo_complete(idx, result) as each finishes, and "
+    "call todo_list to check progress. For simple one-step requests, do NOT "
+    "use the todo tools — just answer or call the needed tool directly."
+)
 
 MAX_STEPS = 8
 
@@ -34,6 +44,13 @@ class AgentLoop:
 
     async def run_stream(self, envelope: E2AEnvelope) -> AsyncIterator[E2AResponse]:
         session_id = envelope.session_id
+        PLAN_TODO_SESSION_ID.set(session_id or "default")
+        # Insert the todo-guidance system message once per session (first call),
+        # so the model knows when/how to use the todo tools. Re-runs in the same
+        # session see it already present and skip insertion — no accumulation.
+        existing = self._store.get_messages(session_id)
+        if not existing or existing[0].get("role") != "system":
+            self._store.append(session_id, {"role": "system", "content": TODO_SYSTEM_PROMPT})
         query = (envelope.params or {}).get("query", "")
         self._store.append(session_id, {"role": "user", "content": query})
         # long-term memory stub: recall is a no-op in Phase 1; shape preserved.
