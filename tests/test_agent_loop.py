@@ -200,3 +200,34 @@ def test_todo_create_round_trip_through_loop() -> None:
     from twinkle.agentserver.tools.todo_tools import _store
     assert len(asyncio.run(_store.list_tasks("s-todo"))) == 2
     assert asyncio.run(_store.list_tasks("default")) == []
+
+
+def test_todo_update_frame_emitted_on_create() -> None:
+    """run_stream yields an e2a.todo_update frame after todo_create executes,
+    carrying the structured snapshot (not just the markdown tool string)."""
+    from twinkle.agentserver.tools import tool_manager
+
+    store = SessionStore()
+    llm = _ScriptedLLM([
+        [Finish("tool_calls", {"role": "assistant", "content": None,
+              "tool_calls": [{"id": "tc1", "type": "function",
+                              "function": {"name": "todo_create",
+                                           "arguments": '{"tasks": ["one", "two"]}'}}]})],
+        [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, store, tool_manager(), LongTermMemory())
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("plan", session_id="s-upd"))]
+
+    frames = asyncio.run(run())
+    todo_frames = [f for f in frames if f.response_kind == "e2a.todo_update"]
+    assert len(todo_frames) == 1
+    body = todo_frames[0].body
+    assert [t["idx"] for t in body["tasks"]] == [1, 2]
+    assert body["remaining"] == 2
+    assert body["total"] == 2
+    assert body["tasks"][0]["title"] == "one"
+    # the todo_update frame is not final and precedes the final complete
+    assert not todo_frames[0].is_final
+    assert frames[-1].response_kind == "e2a.complete"
