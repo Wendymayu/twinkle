@@ -25,6 +25,7 @@ class TextDelta:
 class Finish:
     finish_reason: str
     assistant_message: dict
+    usage: dict | None = None
 
 
 class LLMClient:
@@ -47,6 +48,7 @@ class LLMClient:
             "model": self._model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             kwargs["tools"] = tools
@@ -56,7 +58,15 @@ class LLMClient:
         tool_acc: dict[int, dict] = {}  # index -> {id, name, arguments}
         finish_reason = "stop"
 
+        usage: dict | None = None
         async for chunk in stream:
+            # Capture token usage if the provider emits it (OpenAI with
+            # stream_options.include_usage, or dashscope) — some providers
+            # attach usage to the last content chunk, others to a trailing
+            # usage-only chunk with empty choices. Last non-null wins.
+            _u = getattr(chunk, "usage", None)
+            if _u:
+                usage = _u
             # OpenAI-compatible streams (dashscope, openai with
             # stream_options.include_usage) end with a usage-only chunk whose
             # ``choices`` list is empty. Skip it — there is no delta to consume.
@@ -106,4 +116,5 @@ class LLMClient:
                 "content": content,
                 "tool_calls": tool_calls,
             },
+            usage=usage,
         )
