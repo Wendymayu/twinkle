@@ -137,7 +137,7 @@ def test_cross_turn_remembers_context() -> None:
     assert seen_messages[1][3]["content"] == "turn2"
 
 
-def test_max_steps_emits_error() -> None:
+def test_max_steps_emits_error(monkeypatch) -> None:
     store = SessionStore()
     reg = _reg_with_echo_tool()
     # every turn asks for a tool call -> never converges
@@ -146,6 +146,8 @@ def test_max_steps_emits_error() -> None:
         "tool_calls": [{"id": "c", "type": "function",
                         "function": {"name": "echo", "arguments": '{"text": "x"}'}}]})
     llm = _ScriptedLLM([ [tool_finish] for _ in range(20) ])
+    # default-independent: force a small cap so 20 scripted turns always exceed it
+    monkeypatch.setattr("twinkle.agentserver.agent_loop.MAX_STEPS", 2)
     loop = AgentLoop(llm, store, reg, LongTermMemory())
 
     async def run():
