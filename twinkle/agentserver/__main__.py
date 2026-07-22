@@ -3,6 +3,7 @@ import asyncio
 import logging
 
 from twinkle.agentserver.server import main
+from twinkle.config import ensure_workspace_dir
 
 if __name__ == "__main__":
     logging.basicConfig(
@@ -11,4 +12,5 @@ if __name__ == "__main__":
     )
     import twinkle.observability
     twinkle.observability.setup()
+    ensure_workspace_dir()
     asyncio.run(main())

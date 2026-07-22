@@ -856,6 +856,7 @@ cd web && npm install && npm run dev   # Vite(:5173)
 | `TWINKLE_LLM_BASE_URL` | `https://api.openai.com/v1` | LLM API 端点 |
 | `TWINKLE_LLM_API_KEY` | 空 | LLM API key（**放在 .env 文件，不暴露在环境变量中**） |
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | 模型名 |
+| `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | `command_exec`/`file_tools` 的工作区根（agent 文件操作收敛其下）。默认用户家,生成物不污染仓库;可覆盖 |
 
 配置从 [config.py](../twinkle/config.py) 读取，优先级：环境变量 > `.env` 文件 > 默认值。
 

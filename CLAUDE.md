@@ -105,6 +105,7 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 | `TWINKLE_LLM_API_KEY` | empty | **put in `.env`, never commit** |
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | |
 | `TWINKLE_AGENT_MAX_STEPS` | `1000` | Max ReAct steps before `e2a.error` (runaway backstop, not a target) |
+| `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | Sandbox root for `command_exec`/`file_tools` — agent file ops confined under this. Defaults to the user home so generated files don't pollute the repo; override to point elsewhere |
 
 ## Conventions
 
