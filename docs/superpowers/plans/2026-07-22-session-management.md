@@ -621,10 +621,10 @@ In `twinkle/agentserver/agent_loop.py`, change:
 Run: `python -m pytest tests/test_agent_loop.py -v`
 Expected: all 6 tests PASS (ReAct semantics unchanged; tool_calls/tool_call_id still asserted because the cache holds the full dict).
 
-- [ ] **Step 5: Run the full backend suite**
+- [ ] **Step 5: Run the touched suites**
 
-Run: `python -m pytest tests/ -v`
-Expected: PASS (test_session_store + test_agent_loop + test_message_handler + others).
+Run: `python -m pytest tests/test_agent_loop.py tests/test_session_store.py tests/test_message_handler.py -v`
+Expected: PASS. (Note: `tests/test_integration.py` still uses the old `SessionStore()` no-arg + `ws_handler(loop)` one-arg shape and will fail until Task 6 fixes it — do **not** run it in this task.)
 
 - [ ] **Step 6: Commit**
 
@@ -1015,15 +1015,44 @@ In `twinkle/agentserver/server.py`:
 
 - Add `from twinkle.agentserver.session_store import SessionStore` to the imports (it's already imported — confirm and keep).
 
-- [ ] **Step 6: Run the full backend suite**
+- [ ] **Step 6: Update `tests/test_integration.py` for the new signatures**
+
+`tests/test_integration.py` currently builds `SessionStore()` (no arg) and calls `ws_handler(loop_obj)` (one arg) — both broken by this task. Build ONE store (so chat + RPC share state, as production does) and pass it to both `AgentLoop` and `ws_handler`:
+
+Replace `_build_loop` + the `loop_obj`/`server` lines in `test_end_to_end_tool_round_trip`:
+
+```python
+def test_end_to_end_tool_round_trip(tmp_path, port_factory) -> None:
+    agentserver_port = port_factory()
+    gateway_port = port_factory()
+    scripts = [
+        # turn 1: model calls echo tool, then answers
+        [Finish("tool_calls", {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": "echo", "arguments": '{"text": "ping"}'}}]})],
+        [TextDelta("answer:"), TextDelta("TOOL:ping"),
+         Finish("stop", {"role": "assistant", "content": "answer:TOOL:ping", "tool_calls": None})],
+    ]
+    store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = AgentLoop(_ScriptedLLM(scripts), store, _reg_with_echo(), LongTermMemory())
+
+    async def run() -> None:
+        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+        # ... rest unchanged ...
+```
+
+(Delete the now-unused `_build_loop` helper; inline the loop construction as shown. `tmp_path` is the builtin pytest fixture.)
+
+- [ ] **Step 7: Run the full backend suite**
 
 Run: `python -m pytest tests/ -v`
-Expected: all PASS. (If `test_integration.py` constructs `ws_handler(loop)` with one arg, update it to `ws_handler(loop, SessionStore(str(tmp)))` — check and fix.)
+Expected: all PASS (test_session_store + test_agent_loop + test_message_handler + test_session_rpc + test_integration).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add twinkle/agentserver/session_rpc.py twinkle/agentserver/server.py tests/test_session_rpc.py
+git add twinkle/agentserver/session_rpc.py twinkle/agentserver/server.py tests/test_session_rpc.py tests/test_integration.py
 git commit -m "agentserver: session_rpc dispatch + ws_handler method routing"
 ```
 
