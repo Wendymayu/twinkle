@@ -54,9 +54,17 @@ class AgentLoop:
         # session see it already present and skip insertion — no accumulation.
         existing = self._store.get_messages(session_id)
         if not existing or existing[0].get("role") != "system":
-            self._store.append(session_id, {"role": "system", "content": TODO_SYSTEM_PROMPT})
+            await self._store.append(
+                session_id,
+                {"role": "system", "content": TODO_SYSTEM_PROMPT},
+                request_id=envelope.request_id,
+            )
         query = (envelope.params or {}).get("query", "")
-        self._store.append(session_id, {"role": "user", "content": query})
+        await self._store.append(
+            session_id,
+            {"role": "user", "content": query},
+            request_id=envelope.request_id,
+        )
         # long-term memory stub: recall is a no-op in Phase 1; shape preserved.
         self._memory.recall(query)
 
@@ -77,7 +85,12 @@ class AgentLoop:
                     )
                     seq += 1
                 elif isinstance(ev, Finish):
-                    self._store.append(session_id, ev.assistant_message)
+                    await self._store.append(
+                        session_id,
+                        ev.assistant_message,
+                        request_id=envelope.request_id,
+                        event_type="chat.final",
+                    )
                     tcs = ev.assistant_message.get("tool_calls")
                     if ev.finish_reason == "tool_calls" and tcs:
                         for tc in tcs:
@@ -97,13 +110,15 @@ class AgentLoop:
                                     body=snap,
                                 )
                                 seq += 1
-                            self._store.append(
+                            await self._store.append(
                                 session_id,
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
                                     "content": result,
                                 },
+                                request_id=envelope.request_id,
+                                event_type="chat.tool_result",
                             )
                         continue  # re-ask model with tool results
                     yield E2AResponse(

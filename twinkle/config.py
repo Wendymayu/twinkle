@@ -52,6 +52,15 @@ WORKSPACE_DIR = os.path.expanduser(
     os.getenv("TWINKLE_WORKSPACE_DIR") or str(Path.home() / ".twinkle")
 )
 
+# --- Sessions persistence (disk-backed session store) ---
+# Per-session dir layout: <SESSIONS_DIR>/<session_id>/{metadata.json,history.json}.
+# Defaults to <WORKSPACE_DIR>/.twinkle_data/sessions (which lives under ~/.twinkle
+# unless TWINKLE_WORKSPACE_DIR is overridden). Gitignored. If you want strict
+# isolation from the command_exec / file_tools sandbox, point this outside WORKSPACE_DIR.
+SESSIONS_DIR = os.getenv("TWINKLE_SESSIONS_DIR") or str(
+    Path(WORKSPACE_DIR) / ".twinkle_data" / "sessions"
+)
+
 
 def ensure_workspace_dir() -> str:
     """Create WORKSPACE_DIR if missing (idempotent). Call at server startup

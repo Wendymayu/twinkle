@@ -52,6 +52,16 @@ class MessageHandler:
                         payload=dict(resp.body),
                         content="",
                     )
+                elif resp.response_kind == "e2a.result":
+                    out = Message(
+                        id=msg.id,
+                        type="event",
+                        channel_id=msg.channel_id,
+                        session_id=msg.session_id,
+                        event_type=EventType.RESULT,
+                        payload=dict(resp.body),
+                        content="",
+                    )
                 else:
                     content = (resp.body.get("result") or {}).get("content", "")
                     event_type = EventType.CHAT_FINAL if resp.is_final else EventType.CHAT_DELTA

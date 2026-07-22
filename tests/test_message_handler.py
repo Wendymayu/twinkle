@@ -63,3 +63,26 @@ def test_chunk_frame_still_becomes_chat_delta() -> None:
     out = asyncio.run(run())
     assert out.event_type == EventType.CHAT_DELTA
     assert out.content == "hi"
+
+
+def test_result_frame_becomes_result_event() -> None:
+    body = {"type": "session.list", "sessions": [{"session_id": "s1", "title": "t"}]}
+    frames = [
+        E2AResponse(
+            request_id="r1", sequence=0, is_final=True,
+            status="succeeded", response_kind="e2a.result", body=body,
+        ),
+    ]
+    handler = MessageHandler(_FakeAgentClient(frames))
+
+    async def run():
+        await handler.handle_message(
+            Message(id="r1", type="req", channel_id="web", session_id="s1",
+                    method="session.list", params={})
+        )
+        return await handler.dequeue_outbound()
+
+    out = asyncio.run(run())
+    assert out.event_type == EventType.RESULT
+    assert out.payload == body
+    assert out.content == ""
