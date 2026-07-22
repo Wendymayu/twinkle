@@ -14,6 +14,7 @@ class EventType(str, Enum):
     CONNECTION_ACK = "connection.ack"
     CHAT_DELTA = "chat.delta"
     CHAT_FINAL = "chat.final"
+    TODO_UPDATE = "todo.update"
 
 
 @dataclass

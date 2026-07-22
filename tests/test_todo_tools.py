@@ -1,7 +1,11 @@
 # tests/test_todo_tools.py
 import asyncio
 
-from twinkle.agentserver.plan_todo_context import PLAN_TODO_SESSION_ID
+from twinkle.agentserver.plan_todo_context import (
+    PLAN_TODO_SESSION_ID,
+    drain_todo_events,
+    reset_todo_events,
+)
 from twinkle.agentserver.tools import tool_manager
 from twinkle.agentserver.tools.builtin.todo_tools import todo_complete, todo_create, todo_list
 
@@ -83,3 +87,51 @@ def test_schemas_registered_in_tool_manager() -> None:
     complete_req = schemas["todo_complete"]["function"]["parameters"]["required"]
     assert "idx" in complete_req
     assert "result" not in complete_req
+
+
+def test_create_publishes_snapshot() -> None:
+    _set_sid("pub-1")
+    reset_todo_events()
+    asyncio.run(todo_create.invoke({"tasks": ["a", "b"]}))
+    evs = drain_todo_events()
+    assert len(evs) == 1
+    snap = evs[0]
+    assert snap["total"] == 2
+    assert snap["remaining"] == 2
+    assert [t["idx"] for t in snap["tasks"]] == [1, 2]
+    assert all(t["status"] == "waiting" for t in snap["tasks"])
+    assert snap["tasks"][0]["title"] == "a"
+
+
+def test_complete_publishes_snapshot() -> None:
+    _set_sid("pub-2")
+    reset_todo_events()
+    asyncio.run(todo_create.invoke({"tasks": ["x", "y"]}))
+    drain_todo_events()  # clear create's snapshot
+    asyncio.run(todo_complete.invoke({"idx": 1, "result": "ok"}))
+    evs = drain_todo_events()
+    assert len(evs) == 1
+    snap = evs[0]
+    assert snap["total"] == 2
+    assert snap["remaining"] == 1
+    assert snap["tasks"][0]["status"] == "completed"
+    assert snap["tasks"][0]["result"] == "ok"
+
+
+def test_list_does_not_publish() -> None:
+    _set_sid("pub-3")
+    reset_todo_events()
+    asyncio.run(todo_create.invoke({"tasks": ["a"]}))
+    drain_todo_events()
+    asyncio.run(todo_list.invoke({}))
+    assert drain_todo_events() == []
+
+
+def test_error_path_does_not_publish() -> None:
+    _set_sid("pub-4")
+    reset_todo_events()
+    asyncio.run(todo_create.invoke({"tasks": ["first"]}))
+    drain_todo_events()
+    # second create fails (already exists) — must NOT publish
+    asyncio.run(todo_create.invoke({"tasks": ["second"]}))
+    assert drain_todo_events() == []

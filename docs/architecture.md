@@ -135,6 +135,7 @@ channel_manager = ChannelManager(message_handler)       # ← 只依赖 MessageH
                          │  │  │    e2a.chunk  → Message(chat.delta)            │ │  │
                          │  │  │    e2a.complete → Message(chat.final)           │ │  │
                          │  │  │    e2a.error   → Message(chat.final, [error])  │ │  │
+                         │  │  │    e2a.todo_update → Message(todo.update, body)│ │  │
                          │  │  │                    │                             │ │  │
                          │  │  │                    ▼                             │ │  │
                          │  │  │  enqueue_outbound(msg) → _robot_messages Queue │ │  │
@@ -233,8 +234,9 @@ envelope = E2AEnvelope(
 )
 ```
 
-**出站转换**（E2AResponse → Message → Queue）：
-- 每个 chunk → `Message(event_type=chat.delta, content=chunk_content)` → `enqueue_outbound(msg)`
+**出站转换**（E2AResponse → Message → Queue）——按 `response_kind` 分支：
+- `e2a.todo_update` → `Message(event_type=todo.update, payload=body)`（结构化快照 `{tasks, remaining, total}`）→ `enqueue_outbound(msg)`
+- 否则按 `is_final`：每个 chunk → `Message(event_type=chat.delta, content=chunk_content)` → `enqueue_outbound(msg)`
 - 终止帧 → `Message(event_type=chat.final, content=final_content)` → `enqueue_outbound(msg)`
 - 错误 → `Message(event_type=chat.final, content="[error] ...")` → `enqueue_outbound(msg)`
 
@@ -625,17 +627,18 @@ E2A 是 Gateway 和 AgentServer 之间的**内部信封协议**。定义在 [twi
 | `sequence` | int | 同 request_id 下从 0 严格递增 |
 | `is_final` | bool | 最后一帧 `true` |
 | `status` | str | `in_progress` / `succeeded` / `failed` |
-| `response_kind` | str | `e2a.chunk` / `e2a.complete` / `e2a.error` |
+| `response_kind` | str | `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` |
 | `body` | dict | 载荷内容 |
 | `is_stream` | bool | 固定 `true`（Twinkle 流式专用） |
 
-**三种 response_kind**：
+**三种 response_kind**（外加 todo 快照）：
 
 | response_kind | 含义 | body 结构 |
 |---|---|---|
 | `e2a.chunk` | 流式分片 | `{result: {content: "字片段"}}` |
 | `e2a.complete` | 正常终止 | `{result: {content: "完整文本"}}` |
 | `e2a.error` | 错误终止 | `{error: "错误描述"}` |
+| `e2a.todo_update` | Todo 快照 | `{tasks, remaining, total}` |
 
 #### connection.ack — 连接握手（AgentServer → Gateway）
 
@@ -664,13 +667,14 @@ class Message:
     content: str = ""                    # 文本内容
 ```
 
-`EventType` 只有三个值：
+`EventType` 取值：
 
 | EventType | 说明 |
 |---|---|
 | `connection.ack` | 连接就绪 |
 | `chat.delta` | 流式分片 |
 | `chat.final` | 终止帧 |
+| `todo.update` | Todo 快照（结构化 payload） |
 
 Message 在 Gateway 内流转时不带 `is_stream` 字段——所有请求隐式流式。
 

@@ -12,7 +12,11 @@ from typing import AsyncIterator
 
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
 from twinkle.agentserver.memory import LongTermMemory
-from twinkle.agentserver.plan_todo_context import PLAN_TODO_SESSION_ID
+from twinkle.agentserver.plan_todo_context import (
+    PLAN_TODO_SESSION_ID,
+    drain_todo_events,
+    reset_todo_events,
+)
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
@@ -44,6 +48,7 @@ class AgentLoop:
     async def run_stream(self, envelope: E2AEnvelope) -> AsyncIterator[E2AResponse]:
         session_id = envelope.session_id
         PLAN_TODO_SESSION_ID.set(session_id or "default")
+        reset_todo_events()
         # Insert the todo-guidance system message once per session (first call),
         # so the model knows when/how to use the todo tools. Re-runs in the same
         # session see it already present and skip insertion — no accumulation.
@@ -82,6 +87,16 @@ class AgentLoop:
                             except Exception:
                                 args = {}
                             result = await self._tools.execute(name, args)
+                            for snap in drain_todo_events():
+                                yield E2AResponse(
+                                    request_id=envelope.request_id,
+                                    sequence=seq,
+                                    is_final=False,
+                                    status="in_progress",
+                                    response_kind="e2a.todo_update",
+                                    body=snap,
+                                )
+                                seq += 1
                             self._store.append(
                                 session_id,
                                 {
