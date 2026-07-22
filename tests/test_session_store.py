@@ -108,3 +108,49 @@ def test_cold_start_hydrates_full_history(session_store, sessions_dir):
     assert msgs[2]["tool_calls"] == tc
     assert msgs[3]["tool_call_id"] == "c1"
     assert msgs[3]["content"] == "res"
+
+
+def test_list_sessions_sorted_desc(session_store, sessions_dir):
+    _run(session_store.create_session("old"))
+    _run(session_store.append("old", {"role": "user", "content": "a"},
+                              request_id="r1"))
+    # tiny sleep-free ordering: old was created first -> lower last_message_at
+    _run(session_store.create_session("new"))
+    _run(session_store.append("new", {"role": "user", "content": "b"},
+                              request_id="r2"))
+    rows = session_store.list_sessions()
+    assert [r["session_id"] for r in rows] == ["new", "old"]
+
+
+def test_list_sessions_falls_back_on_corrupt_metadata(session_store, sessions_dir):
+    sdir = Path(sessions_dir) / "broken"
+    sdir.mkdir()
+    (sdir / "metadata.json").write_text("{not valid json", encoding="utf-8")
+    rows = session_store.list_sessions()
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == "broken"
+    assert rows[0]["title"] == "(无标题)"
+
+
+def test_delete_session_removes_dir_and_evicts_cache(session_store, sessions_dir):
+    _run(session_store.create_session("s1"))
+    _run(session_store.append("s1", {"role": "user", "content": "hi"}))
+    assert _run(session_store.delete_session("s1")) is True
+    assert not (Path(sessions_dir) / "s1").exists()
+    # cache evicted -> cold read returns empty
+    assert session_store.get_messages("s1") == []
+    # deleting again -> False (absent)
+    assert _run(session_store.delete_session("s1")) is False
+
+
+def test_get_history_skips_corrupt_lines(session_store, sessions_dir):
+    _run(session_store.create_session("s1"))
+    hpath = Path(sessions_dir) / "s1" / "history.json"
+    hpath.write_text(
+        json.dumps({"role": "user", "content": "good"}) + "\n"
+        + "{bad line\n"
+        + json.dumps({"role": "assistant", "content": "ok"}) + "\n",
+        encoding="utf-8",
+    )
+    rows = session_store.get_history("s1")
+    assert [r["content"] for r in rows] == ["good", "ok"]
