@@ -20,7 +20,7 @@ Twinkle 当前 `agent_loop` 是扁平 ReAct:模型每步看着完整历史自己
 
 - `todo_start` / `todo_insert` / `todo_remove`:砍。`TodoTask.status` 字段保留 `running` 取值供将来 `start` 工具,但现在不暴露入口。
 - `todo_complete_batch`:砍。
-- op-result 发布总线(`_publish_op_result` / `consume_last_op_result`):砍。它只服务 jiuwenclaw 的 rail 消费,Twinkle 无 rail 系统,留着是死重量。
+- op-result 发布总线(`_publish_op_result` / `consume_last_op_result`):砍 jiuwenclaw 那套。**实现期引入了功能等价的 per-request `TODO_EVENTS` 快照总线**（见 §2 `plan_todo_context.py`），sink 是 `run_stream`（drain 后 yield `e2a.todo_update`）而非 rail——故并非真"无总线"，只是 sink 不同。
 - 磁盘持久化 / markdown 文件:砍。与 Twinkle 内存 SessionStore 哲学一致,roadmap 明确持久化/长期记忆推迟。`TodoStore` 接口形态允许后续换实现。
 - 复杂度分类器 / 规划引擎:不做。对齐 jiuwenclaw「能力常在、用不用看模型」的设计。
 - `clear(session_id)`:先不加。测试需要隔离时用独立 session_id 即可。
@@ -39,7 +39,7 @@ twinkle/agentserver/
 
 ### 组件职责
 
-- **`plan_todo_context.py`**:`PLAN_TODO_SESSION_ID: ContextVar[str]`(default `"default"`) + `get_plan_todo_session_id() -> str`。取不到返回 `"default"`,不抛异常。镜像 jiuwenclaw `plan_todo_context.py:33-45`。
+- **`plan_todo_context.py`**:`PLAN_TODO_SESSION_ID: ContextVar[str]`(default `"default"`) + `get_plan_todo_session_id() -> str`(取不到返回 `"default"`,不抛异常)。**另有 `TODO_EVENTS` ContextVar**——per-request todo 快照总线:`reset_todo_events()` / `publish_todo_update(snapshot)` / `drain_todo_events()`,供 `run_stream` 在工具执行后 drain 并 yield `e2a.todo_update`。这是 §1 原"砍 op-result 总线"后引入的功能等价物(sink 是 `run_stream` 而非 rail)。
 - **`todo_store.py` — `TodoStore`**:
   - `TodoTask` dataclass:`idx: int, title: str, status: str, result: str`。`status ∈ {"waiting","running","completed"}`。
   - `async create(session_id, tasks: list[str]) -> list[TodoTask]`:该 session 已有列表 → 抛业务错误(由工具层捕获转字符串);否则建 `TodoTask(idx=i+1, title=t, status="waiting", result="")`。
@@ -133,6 +133,8 @@ E2AEnvelope(session_id, query)
                     for tc: result = tools.execute(name, args)
                         └─ todo_* 读 ContextVar → TodoStore → 返回 markdown 串
                     store.append({role:tool, tool_call_id, content:result})
+                    for snap in drain_todo_events():   # todo_* publish 的快照
+                        yield E2AResponse(response_kind="e2a.todo_update", body=snap)
                     continue   # 带 todo 结果再问模型
                 else: yield e2a.complete; return
 ```

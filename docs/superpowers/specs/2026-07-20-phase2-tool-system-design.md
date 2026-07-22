@@ -3,6 +3,8 @@
 > 日期：2026-07-20
 > 范围：把 `twinkle/agentserver/tools/` 从"静态手写 schema 的 registry"重写成 openjiuwen 风格的 `@tool` + `ToolCard`/`Tool`/`LocalFunction`/`ToolManager`，动态可注册，加最小手写 schema 抽取器。
 > 参考：openjiuwen `core/foundation/tool/{base,function,tool,utils}` + `core/single_agent/ability_manager.py`（jiuwenswarm-instrumentor 插桩的目标）。
+>
+> **实现期演进（builtin 重构后，以 `docs/architecture.md` §4.5/§10 为准）**：具体工具已下沉到 `tools/builtin/` 子包（本设计写于重构前，仍把 `web_fetch`/`web_search` 列在 `tools/` 顶层）；装配函数为 `tool_manager()`（非本设计的 `build_default_manager()`）。
 
 ---
 

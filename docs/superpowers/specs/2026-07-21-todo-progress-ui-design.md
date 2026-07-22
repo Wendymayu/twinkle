@@ -47,7 +47,7 @@ web/src/
   - `reset_todo_events()`:`TODO_EVENTS.set([])`(`run_stream` 入口调,per-request 初始化)。
   - `publish_todo_update(snapshot: dict)`:取当前 list;若为 `None`(bus 未初始化)则 no-op(工具在 loop 外被调用时不崩);否则 append。
   - `drain_todo_events() -> list[dict]`:取当前 list,`set([])` 清空,返回旧 list。
-- **`todo_tools.py`**:`todo_create` / `todo_complete` 在成功路径(拿到 `created`/`tasks` 后)调 `publish_todo_update({"tasks": [...], "remaining": n, "total": m})`。`todo_list` **不 publish**(只读,不改变状态;且 list 本身已被 create/complete 的 publish 带出)。snapshot 的 `tasks` 元素形如 `{"idx":1,"title":"...","status":"waiting|completed","result":"..."}`,对齐 `TodoTask` dataclass。
+- **`todo_tools.py`**:`todo_create` / `todo_complete` 在成功路径(拿到 `created`/`tasks` 后)调 `publish_todo_update({"tasks": [...], "remaining": n, "total": m})`。`todo_list` **不 publish**(只读,不改变状态;且 list 本身已被 create/complete 的 publish 带出)。snapshot 的 `tasks` 元素形如 `{"idx":1,"title":"...","status":"waiting|running|completed","result":"..."}`,对齐 `TodoTask` dataclass（`running` 预留给将来 `start` 工具，当前无代码路径赋值）。
 - **`agent_loop.py`**:在 tool 执行循环里(现有 `for tc in tcs` 块),每次 `await self._tools.execute(name, args)` 之后,加 `for ev in drain_todo_events(): yield E2AResponse(response_kind="e2a.todo_update", body=ev, is_final=False, ...)`。这些 frame 在 append tool 结果到 store、`continue` 之前 yield 出去。
 - **`e2a/models.py`**:`E2AResponse.response_kind` 注释从 `e2a.chunk | e2a.complete | e2a.error` 扩到 `| e2a.todo_update`。字段类型仍是 `str`,无 schema 变更。
 - **`schema/message.py`**:`EventType.TODO_UPDATE = "todo.update"`。

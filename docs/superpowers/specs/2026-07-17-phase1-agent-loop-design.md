@@ -1,8 +1,10 @@
 # Phase 1 设计文档 — agent loop 最小闭环 + 短期会话记忆
 
-> 状态：设计待实现。对应 [roadmap](../../roadmap.md) Phase 1 / 里程碑 M2。
+> 状态：已实现（Phase 1 落地）。对应 [roadmap](../../roadmap.md) Phase 1 / 里程碑 M2。
+>
+> **实现期演进（与本设计快照不符，以 `docs/architecture.md` §4 为准）**：`max_steps` 默认已改 `1000`（`TWINKLE_AGENT_MAX_STEPS` env 可配，非 8）；`LLMClient.stream` 事件改为 `TextDelta | Finish`（`tool_calls` 累积进 `Finish`，由 `finish_reason` 区分，无独立 `ToolCalls`/`Done` 类型）；`run_unary` 已移除（流式专用）。
 > 前置：[Phase 0 设计](../phase-0-design.md) 已实现并验收（两进程骨架 + echo 闭环）。
-> 参考实现：`D:\opensource\gitcode\jiuwenclaw`。
+> 参考实现：`D:\code\opensource\gitcode\jiuwenswarm`（`jiuwenclaw/` 为 agent 应用层，`.py` 源码在 `enterprise_dev` 分支）。
 
 ## 1. 目标
 

@@ -1,7 +1,7 @@
 # 文件操作工具设计（file tools）
 
 - **日期**：2026-07-22
-- **状态**：已通过设计评审，待写实现计划
+- **状态**：已实现（见 `twinkle/agentserver/tools/builtin/file_tools.py` + `tests/test_file_tools.py`）
 - **范围阶段**：Phase 2（工具系统成形）
 - **参考实现**：jiuwenswarm 已装的 openjiuwen SDK `harness/tools/filesystem.py`（2032 行，6 个文件工具）
 
@@ -205,7 +205,7 @@ write_file(c.py, content)  → c.py 存在 + has_read ✗ → [ERROR]: must read
 
 ## 10. 配置
 
-复用 `twinkle.config.WORKSPACE_DIR`（默认仓库根，可 `TWINKLE_WORKSPACE_DIR` 覆盖）。`file_tools.py` 顶部 `from twinkle.config import WORKSPACE_DIR`（与 command_exec 同款 import，便于测试 monkeypatch `file_tools.WORKSPACE_DIR` 重定向到临时目录）。不新增配置项。
+复用 `twinkle.config.WORKSPACE_DIR`（默认 `~/.twinkle` 用户家目录，可 `TWINKLE_WORKSPACE_DIR` 覆盖）。`file_tools.py` 顶部 `from twinkle.config import WORKSPACE_DIR`（与 command_exec 同款 import，便于测试 monkeypatch `file_tools.WORKSPACE_DIR` 重定向到临时目录）。不新增配置项。
 
 ## 11. 测试（`tests/test_file_tools.py`）
 

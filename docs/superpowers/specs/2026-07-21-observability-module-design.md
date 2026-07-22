@@ -65,13 +65,14 @@ twinkle.agent.invoke  (root, INTERNAL)
 
 ```
 twinkle/observability/
-  __init__.py           # 公开 setup() / apply_instrumentors()；setup() 是唯一对外入口
+  __init__.py           # 公开 setup()（唯一对外入口；apply_instrumentors 在 instrumentors/__init__.py，顶层未 re-export）
   config.py             # ObservabilityConfig + load_config()（OTEL_* + TWINKLE_OBS_* env）
   provider.py            # init_providers()：TracerProvider + MeterProvider over Resource，OTLP gRPC/HTTP + console/none
   attributes.py          # span/metric 属性键常量（gen_ai.* semconv + twinkle.* 自定义）
   wrap.py                # patch_method(cls, name, factory)：幂等、fail-soft、带 __wrapped__
   context.py             # request 上下文 ContextVar（request_id/session_id）+ _llm_call_counter
   metrics.py             # Metrics 类：counters/histograms + fail-soft record_*
+  usage.py               # read_usage_token：统一读 token，兼容 dict（测试 fake）与 pydantic CompletionUsage（真 SDK 无 .get）
   instrumentors/
     __init__.py           # apply_instrumentors(tracer, meter, cfg)
     agent.py              # instrument_agent：包 AgentLoop.run_stream → twinkle.agent.invoke
@@ -123,7 +124,7 @@ streaming 的 patch 是 async generator wrapper：`async def traced(self, messag
 
 | 类型 | 名字 | 维度 |
 |---|---|---|
-| counter | `gen_ai.client.token.usage` | `gen_ai.token.type`=input/output |
+| counter | `gen_ai.client.token.usage` | `gen_ai.token.type`=input/output（input/output 都缺而仅有 total 时额外记一条 `total`） |
 | counter | `gen_ai.tool.count` | `gen_ai.tool.name`、`error`=true/false |
 | histogram | `gen_ai.client.operation.duration` | `gen_ai.request.model` |
 | histogram | `gen_ai.tool.duration` | `gen_ai.tool.name` |
@@ -165,14 +166,14 @@ streaming 的 patch 是 async generator wrapper：`async def traced(self, messag
 
 ## 7. 配置（`config.py`）
 
-`ObservabilityConfig`（`@dataclass(frozen=True)`，`load_config()` 从 env 读）：
+`ObservabilityConfig`（实现为普通类 + `load_config()` 从 env 读；未用 `@dataclass(frozen=True)`）：
 
 | env | 默认 | 说明 |
 |---|---|---|
 | `OTEL_ENABLED` | `false` | false → `setup()` 直接 return，零成本 no-op |
 | `OTEL_TRACES_EXPORTER` | `none` | `otlp` / `console` / `none` |
 | `OTEL_METRICS_EXPORTER` | `none` | 同上 |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` / `http` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` / `http`（**当前仅 gRPC exporter 落地，设 `http` 被静默忽略**） |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | 如 `http://101.37.215.110:4317` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | — | 逗号分隔 `k=v`，鉴权用 |
 | `OTEL_SERVICE_NAME` | `twinkle-agentserver` | Resource.service.name |
@@ -219,7 +220,7 @@ twinkle.observability.setup()
 - patch 失败（类/方法找不到、factory 抛错）→ log + skip 该 surface，其余继续。
 - provider init 失败 → log + 跳过，不打补丁。
 - span/metric 记录异常 → 吞掉，**永不冒泡进业务**。
-- 原方法抛错 → 照常传播，只把 span status 设 ERROR、记 exception。
+- 原方法抛错 → 照常传播，只把 span status 设 ERROR、记 exception。**另有一条非异常失败路径**：`run_stream` 正常 yield 了终止错误帧（`response_kind=="e2a.error"` / `status=="failed"`，如撞 `max_steps`）后正常 return——wrapper 在 yield 循环内检测该帧也置 status=failed + span ERROR（否则会被误标 succeeded；b60a084 修复点）。
 - 幂等：重复 `setup()` 不重复包（`_twinkle_wrapped` / `_APPLIED` 双保险）。
 - `OTEL_ENABLED=false` → 零开销（不 patch、不构造 provider）。
 
@@ -227,8 +228,8 @@ twinkle.observability.setup()
 
 ## 10. 测试策略（贴 twinkle 现有风格 + 借参考仓 fixture）
 
-- `tests/conftest.py` 加 `CollectingSpanExporter`（内存 `SpanExporter`，~10 行）+ `exporter` fixture；metrics 用 OTel SDK 自带的 `InMemoryMetricReader` 收集后断 counter/histogram 值。
-- instrumentor 函数签名 `instrument_llm(tracer, meter, *, llm_cls=None)`：生产传 `None` 懒加载真 `LLMClient`；测试传 fake 类（同方法签名）。断 `exporter.spans[0].attributes[...]`。**不调真 LLM、不联网、不起 host**。
+- `tests/test_observability.py` 内置 `CollectingSpanExporter` + `tracer_exporter`/`meter_metricreader` fixture（~10 行，**不进 `conftest.py`**——零回炉：不装 `[obs]` 时既有测试零污染；`conftest.py` 仍只有 `port_factory`/`free_port`）；metrics 用 OTel SDK `InMemoryMetricReader` 收集后断 counter/histogram 值。
+- instrumentor 函数签名 `instrument_llm(tracer, metrics, cfg, *, llm_cls=None)`（三个 instrumentor 统一带 `cfg` 位置参数）：生产传 `None` 懒加载真 `LLMClient`；测试传 fake 类（同方法签名）。断 `exporter.spans[0].attributes[...]`。**不调真 LLM、不联网、不起 host**。
 - sync 测试 + `asyncio.run` + inline fake，对齐现有 `_ScriptedLLM` / `_FakeClient` 风格。
 - 必测：
   - `OTEL_ENABLED=false` → `setup()` 不 patch、exporter 无 span。
