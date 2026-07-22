@@ -23,6 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
+from twinkle.agentserver.tools.decorator import tool
 from twinkle.config import WORKSPACE_DIR
 
 # --- Safety: a slim blocklist of obviously destructive patterns. ---
@@ -113,6 +114,7 @@ def _run_command_background(
     return proc.pid, resolved_shell, None
 
 
+@tool
 async def command_exec(
     command: str,
     timeout_seconds: int = 300,

@@ -137,7 +137,7 @@ def test_cross_turn_remembers_context() -> None:
     assert seen_messages[1][3]["content"] == "turn2"
 
 
-def test_max_steps_emits_error() -> None:
+def test_max_steps_emits_error(monkeypatch) -> None:
     store = SessionStore()
     reg = _reg_with_echo_tool()
     # every turn asks for a tool call -> never converges
@@ -146,6 +146,8 @@ def test_max_steps_emits_error() -> None:
         "tool_calls": [{"id": "c", "type": "function",
                         "function": {"name": "echo", "arguments": '{"text": "x"}'}}]})
     llm = _ScriptedLLM([ [tool_finish] for _ in range(20) ])
+    # default-independent: force a small cap so 20 scripted turns always exceed it
+    monkeypatch.setattr("twinkle.agentserver.agent_loop.MAX_STEPS", 2)
     loop = AgentLoop(llm, store, reg, LongTermMemory())
 
     async def run():
@@ -197,7 +199,7 @@ def test_todo_create_round_trip_through_loop() -> None:
     # "default" fallback — otherwise both store keys below would be empty
     # except "default". This makes run_stream's PLAN_TODO_SESSION_ID.set(...)
     # load-bearing rather than silently skippable.
-    from twinkle.agentserver.tools.todo_tools import _store
+    from twinkle.agentserver.tools.builtin.todo_tools import _store
     assert len(asyncio.run(_store.list_tasks("s-todo"))) == 2
     assert asyncio.run(_store.list_tasks("default")) == []
 

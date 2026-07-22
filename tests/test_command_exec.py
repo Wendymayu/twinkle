@@ -2,7 +2,7 @@ import asyncio
 import json
 import subprocess
 
-from twinkle.agentserver.tools import command_exec
+from twinkle.agentserver.tools.builtin import command_exec
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", code: int = 0):
@@ -14,17 +14,17 @@ def _fake_completed(stdout: str = "", stderr: str = "", code: int = 0):
 # --- safety + workdir guards ---
 
 def test_rejects_empty_command() -> None:
-    assert asyncio.run(command_exec.command_exec("")) == "[ERROR]: command cannot be empty."
+    assert asyncio.run(command_exec.command_exec.invoke({"command": ""})) == "[ERROR]: command cannot be empty."
 
 
 def test_blocks_dangerous_pattern() -> None:
-    out = asyncio.run(command_exec.command_exec("rm -rf /"))
+    out = asyncio.run(command_exec.command_exec.invoke({"command": "rm -rf /"}))
     assert "rejected for safety" in out
     assert "rm -rf" in out
 
 
 def test_rejects_workdir_escape() -> None:
-    out = asyncio.run(command_exec.command_exec("echo hi", workdir="../../"))
+    out = asyncio.run(command_exec.command_exec.invoke({"command": "echo hi", "workdir": "../../"}))
     assert "outside the project workspace" in out
 
 
@@ -39,7 +39,7 @@ def test_runs_command_and_returns_json(monkeypatch) -> None:
 
     monkeypatch.setattr(command_exec, "_run_command_sync", fake_run_sync)
 
-    payload = json.loads(asyncio.run(command_exec.command_exec("echo hello")))
+    payload = json.loads(asyncio.run(command_exec.command_exec.invoke({"command": "echo hello"})))
     assert payload["exit_code"] == 0
     assert payload["stdout"] == "hello\n"
     assert payload["stderr"] == ""
@@ -54,7 +54,7 @@ def test_clips_large_output(monkeypatch) -> None:
         "_run_command_sync",
         lambda c, t, w: (_fake_completed(stdout=big), "sh"),
     )
-    payload = json.loads(asyncio.run(command_exec.command_exec("echo big", max_output_chars=10)))
+    payload = json.loads(asyncio.run(command_exec.command_exec.invoke({"command": "echo big", "max_output_chars": 10})))
     assert payload["stdout"] == "xxxxxxxxxx\n...[truncated]"
 
 
@@ -63,7 +63,7 @@ def test_timeout_returns_error(monkeypatch) -> None:
         raise subprocess.TimeoutExpired(cmd=command, timeout=timeout_seconds)
 
     monkeypatch.setattr(command_exec, "_run_command_sync", fake_run_sync)
-    out = asyncio.run(command_exec.command_exec("sleep 999", timeout_seconds=1))
+    out = asyncio.run(command_exec.command_exec.invoke({"command": "sleep 999", "timeout_seconds": 1}))
     assert "timed out after 1s" in out
 
 
@@ -71,7 +71,7 @@ def test_background_returns_pid(monkeypatch) -> None:
     monkeypatch.setattr(
         command_exec, "_run_command_background", lambda c, w: (4242, "powershell", None)
     )
-    payload = json.loads(asyncio.run(command_exec.command_exec("python -m http.server", background=True)))
+    payload = json.loads(asyncio.run(command_exec.command_exec.invoke({"command": "python -m http.server", "background": True})))
     assert payload["pid"] == 4242
     assert payload["status"] == "started"
 
@@ -82,7 +82,7 @@ def test_background_failure_returns_error(monkeypatch) -> None:
         "_run_command_background",
         lambda c, w: (1, "powershell", "Process exited with code 1"),
     )
-    out = asyncio.run(command_exec.command_exec("badcmd", background=True))
+    out = asyncio.run(command_exec.command_exec.invoke({"command": "badcmd", "background": True}))
     assert "background command failed" in out
 
 

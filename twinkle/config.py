@@ -56,3 +56,10 @@ WORKSPACE_DIR = os.getenv("TWINKLE_WORKSPACE_DIR") or str(
 LLM_BASE_URL = os.getenv("TWINKLE_LLM_BASE_URL", "https://api.openai.com/v1")
 LLM_API_KEY = os.getenv("TWINKLE_LLM_API_KEY", "")
 LLM_MODEL = os.getenv("TWINKLE_LLM_MODEL", "gpt-4o-mini")
+
+# --- agent loop ---
+# Max ReAct steps before the loop gives up (yields e2a.error). Default 1000 —
+# supports long agentic runs (Claude Code-scale traces run thousands of spans).
+# This is a runaway backstop, not a target: a non-converging loop burns up to
+# this many LLM calls before being caught.
+AGENT_MAX_STEPS = int(os.getenv("TWINKLE_AGENT_MAX_STEPS", "1000"))

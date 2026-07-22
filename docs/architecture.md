@@ -887,10 +887,12 @@ twinkle/
       local_function.py    # LocalFunction（本地函数 Tool 实现）
       decorator.py         # @tool 装饰器
       manager.py           # ToolManager（容器，存 dict[str, Tool]）
-      web_fetch.py          # URL → markdown/文本
-      web_search.py         # DuckDuckGo Lite 搜索
-      command_exec.py       # 跨平台 shell 执行（blocklist + workspace 收敛 + 超时 + 后台）
-      todo_tools.py         # @tool todo 工具：create / complete / list
+      __init__.py           # 框架 re-export + tool_manager() 预注册 builtin 工具
+      builtin/             # 具体工具（web/shell/todo）：框架/实现分层
+        web_fetch.py          # URL → markdown/文本
+        web_search.py         # DuckDuckGo Lite 搜索
+        command_exec.py       # 跨平台 shell 执行（blocklist + workspace 收敛 + 超时 + 后台）
+        todo_tools.py         # @tool todo 工具：create / complete / list
   gateway/
     __main__.py            # python -m 入口，装配四件 + 起 web_channel
     agent_client.py         # ws client + demux + stream

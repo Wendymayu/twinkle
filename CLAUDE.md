@@ -69,15 +69,17 @@ Browser ──ws (req/res/event)──> Gateway (:19000) ──ws (E2A envelope)
 - **`llm_client.py`** — thin OpenAI SDK wrapper; `base_url` is configurable so any OpenAI-compatible endpoint works. `stream()` yields `TextDelta | ToolCalls | Finish`.
 - **`session_store.py`** — in-memory `dict[session_id, list[msg]]` storing raw OpenAI `messages`. No persistence yet; interface allows swapping in SQLite later without rework.
 - **`memory.py`** — **stub** long-term memory (`recall()` returns `[]`, `store()` no-ops). Interface shape is pinned so a real impl can drop in.
-- **`tools/`** — the four-layer tool system (Phase 2 rewrite):
+- **`tools/`** — the four-layer tool system (Phase 2 rewrite). Split into a framework layer at the top level and concrete tools under `builtin/`; to add a tool, drop a `*_tools.py` in `builtin/` and `register` it inside `tool_manager()` in `__init__.py`:
   - `base.py`: `ToolCard` (pure metadata) + `Tool` (Protocol: `card` + `invoke`)
   - `local_function.py`: `LocalFunction`, the local-Python-function implementation of `Tool`
   - `schema_extractor.py`: hand-written extractor (str/int/float/bool/list/dict/Optional/`X | None` PEP 604 → JSON schema) from a function's signature + docstring
   - `decorator.py`: `@tool` turns a plain async function into a `LocalFunction` (auto-derives name/description/params; override with `@tool(name=..., input_params=...)`)
   - `manager.py`: `ToolManager` — `register`/`unregister`/`list`/`get`/`schemas`/`execute`, stores `dict[str, Tool]`, only knows the `Tool` interface
-  - `web_fetch.py`, `web_search.py`: concrete read-only tools (URL→markdown; DuckDuckGo Lite search)
-  - `command_exec.py`: shell-command execution tool (slim rewrite of jiuwenclaw's `command_tools.py`). Cross-platform shell detection (PowerShell on Windows, bash/sh on Unix), workspace-confined `workdir`, dangerous-command blocklist, timeout, output clipping, and a non-blocking background mode. **Not read-only** — the only safety rails today are the blocklist + workspace confinement; an approval flow is deferred (roadmap `permissions/`).
-  - `todo_tools.py`: the three `@tool` todo functions (create/complete/list) for agent self-planning; reads `plan_todo_context` for session routing, operates the module-level `TodoStore` singleton, returns markdown strings with the current list appended.
+  - `__init__.py`: re-exports the framework (`Tool`/`ToolCard`/`LocalFunction`/`@tool`/`ToolManager`) + the `tool_manager()` builder that pre-registers the `builtin/` tools. Tool singletons stay module-attribute access (e.g. `builtin.web_fetch.web_fetch`) so tests can monkeypatch internal helpers.
+  - **`builtin/`** — concrete tool implementations, grouped out of the framework layer (mirrors openjiuwen's `core/foundation/tool/` vs the app's per-domain tool files, minus jiuwenswarm's catalog/provider indirection):
+    - `web_fetch.py`, `web_search.py`: concrete read-only tools (URL→markdown; DuckDuckGo Lite search)
+    - `command_exec.py`: shell-command execution tool (slim rewrite of jiuwenclaw's `command_tools.py`). Cross-platform shell detection (PowerShell on Windows, bash/sh on Unix), workspace-confined `workdir`, dangerous-command blocklist, timeout, output clipping, and a non-blocking background mode. **Not read-only** — the only safety rails today are the blocklist + workspace confinement; an approval flow is deferred (roadmap `permissions/`).
+    - `todo_tools.py`: the three `@tool` todo functions (create/complete/list) for agent self-planning; reads `plan_todo_context` for session routing, operates the module-level `TodoStore` singleton, returns markdown strings with the current list appended.
   - `agent_loop` calls `self._tools.schemas()` / `self._tools.execute(name, args)` — `ToolManager` is a superset of the old call surface.
 - **`plan_todo_context.py`** — a `ContextVar` (`PLAN_TODO_SESSION_ID`) set by `AgentLoop.run_stream` at request entry to the envelope's `session_id`, plus a `get_plan_todo_session_id()` getter with a `"default"` fallback. Lets the parameter-less todo tools resolve the current session without threading it through every tool call.
 - **`todo_store.py`** — in-memory `TodoStore` (`dict[session_id, list[TodoTask]]` + per-session `asyncio.Lock` serializing read-modify-write). Methods: `create`/`complete`/`list_tasks`. No persistence (matches SessionStore philosophy).
@@ -105,7 +107,7 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 
 ## Conventions
 
-- **Add a new read-only tool**: write an async function, decorate with `@tool` (the docstring + type hints auto-generate the JSON schema), then `tool_manager.register(it)` in the AgentServer wiring. `agent_loop` picks it up via `schemas()`/`execute()` with no loop changes.
+- **Add a new read-only tool**: write an async function in a `*_tools.py` module under `tools/builtin/`, decorate with `@tool` (the docstring + type hints auto-generate the JSON schema), then `tm.register(it)` inside `tool_manager()` in `tools/__init__.py`. `agent_loop` picks it up via `schemas()`/`execute()` with no loop changes.
 - **Add a new channel** (e.g. Feishu): implement the channel interface (`channel_id`, `on_message`, `send`, `start`) and `register_channel` it in `gateway/__main__.py`. Gateway core (`MessageHandler`/`ChannelManager`/`AgentClient`) should not change.
 - **Tests must not use `pytest-asyncio`** — use `asyncio.run()` and the `free_port`/`port_factory` fixtures. This is a deliberate choice to avoid pulling the plugin in for free-port fixtures.
 - The reference impl `jiuwenclaw` is at `D:\opensource\gitcode\jiuwenclaw` — consult it when a module's behavior is unclear; each module docstring / `docs/architecture.md` §11 maps Twinkle files to jiuwenclaw file ranges.

@@ -30,8 +30,9 @@ class _Choice:
 
 
 class _Chunk:
-    def __init__(self, choices):
+    def __init__(self, choices, usage=None):
         self.choices = choices
+        self.usage = usage
 
 
 class _FakeCompletions:
@@ -132,3 +133,23 @@ def test_tool_call_fragments_accumulated() -> None:
     assert tcs[0]["id"] == "call_1"
     assert tcs[0]["function"]["name"] == "web_fetch"
     assert tcs[0]["function"]["arguments"] == '{"url":"http://x"}'
+
+
+def test_trailing_usage_chunk_is_captured_on_finish() -> None:
+    usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+    scripts = [
+        [
+            _Chunk([_Choice(_Delta(content="hi"))]),
+            _Chunk([_Choice(_Delta(), finish_reason="stop")]),
+            _Chunk([], usage=usage),  # usage-only trailing chunk
+        ]
+    ]
+    client = LLMClient(base_url="x", api_key="y", model="m", client=_FakeClient(scripts))
+
+    async def run():
+        return [e async for e in client.stream(messages=[{"role": "user", "content": "hi"}], tools=[])]
+
+    events = _run(run())
+    finish = events[-1]
+    assert isinstance(finish, Finish)
+    assert finish.usage == usage

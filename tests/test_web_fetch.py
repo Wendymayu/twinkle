@@ -1,6 +1,6 @@
 import asyncio
 
-from twinkle.agentserver.tools import web_fetch
+from twinkle.agentserver.tools.builtin import web_fetch
 
 
 class _FakeResp:
@@ -21,7 +21,7 @@ def test_strips_tags_and_clips(monkeypatch) -> None:
     monkeypatch.setattr(web_fetch, "_http_get", fake_get)
 
     async def run() -> str:
-        return await web_fetch.web_fetch("http://x", max_chars=8000)
+        return await web_fetch.web_fetch.invoke({"url": "http://x", "max_chars": 8000})
 
     out = asyncio.run(run())
     assert "hello" in out and "world" in out
@@ -38,7 +38,7 @@ def test_truncates_over_max(monkeypatch) -> None:
     monkeypatch.setattr(web_fetch, "_http_get", fake_get)
 
     async def run() -> str:
-        return await web_fetch.web_fetch("http://x", max_chars=100)
+        return await web_fetch.web_fetch.invoke({"url": "http://x", "max_chars": 100})
 
     out = asyncio.run(run())
     assert len(out) < 5000

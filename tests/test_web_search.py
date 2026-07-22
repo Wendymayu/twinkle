@@ -1,6 +1,6 @@
 import asyncio
 
-from twinkle.agentserver.tools import web_search
+from twinkle.agentserver.tools.builtin import web_search
 
 
 class _FakeResp:
@@ -28,7 +28,7 @@ def test_parses_result_links(monkeypatch) -> None:
     monkeypatch.setattr(web_search, "_http_post", fake_post)
 
     async def run() -> str:
-        return await web_search.web_search("hello", max_results=5)
+        return await web_search.web_search.invoke({"query": "hello", "max_results": 5})
 
     out = asyncio.run(run())
     assert "First Result" in out
@@ -44,7 +44,7 @@ def test_respects_max_results(monkeypatch) -> None:
     monkeypatch.setattr(web_search, "_http_post", fake_post)
 
     async def run() -> str:
-        return await web_search.web_search("hello", max_results=2)
+        return await web_search.web_search.invoke({"query": "hello", "max_results": 2})
 
     out = asyncio.run(run())
     assert "example.com/1" in out

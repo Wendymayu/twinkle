@@ -20,6 +20,7 @@ from twinkle.agentserver.plan_todo_context import (
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
+from twinkle.config import AGENT_MAX_STEPS as MAX_STEPS
 
 TODO_SYSTEM_PROMPT = (
     "You have todo tools to plan and track multi-step work: "
@@ -29,8 +30,6 @@ TODO_SYSTEM_PROMPT = (
     "call todo_list to check progress. For simple one-step requests, do NOT "
     "use the todo tools — just answer or call the needed tool directly."
 )
-
-MAX_STEPS = 8
 
 
 class AgentLoop:
