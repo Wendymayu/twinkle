@@ -4,7 +4,6 @@ import json
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import TextDelta, Finish
 from twinkle.agentserver.memory import LongTermMemory
-from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.e2a.models import E2AEnvelope
 
@@ -44,8 +43,8 @@ def _reg_with_echo_tool():
     return m
 
 
-def test_plain_answer_streams_chunks_and_complete() -> None:
-    store = SessionStore()
+def test_plain_answer_streams_chunks_and_complete(session_store) -> None:
+    store = session_store
     llm = _ScriptedLLM([
         [TextDelta("hel"), TextDelta("lo"),
          Finish("stop", {"role": "assistant", "content": "hello", "tool_calls": None})],
@@ -65,8 +64,8 @@ def test_plain_answer_streams_chunks_and_complete() -> None:
     assert final.body["result"]["content"] == "hello"
 
 
-def test_tool_call_round_trip_then_answer() -> None:
-    store = SessionStore()
+def test_tool_call_round_trip_then_answer(session_store) -> None:
+    store = session_store
     reg = _reg_with_echo_tool()
     llm = _ScriptedLLM([
         # turn 1: model calls echo
@@ -98,8 +97,8 @@ def test_tool_call_round_trip_then_answer() -> None:
     assert msgs[4]["role"] == "assistant"
 
 
-def test_cross_turn_remembers_context() -> None:
-    store = SessionStore()
+def test_cross_turn_remembers_context(session_store) -> None:
+    store = session_store
     reg = _reg_with_echo_tool()
     seen_messages = []
 
@@ -137,8 +136,8 @@ def test_cross_turn_remembers_context() -> None:
     assert seen_messages[1][3]["content"] == "turn2"
 
 
-def test_max_steps_emits_error(monkeypatch) -> None:
-    store = SessionStore()
+def test_max_steps_emits_error(session_store, monkeypatch) -> None:
+    store = session_store
     reg = _reg_with_echo_tool()
     # every turn asks for a tool call -> never converges
     tool_finish = Finish("tool_calls", {
@@ -159,7 +158,7 @@ def test_max_steps_emits_error(monkeypatch) -> None:
     assert frames[-1].status == "failed"
 
 
-def test_todo_create_round_trip_through_loop() -> None:
+def test_todo_create_round_trip_through_loop(session_store) -> None:
     """Model calls todo_create then answers — verifies the ContextVar is set
     to the envelope's session_id (via the store assertions below; without
     PLAN_TODO_SESSION_ID.set the tool would fall back to "default" and the
@@ -167,7 +166,7 @@ def test_todo_create_round_trip_through_loop() -> None:
     present."""
     from twinkle.agentserver.tools import tool_manager
 
-    store = SessionStore()
+    store = session_store
     llm = _ScriptedLLM([
         # turn 1: model calls todo_create
         [Finish("tool_calls", {"role": "assistant", "content": None,
@@ -204,12 +203,12 @@ def test_todo_create_round_trip_through_loop() -> None:
     assert asyncio.run(_store.list_tasks("default")) == []
 
 
-def test_todo_update_frame_emitted_on_create() -> None:
+def test_todo_update_frame_emitted_on_create(session_store) -> None:
     """run_stream yields an e2a.todo_update frame after todo_create executes,
     carrying the structured snapshot (not just the markdown tool string)."""
     from twinkle.agentserver.tools import tool_manager
 
-    store = SessionStore()
+    store = session_store
     llm = _ScriptedLLM([
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "tc1", "type": "function",

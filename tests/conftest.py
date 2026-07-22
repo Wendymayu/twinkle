@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 
 import pytest
 
@@ -21,3 +22,18 @@ def port_factory():
 @pytest.fixture
 def free_port() -> int:
     return _free_port()
+
+
+@pytest.fixture
+def sessions_dir(tmp_path) -> "Path":
+    """A fresh per-test sessions directory (disk-backed SessionStore target)."""
+    d = tmp_path / "sessions"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def session_store(sessions_dir):
+    """A SessionStore rooted in a per-test tmp dir (no repo pollution)."""
+    from twinkle.agentserver.session_store import SessionStore
+    return SessionStore(str(sessions_dir))

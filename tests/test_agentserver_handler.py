@@ -7,6 +7,7 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from twinkle.agentserver.server import ws_handler
+from twinkle.agentserver.session_store import SessionStore
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 
@@ -34,12 +35,13 @@ class _RecordingLoop:
         )
 
 
-def test_malformed_envelope_returns_error() -> None:
+def test_malformed_envelope_returns_error(tmp_path) -> None:
     port = _free_port()
     loop_obj = _RecordingLoop()
+    store = SessionStore(str(tmp_path / "sessions"))
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
+        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
         try:
             async with connect(f"ws://127.0.0.1:{port}") as ws:
                 await ws.recv()  # connection.ack
@@ -54,12 +56,13 @@ def test_malformed_envelope_returns_error() -> None:
     asyncio.run(run())
 
 
-def test_valid_envelope_dispatches_to_loop() -> None:
+def test_valid_envelope_dispatches_to_loop(tmp_path) -> None:
     port = _free_port()
     loop_obj = _RecordingLoop()
+    store = SessionStore(str(tmp_path / "sessions"))
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
+        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
         try:
             async with connect(f"ws://127.0.0.1:{port}") as ws:
                 await ws.recv()  # connection.ack

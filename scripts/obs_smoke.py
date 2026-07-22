@@ -28,6 +28,7 @@ from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
+from twinkle.config import SESSIONS_DIR
 from twinkle.observability.config import load_config
 from twinkle.observability.instrumentors import apply_instrumentors
 from twinkle.observability.metrics import Metrics
@@ -138,7 +139,7 @@ async def main() -> None:
     llm = LLMClient(base_url="x", api_key="y", model="smoke-model", client=_FakeClient(scripts))
     tools = ToolManager()
     tools.register(echo)
-    loop = AgentLoop(llm=llm, store=SessionStore(), tools=tools, memory=LongTermMemory())
+    loop = AgentLoop(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools, memory=LongTermMemory())
 
     print(f"twinkle obs smoke -> OTLP/gRPC {ENDPOINT}")
     async for frame in loop.run_stream(_Env()):

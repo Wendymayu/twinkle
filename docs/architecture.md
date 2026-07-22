@@ -357,7 +357,7 @@ LLMClient  SessionStore  ToolManager
 4. 解析成功 → `async for frame in loop.run_stream(env): await _safe_send(ws, frame)`
 5. AgentLoop 异常 → 发 `e2a.error` **终止帧**（`is_final=true`）
 
-> 错误帧必须显式置 `is_final=true`——`E2AResponse.is_final` 默认 `false`，不置则 gateway demux 不终止、请求挂起。`_safe_send` 静默吞掉 `ConnectionClosed`（客户端断连是正常生命周期事件）。`ws_handler(loop)` 让测试注入假 loop，`agent_loop()` 用真实配置组建。
+> 错误帧必须显式置 `is_final=true`——`E2AResponse.is_final` 默认 `false`，不置则 gateway demux 不终止、请求挂起。`_safe_send` 静默吞掉 `ConnectionClosed`（客户端断连是正常生命周期事件）。`ws_handler(loop, store)` 让测试注入假 loop + 共享 `SessionStore`，`agent_loop()` 用真实配置组建。
 
 ### 4.2 AgentLoop — ReAct 核心闭环
 
@@ -385,14 +385,18 @@ LLMClient  SessionStore  ToolManager
 - `max_steps` 防止工具循环不收敛；触顶是"正常 yield `e2a.error` 后返回"，**非异常**——异常才走 §4.1 步骤 5
 - 入口设 plan-todo ContextVar + `reset_todo_events`，会话首次插入 `TODO_SYSTEM_PROMPT`；工具执行后 `drain_todo_events` 产 `e2a.todo_update` 侧信道（结构化快照 `{tasks, remaining, total}`）
 
-### 4.3 SessionStore — 短期对话记忆
+### 4.3 SessionStore — 会话记忆（磁盘落盘 + 内存缓存）
 
-[session_store.py](../twinkle/agentserver/session_store.py) 是 in-memory `dict[session_id, list[msg]]`，存的就是 OpenAI 原生 `messages` 格式：
+[session_store.py](../twinkle/agentserver/session_store.py) 是**磁盘 + 内存两层**的会话存储，存的是 OpenAI 原生 `messages` 格式：内存缓存 `dict[session_id, list[msg]]` 服务热读，磁盘 `<SESSIONS_DIR>/<sid>/{metadata.json,history.json}` 服务持久化与历史回看。
 
-- `append(session_id, message)` — 添加一条消息
-- `get_messages(session_id)` — 返回该会话的所有消息（含 user/assistant/tool）
+- `append(session_id, message, request_id, event_type)` — async；更新缓存 + 追加 `history.json` + 更新 metadata（首条 user 消息自动起 title）
+- `get_messages(session_id)` — sync；缓存命中直接返，未命中从 `history.json` 冷启动 hydrate（保留完整 `tool_calls`/`tool_call_id` 以重建 ReAct 上下文）
+- `create_session` / `delete_session` — async；幂等建/删会话目录
+- `list_sessions` / `get_history` — sync；列表按 `last_message_at` 倒序，history 返回 raw 记录
+- `list_files(session_id)` — sync；返回会话目录扁平文件列表 `[{name, is_dir, size}]`，未知会话返回 `[]`
+- `read_file(session_id, name)` — sync；路径安全地读取会话目录内的单文件文本内容（拒绝非裸文件名与路径穿越）
 
-Phase 1 不做落盘持久化；接口允许后续换 SQLite，不回炉。
+详见 §4.7。
 
 ### 4.4 LLMClient — 模型流式接口
 
@@ -450,6 +454,45 @@ metrics（全 fail-soft，`Metrics(None)` 静默 no-op）：counter `gen_ai.clie
 | `instrumentors/` | `apply_instrumentors(...)`：每个 instrumentor 独立 try/except；生产传 `None` 懒加载真类、测试传 fake |
 
 依赖放 `[obs]` optional extra（`opentelemetry-api` / `-sdk` / `-exporter-otlp-proto-grpc`），`pip install -e ".[obs]"` 才装；不装时 try-import 守卫跳过。借鉴 `jiuwenswarm-instrumentor`（OTel auto-instrumentation），砍跨进程 W3C / context-token 分桶 / CLI wrapper / logs，是其最小子集 + 学习重写。
+
+### 4.8 会话持久化与 history RPC
+
+> **超出 roadmap 的有意扩展**：`roadmap.md` 原定 Phase 1/2 "不做落盘持久化"。本节描述的 session management 是在 roadmap 之外有意补回的能力——为了支持跨重启的对话延续与历史回看。设计与实施记录在 [spec](../superpowers/specs/2026-07-22-session-management-design.md) 与 [plan](../superpowers/plans/2026-07-22-session-management.md)。
+
+`SessionStore` 从纯内存 dict 升级为**磁盘落盘 + 内存缓存**两层结构，`session_rpc.py` 在 AgentServer 侧分发六个会话/历史/文件 RPC，`session_id` 由浏览器生成并 sticky 在 `localStorage`。
+
+**每会话磁盘布局**（根目录 `SESSIONS_DIR`，见 `config.py`）：
+
+```
+<SESSIONS_DIR>/<session_id>/
+    metadata.json   # {session_id, title, created_at, last_message_at, message_count, channel_id}
+    history.json    # JSONL，每条 append 的消息一行
+```
+
+- `history.json` 每行一条记录，**保留完整 OpenAI 原生字段**（`role`/`content`/`tool_calls`/`tool_call_id`），以便冷启动时无损重建 ReAct 上下文（system prompt、tool_calls、tool 结果都能还原）。首条 user 消息自动生成 `title`。
+- 内存缓存 `dict[sid -> list[OpenAI msg]]` 服务 AgentLoop 的热读；`get_messages` 在缓存未命中时从 `history.json` 冷启动 hydrate。坏 JSONL 行跳过不抛错；`metadata.json` 损坏时 fallback 到目录 mtime。
+- `append`/`create_session`/`delete_session` 是 async（持一把 `asyncio.Lock` 串行化 metadata 的 read-modify-write）；`get_messages`/`list_sessions`/`get_history`/`list_files`/`read_file` 是 sync。
+
+**六个 RPC** 在 [session_rpc.py](../twinkle/agentserver/session_rpc.py) 的 `dispatch_session_rpc(envelope, store)` 中分发，被 `server.py` 的 `ws_handler(loop, store)` 在进入 AgentLoop 之前路由：
+
+| method | 动作 | body |
+|---|---|---|
+| `session.create` | 幂等建会话目录 + metadata | `{type:"session.create", session_id}` |
+| `session.list` | 列会话（按 `last_message_at` 倒序） | `{type:"session.list", sessions:[...]}` |
+| `session.delete` | 删会话目录 + 清缓存 | `{type:"session.delete", session_id}` |
+| `history.get` | 返回该会话 raw history 记录 | `{type:"history.get", messages:[...]}` |
+| `session.files` | 列该会话目录的**扁平**文件列表 | `{type:"session.files", files:[{name,is_dir,size}]}` |
+| `file.read` | 路径安全地读取会话目录内的单文件内容 | `{type:"file.read", name, content:<str>}` |
+
+每个 RPC **只产一帧** `E2AResponse(response_kind="e2a.result", is_final=true, sequence=0)`；失败时产 `status="failed"` 的 result 帧（body 带 `error`），让前端 `request()` 干净地 reject。Gateway 的 `MessageHandler._process_stream` 把 `e2a.result` 映射为浏览器 `result` event（单帧，无流式分片）。
+
+**文件浏览 RPC 的路径安全**：`file.read` 的 `name` 参数来自浏览器且内容会回显到前端预览区，因此 `SessionStore.read_file` 拒绝任何非裸文件名的请求——空串、含 `/` 或 `\`、`.`/`..` 均抛 `ValueError`；路径 resolve 后必须留在会话目录内（`base in target.parents`），否则也抛 `ValueError`。这是 load-bearing 安全约束，由显式单元测试覆盖。`list_files` 返回会话目录顶层条目的扁平列表 `[{name, is_dir, size}]`（当前会话目录无子目录，无需递归），未知会话返回空列表。
+
+**前端导航壳**：App.vue 从 3 列永远可见布局（SessionSidebar | ChatPanel | TodoPanel）重构为 jiuwen 式导航壳——窄 `LeftNav`（聊条 + 会话两个入口）切换 `useSessions.activeNav` composable 字段，内容区 `v-if` 在 `ChatView`（ChatPanel + TodoPanel）与 `SessionsView`（3 栏文件浏览器）之间切换。旧的 `SessionSidebar.vue` 已删除。设计与实施记录在 [sessions-page spec](../superpowers/specs/2026-07-22-sessions-page-design.md) 与 [plan](../superpowers/plans/2026-07-22-sessions-page.md)。
+
+**SessionsView 3 栏布局**：`SessionListPane | FileTreePane | FilePreviewPane`（grid 1fr : 1fr : 3fr，与 jiuwen 对齐）。`SessionListPane` 展示历史会话列表，选中后调用 `loadSessionFiles(sid)` 拉取文件列表；`FileTreePane` 展示扁平文件列表，点击调用 `readSessionFile(sid, name)`；`FilePreviewPane` 按文件名分派渲染——`history.json` 提供「聊天气泡 / 原始 JSON」切换（气泡模式复用 `fromHistory` composable），`metadata.json` 格式化 JSON `<pre>`，其余文件纯文本 `<pre>`。「↩ 恢复」按钮执行 `restoreSession(sid)`：加载聊天历史 + 切回 `ChatView`。
+
+**session_id 的归属**：`session_id` 由浏览器 `webClient.ts` 生成（`'sess_' + crypto.randomUUID()`）并 sticky 存在 `localStorage`；贯穿 `req.params.session_id` → `E2AEnvelope.session_id` → `SessionStore`。AgentServer 自己不生成 session_id，只接收并落盘。
 
 ---
 
@@ -683,11 +726,11 @@ E2A 是 Gateway 和 AgentServer 之间的**内部信封协议**。定义在 [twi
 | `sequence` | int | 同 request_id 下从 0 严格递增 |
 | `is_final` | bool | 最后一帧 `true` |
 | `status` | str | `in_progress` / `succeeded` / `failed` |
-| `response_kind` | str | `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` |
+| `response_kind` | str | `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` / `e2a.result` |
 | `body` | dict | 载荷内容 |
 | `is_stream` | bool | 固定 `true`（Twinkle 流式专用） |
 
-**四种 response_kind**：
+**五种 response_kind**（chunk/complete/error/todo_update/result）：
 
 | response_kind | 含义 | body 结构 |
 |---|---|---|
@@ -695,6 +738,7 @@ E2A 是 Gateway 和 AgentServer 之间的**内部信封协议**。定义在 [twi
 | `e2a.complete` | 正常终止 | `{result: {content: "完整文本"}}` |
 | `e2a.error` | 错误终止 | `{error: "错误描述"}` |
 | `e2a.todo_update` | Todo 快照 | `{tasks, remaining, total}` |
+| `e2a.result` | 单帧 RPC 结果（session/history） | `{type: "session.*"|"history.get", ...}` |
 
 #### connection.ack — 连接握手（AgentServer → Gateway）
 
@@ -878,16 +922,15 @@ handle(frame)
 setHandlers(onDelta, onFinal, onTodoUpdate) — 注册三个回调；todo.update 的 payload 是结构化快照，不经 content
 ```
 
-### 8.4 App.vue
+### 8.4 导航壳与 App.vue
 
-[App.vue](../web/src/App.vue) 是「聊天 + Todo」双栏 UI：
+[App.vue](../web/src/App.vue) 从 3 列永远可见布局重构为 jiuwen 式导航壳：
 
-- `onDelta(delta, rid)` — 拼接到最后一个 assistant bubble（rid == currentId 时）
-- `onFinal(text, rid)` — 最终内容覆盖或新建 assistant bubble，并把 `busy` 置回 false
-- `onTodoUpdate(todo, rid)` — 收到 todo 快照后整体替换 `todo.value`，触发右侧面板重渲染
-- `send()` — 用户输入 → `msgs.push({role:'user'})` → `client.send('chat.send', {query})` → `busy=true`
-- **处理中指示**：请求进行中（`busy` 为 true）时，消息列表末尾显示带 pulse 动画的「处理中…」气泡；`onFinal` 收到终止帧后清除
-- **Todo 侧边面板**（`<aside class="todo-panel">`）：渲染 checkbox 列表（`box()` 给 ✓/◐/○ 图标）与 `completedCount/total` 进度；空列表显示「暂无任务」。flex 两栏（chat 主 + todo 280px 右栏），窄屏（≤640px）转纵向
+- `LeftNav`（窄左栏，聊条 + 会话两个入口）→ `setNav(key)` 切换 `useSessions.activeNav`
+- 内容区 `v-if="activeNav === 'chat'" → ChatView`（ChatPanel + TodoPanel），`v-else → SessionsView`（3 栏文件浏览器）
+- 旧 `SessionSidebar.vue` 已删除——会话列表只存在于 Sessions 页面
+
+`ChatPanel` 输入栏左侧新增 ➕ 「新对话」按钮（调用 `createSession()`），取代旧 sidebar 的「+ 新对话」入口。
 
 ---
 
@@ -950,10 +993,11 @@ twinkle/
     __init__.py
   agentserver/
     __main__.py            # python -m 入口
-    server.py              # ws server + AgentLoop 分发
+    server.py              # ws server + AgentLoop 分发 + ws_handler(loop, store) 路由 session RPC
     agent_loop.py          # ReAct 核心闭环（入口 set plan-todo ContextVar + 首次插入 todo system message）
+    session_rpc.py         # session.create/list/delete + history.get + session.files/file.read RPC 分发（产单帧 e2a.result）
     llm_client.py          # OpenAI SDK 薄封装
-    session_store.py       # in-memory 对话记录
+    session_store.py       # 磁盘+内存会话存储（<sid>/{metadata,history}.json）
     memory.py              # 长期记忆 stub
     plan_todo_context.py   # ContextVar：当前请求的 todo session 路由
     todo_store.py          # TodoStore：内存 dict[session_id, list[TodoTask]] + 每 session 一把 asyncio.Lock
@@ -988,16 +1032,28 @@ twinkle/
     message_handler.py      # 格式转换 + 流式扇出
   web/
     src/
-      App.vue               # 聊天 + Todo 双栏 UI（处理中指示 + todo 侧边面板）
+      App.vue               # 导航壳（LeftNav + ChatView/SessionsView 切换）
       services/
         webClient.ts         # 浏览器 ws 客户端
+      composables/
+        useSessions.ts       # 会话状态 + activeNav + 文件浏览 composable
+      components/
+        LeftNav.vue           # 左侧导航（聊条 + 会话）
+        ChatView.vue          # 聊天视图（ChatPanel + TodoPanel）
+        ChatPanel.vue         # 聊天面板（➕ 新对话按钮 + 输入 + 发送）
+        TodoPanel.vue         # Todo 侧栏
+        SessionsView.vue      # 3 栏会话页面容器
+        SessionListPane.vue   # 会话列表栏
+        FileTreePane.vue      # 文件树栏（扁平文件列表）
+        FilePreviewPane.vue   # 文件预览栏（history.json 气泡/JSON 切换 + metadata.json 格式化）
     vite.config.ts          # Vite 配置 + ws 代理
 tests/
   test_agent_loop.py        # AgentLoop 单测
   test_agentserver_handler.py # ws handler 级测试
   test_integration.py       # 端到端全链路
   test_llm_client.py        # LLM 客户端单测
-  test_session_store.py     # 会话存储单测
+  test_session_store.py     # 会话存储单测（含 list_files/read_file + 路径安全）
+  test_session_rpc.py       # 会话 RPC 单测（含 session.files/file.read）
   test_tool_manager.py      # ToolManager 单测
   test_base.py              # ToolCard + Tool 单测
   test_schema_extractor.py  # schema 抽取器单测
