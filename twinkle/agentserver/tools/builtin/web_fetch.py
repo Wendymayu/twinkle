@@ -11,6 +11,8 @@ from typing import Any
 
 import httpx
 
+from twinkle.agentserver.tools.decorator import tool
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -58,6 +60,7 @@ def _html_to_text(html: str) -> str:
     return p.text()
 
 
+@tool
 async def web_fetch(url: str, max_chars: int = 8000) -> str:
     """Fetch a URL and return its visible text, clipped to max_chars."""
     resp = await _http_get(url)

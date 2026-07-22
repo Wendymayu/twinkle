@@ -199,6 +199,6 @@ def test_todo_create_round_trip_through_loop() -> None:
     # "default" fallback — otherwise both store keys below would be empty
     # except "default". This makes run_stream's PLAN_TODO_SESSION_ID.set(...)
     # load-bearing rather than silently skippable.
-    from twinkle.agentserver.tools.todo_tools import _store
+    from twinkle.agentserver.tools.builtin.todo_tools import _store
     assert len(asyncio.run(_store.list_tasks("s-todo"))) == 2
     assert asyncio.run(_store.list_tasks("default")) == []

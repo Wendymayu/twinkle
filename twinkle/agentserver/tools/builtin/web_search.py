@@ -13,6 +13,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from twinkle.agentserver.tools.decorator import tool
+
 _DDG_HTML_URL = "https://html.duckduckgo.com/html/"
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -73,6 +75,7 @@ async def _http_post(url: str, data: dict, timeout: float = 15.0) -> Any:
         )
 
 
+@tool
 async def web_search(query: str, max_results: int = 5) -> str:
     """Search the web via DuckDuckGo; return up to max_results title+URL lines."""
     query = (query or "").strip()
