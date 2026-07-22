@@ -362,7 +362,7 @@ LLMClient  SessionStore  ToolManager
 ```
 用户 query → store.append(user) → memory.recall(stub空) → msgs = store.get_messages()
     │
-    ▼  ReAct 循环（max_steps=8 守护）
+    ▼  ReAct 循环（max_steps 守护）
     │
     ├── llm.stream(msgs, tools)
     │   ├── TextDelta → yield E2AResponse(e2a.chunk)
@@ -375,7 +375,7 @@ LLMClient  SessionStore  ToolManager
 关键设计：
 - `run_stream` 是 **async generator**，yield E2AResponse — loop 对 ws 零依赖，单测无需起 ws
 - 工具结果回灌是命门：`{role:"tool", tool_call_id, content:result}` append 进 store，下一轮 `get_messages` 自然带上
-- `max_steps=8` 防止工具循环不收敛
+- `max_steps` 防止工具循环不收敛
 
 ### 4.3 SessionStore — 短期对话记忆
 

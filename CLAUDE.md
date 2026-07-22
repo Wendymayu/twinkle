@@ -65,7 +65,7 @@ Browser ──ws (req/res/event)──> Gateway (:19000) ──ws (E2A envelope)
 ### AgentServer internals
 
 - **`server.py`** — ws handler: send `connection.ack`, parse `E2AEnvelope`, dispatch to `AgentLoop.run_stream`, send each yielded frame back via `_safe_send` (silently swallows `ConnectionClosed`). `ws_handler(loop)` allows tests to inject a fake loop.
-- **`agent_loop.py`** — the ReAct core. `run_stream` is an **async generator** yielding `E2AResponse` with zero ws dependency (so it's unit-testable without sockets). Loop: `store.append(user)` → `llm.stream(msgs, tools)` → `TextDelta` yields `e2a.chunk`, `ToolCalls` get executed and the result is appended as `{role:"tool", tool_call_id, content}` then re-queried, `Done(stop)` yields `e2a.complete`. Guarded by `max_steps=8` → `e2a.error` if it doesn't converge. **Tool-result re-injection is the linchpin** — the result goes back into `SessionStore` so the next `get_messages` carries it. At entry it also sets the plan-todo ContextVar to the envelope's `session_id` and first-inserts a todo-guidance system message (once per session).
+- **`agent_loop.py`** — the ReAct core. `run_stream` is an **async generator** yielding `E2AResponse` with zero ws dependency (so it's unit-testable without sockets). Loop: `store.append(user)` → `llm.stream(msgs, tools)` → `TextDelta` yields `e2a.chunk`, `ToolCalls` get executed and the result is appended as `{role:"tool", tool_call_id, content}` then re-queried, `Done(stop)` yields `e2a.complete`. Guarded by `max_steps` (`TWINKLE_AGENT_MAX_STEPS`, default `1000`) → `e2a.error` if it doesn't converge. **Tool-result re-injection is the linchpin** — the result goes back into `SessionStore` so the next `get_messages` carries it. At entry it also sets the plan-todo ContextVar to the envelope's `session_id` and first-inserts a todo-guidance system message (once per session).
 - **`llm_client.py`** — thin OpenAI SDK wrapper; `base_url` is configurable so any OpenAI-compatible endpoint works. `stream()` yields `TextDelta | ToolCalls | Finish`.
 - **`session_store.py`** — in-memory `dict[session_id, list[msg]]` storing raw OpenAI `messages`. No persistence yet; interface allows swapping in SQLite later without rework.
 - **`memory.py`** — **stub** long-term memory (`recall()` returns `[]`, `store()` no-ops). Interface shape is pinned so a real impl can drop in.
@@ -104,6 +104,7 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 | `TWINKLE_LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible |
 | `TWINKLE_LLM_API_KEY` | empty | **put in `.env`, never commit** |
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | |
+| `TWINKLE_AGENT_MAX_STEPS` | `1000` | Max ReAct steps before `e2a.error` (runaway backstop, not a target) |
 
 ## Conventions
 
