@@ -379,14 +379,16 @@ LLMClient  SessionStore  ToolManager
 - 工具结果回灌是命门：`{role:"tool", tool_call_id, content:result}` append 进 store，下一轮 `get_messages` 自然带上
 - `max_steps=8` 防止工具循环不收敛
 
-### 4.3 SessionStore — 短期对话记忆
+### 4.3 SessionStore — 会话记忆（磁盘落盘 + 内存缓存）
 
-[session_store.py](../twinkle/agentserver/session_store.py) 是 in-memory `dict[session_id, list[msg]]`，存的就是 OpenAI 原生 `messages` 格式：
+[session_store.py](../twinkle/agentserver/session_store.py) 是**磁盘 + 内存两层**的会话存储，存的是 OpenAI 原生 `messages` 格式：内存缓存 `dict[session_id, list[msg]]` 服务热读，磁盘 `<SESSIONS_DIR>/<sid>/{metadata.json,history.json}` 服务持久化与历史回看。
 
-- `append(session_id, message)` — 添加一条消息
-- `get_messages(session_id)` — 返回该会话的所有消息（含 user/assistant/tool）
+- `append(session_id, message, request_id, event_type)` — async；更新缓存 + 追加 `history.json` + 更新 metadata（首条 user 消息自动起 title）
+- `get_messages(session_id)` — sync；缓存命中直接返，未命中从 `history.json` 冷启动 hydrate（保留完整 `tool_calls`/`tool_call_id` 以重建 ReAct 上下文）
+- `create_session` / `delete_session` — async；幂等建/删会话目录
+- `list_sessions` / `get_history` — sync；列表按 `last_message_at` 倒序，history 返回 raw 记录
 
-Phase 1 不做落盘持久化；接口允许后续换 SQLite，不回炉。
+详见 §4.7。
 
 ### 4.4 LLMClient — 模型流式接口
 
@@ -407,6 +409,37 @@ agent_loop 调用面 `self._tools.schemas()` / `self._tools.execute(name, args)`
 ### 4.6 LongTermMemory — stub
 
 [memory.py](../twinkle/agentserver/memory.py) 是空实现：`recall()` 返回空列表，`store()` 不做事。接口形状钉死，将来换真实现不回炉。
+
+### 4.7 会话持久化与 history RPC
+
+> **超出 roadmap 的有意扩展**：`roadmap.md` 原定 Phase 1/2 "不做落盘持久化"。本节描述的 session management 是在 roadmap 之外有意补回的能力——为了支持跨重启的对话延续与历史回看。设计与实施记录在 [spec](../superpowers/specs/2026-07-22-session-management-design.md) 与 [plan](../superpowers/plans/2026-07-22-session-management.md)。
+
+`SessionStore` 从纯内存 dict 升级为**磁盘落盘 + 内存缓存**两层结构，`session_rpc.py` 在 AgentServer 侧分发四个会话/历史 RPC，`session_id` 由浏览器生成并 sticky 在 `localStorage`。
+
+**每会话磁盘布局**（根目录 `SESSIONS_DIR`，见 `config.py`）：
+
+```
+<SESSIONS_DIR>/<session_id>/
+    metadata.json   # {session_id, title, created_at, last_message_at, message_count, channel_id}
+    history.json    # JSONL，每条 append 的消息一行
+```
+
+- `history.json` 每行一条记录，**保留完整 OpenAI 原生字段**（`role`/`content`/`tool_calls`/`tool_call_id`），以便冷启动时无损重建 ReAct 上下文（system prompt、tool_calls、tool 结果都能还原）。首条 user 消息自动生成 `title`。
+- 内存缓存 `dict[sid -> list[OpenAI msg]]` 服务 AgentLoop 的热读；`get_messages` 在缓存未命中时从 `history.json` 冷启动 hydrate。坏 JSONL 行跳过不抛错；`metadata.json` 损坏时 fallback 到目录 mtime。
+- `append`/`create_session`/`delete_session` 是 async（持一把 `asyncio.Lock` 串行化 metadata 的 read-modify-write）；`get_messages`/`list_sessions`/`get_history` 是 sync。
+
+**四个 RPC** 在 [session_rpc.py](../twinkle/agentserver/session_rpc.py) 的 `dispatch_session_rpc(envelope, store)` 中分发，被 `server.py` 的 `ws_handler(loop, store)` 在进入 AgentLoop 之前路由：
+
+| method | 动作 | body |
+|---|---|---|
+| `session.create` | 幂等建会话目录 + metadata | `{type:"session.create", session_id}` |
+| `session.list` | 列会话（按 `last_message_at` 倒序） | `{type:"session.list", sessions:[...]}` |
+| `session.delete` | 删会话目录 + 清缓存 | `{type:"session.delete", session_id}` |
+| `history.get` | 返回该会话 raw history 记录 | `{type:"history.get", messages:[...]}` |
+
+每个 RPC **只产一帧** `E2AResponse(response_kind="e2a.result", is_final=true, sequence=0)`；失败时产 `status="failed"` 的 result 帧（body 带 `error`），让前端 `request()` 干净地 reject。Gateway 的 `MessageHandler._process_stream` 把 `e2a.result` 映射为浏览器 `result` event（单帧，无流式分片）。
+
+**session_id 的归属**：`session_id` 由浏览器 `webClient.ts` 生成（`'sess_' + crypto.randomUUID()`）并 sticky 存在 `localStorage`；贯穿 `req.params.session_id` → `E2AEnvelope.session_id` → `SessionStore`。AgentServer 自己不生成 session_id，只接收并落盘。
 
 ---
 
@@ -627,11 +660,11 @@ E2A 是 Gateway 和 AgentServer 之间的**内部信封协议**。定义在 [twi
 | `sequence` | int | 同 request_id 下从 0 严格递增 |
 | `is_final` | bool | 最后一帧 `true` |
 | `status` | str | `in_progress` / `succeeded` / `failed` |
-| `response_kind` | str | `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` |
+| `response_kind` | str | `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` / `e2a.result` |
 | `body` | dict | 载荷内容 |
 | `is_stream` | bool | 固定 `true`（Twinkle 流式专用） |
 
-**三种 response_kind**（外加 todo 快照）：
+**三种 response_kind**（外加 todo 快照与单帧 RPC 结果）：
 
 | response_kind | 含义 | body 结构 |
 |---|---|---|
@@ -639,6 +672,7 @@ E2A 是 Gateway 和 AgentServer 之间的**内部信封协议**。定义在 [twi
 | `e2a.complete` | 正常终止 | `{result: {content: "完整文本"}}` |
 | `e2a.error` | 错误终止 | `{error: "错误描述"}` |
 | `e2a.todo_update` | Todo 快照 | `{tasks, remaining, total}` |
+| `e2a.result` | 单帧 RPC 结果（session/history） | `{type: "session.*"|"history.get", ...}` |
 
 #### connection.ack — 连接握手（AgentServer → Gateway）
 
@@ -874,10 +908,11 @@ twinkle/
     __init__.py
   agentserver/
     __main__.py            # python -m 入口
-    server.py              # ws server + AgentLoop 分发
+    server.py              # ws server + AgentLoop 分发 + ws_handler(loop, store) 路由 session RPC
     agent_loop.py          # ReAct 核心闭环（入口 set plan-todo ContextVar + 首次插入 todo system message）
+    session_rpc.py         # session.create/list/delete + history.get RPC 分发（产单帧 e2a.result）
     llm_client.py          # OpenAI SDK 薄封装
-    session_store.py       # in-memory 对话记录
+    session_store.py       # 磁盘+内存会话存储（<sid>/{metadata,history}.json）
     memory.py              # 长期记忆 stub
     plan_todo_context.py   # ContextVar：当前请求的 todo session 路由
     todo_store.py          # TodoStore：内存 dict[session_id, list[TodoTask]] + 每 session 一把 asyncio.Lock
