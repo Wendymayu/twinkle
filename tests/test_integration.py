@@ -48,10 +48,6 @@ def _reg_with_echo():
     return m
 
 
-def _build_loop(scripts):
-    return AgentLoop(_ScriptedLLM(scripts), SessionStore(), _reg_with_echo(), LongTermMemory())
-
-
 async def _collect_streamed(browser) -> tuple[str, bool]:
     """Collect chat.delta into chat.final. Returns (assembled, saw_final)."""
     assembled = ""
@@ -72,7 +68,7 @@ async def _collect_streamed(browser) -> tuple[str, bool]:
     return assembled, saw_final
 
 
-def test_end_to_end_tool_round_trip(port_factory) -> None:
+def test_end_to_end_tool_round_trip(tmp_path, port_factory) -> None:
     agentserver_port = port_factory()
     gateway_port = port_factory()
     scripts = [
@@ -84,10 +80,11 @@ def test_end_to_end_tool_round_trip(port_factory) -> None:
         [TextDelta("answer:"), TextDelta("TOOL:ping"),
          Finish("stop", {"role": "assistant", "content": "answer:TOOL:ping", "tool_calls": None})],
     ]
-    loop_obj = _build_loop(scripts)
+    store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = AgentLoop(_ScriptedLLM(scripts), store, _reg_with_echo(), LongTermMemory())
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj), "127.0.0.1", agentserver_port)
+        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
         try:
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
