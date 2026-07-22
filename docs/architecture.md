@@ -884,10 +884,11 @@ twinkle/
       decorator.py         # @tool 装饰器
       manager.py           # ToolManager（容器，存 dict[str, Tool]）
       __init__.py           # 框架 re-export + tool_manager() 预注册 builtin 工具
-      builtin/             # 具体工具（web/shell/todo）：框架/实现分层
+      builtin/             # 具体工具（web/shell/file/todo）：框架/实现分层
         web_fetch.py          # URL → markdown/文本
         web_search.py         # DuckDuckGo Lite 搜索
         command_exec.py       # 跨平台 shell 执行（blocklist + workspace 收敛 + 超时 + 后台）
+        file_tools.py         # @tool 文件工具：read_file / write_file / edit_file / list_files / glob（workspace 收敛 + 先读后写）
         todo_tools.py         # @tool todo 工具：create / complete / list
   gateway/
     __main__.py            # python -m 入口，装配四件 + 起 web_channel
@@ -916,6 +917,7 @@ tests/
   test_memory_stub.py       # 记忆 stub 单测
   test_web_fetch.py         # web_fetch 单测
   test_web_search.py        # web_search 单测
+  test_file_tools.py        # 文件工具单测
 scripts/
   start_services.py         # 一键启动两进程
 ```
