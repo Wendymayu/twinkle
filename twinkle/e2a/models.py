@@ -41,6 +41,6 @@ class E2AResponse(BaseModel):
     sequence: int = 0
     is_final: bool = False
     status: str = "in_progress"  # in_progress | succeeded | failed
-    response_kind: str = "e2a.chunk"  # e2a.chunk | e2a.complete | e2a.error | e2a.todo_update
+    response_kind: str = "e2a.chunk"  # e2a.chunk | e2a.complete | e2a.error | e2a.todo_update | e2a.result
     body: dict[str, Any] = Field(default_factory=dict)
     is_stream: bool = True
