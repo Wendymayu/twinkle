@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useSessions } from '../composables/useSessions'
 
 const { todo, completedCount, box } = useSessions()

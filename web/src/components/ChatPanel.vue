@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, nextTick } from 'vue'
 import { useSessions } from '../composables/useSessions'
 
 const { messages, connected, busy, loading, sendQuery } = useSessions()

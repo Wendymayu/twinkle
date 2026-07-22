@@ -2,7 +2,7 @@
 
 Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
 AgentLoop (ReAct: think -> tool -> result -> re-decide). Stream-only; no
-unary mode. ws_handler(loop) lets tests inject a fake loop;
+unary mode. ws_handler(loop, store) lets tests inject a fake loop;
 agent_loop() wires the real config-driven loop for production.
 """
 from __future__ import annotations

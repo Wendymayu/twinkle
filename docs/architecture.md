@@ -355,7 +355,7 @@ LLMClient  SessionStore  ToolManager
 
 `_safe_send` 静默吞掉 `ConnectionClosed` — 客户端断连时不报错，这是正常生命周期事件。
 
-`ws_handler(loop)` 让测试注入假 loop，`agent_loop()` 用真实配置组建。
+`ws_handler(loop, store)` 让测试注入假 loop，`agent_loop()` 用真实配置组建。
 
 ### 4.2 AgentLoop — ReAct 核心闭环
 
@@ -664,7 +664,7 @@ E2A 是 Gateway 和 AgentServer 之间的**内部信封协议**。定义在 [twi
 | `body` | dict | 载荷内容 |
 | `is_stream` | bool | 固定 `true`（Twinkle 流式专用） |
 
-**三种 response_kind**（外加 todo 快照与单帧 RPC 结果）：
+**五种 response_kind**（chunk/complete/error/todo 快照/单帧 RPC 结果）：
 
 | response_kind | 含义 | body 结构 |
 |---|---|---|

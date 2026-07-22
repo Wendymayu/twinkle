@@ -101,10 +101,9 @@ function init() {
       (t) => { todo.value = t },
     )
     const saved = client.getSessionId()
-    loadSessions().then(() => {
-      if (saved) selectSession(saved).catch(() => createSession())
-      else createSession()
-    })
+    loadSessions()
+      .then(() => (saved ? selectSession(saved).catch(() => createSession()) : createSession()))
+      .catch(() => { /* session bootstrap failed — user can retry via the + 新对话 button */ })
   })
 }
 
