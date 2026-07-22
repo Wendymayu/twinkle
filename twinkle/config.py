@@ -50,6 +50,15 @@ WORKSPACE_DIR = os.getenv("TWINKLE_WORKSPACE_DIR") or str(
     Path(__file__).resolve().parent.parent
 )
 
+# --- Sessions persistence (disk-backed session store) ---
+# Per-session dir layout: <SESSIONS_DIR>/<session_id>/{metadata.json,history.json}.
+# Defaults to <repo_root>/.twinkle_data/sessions (gitignored). If you want strict
+# isolation from the command_exec sandbox (workdir confined under WORKSPACE_DIR),
+# point this outside WORKSPACE_DIR.
+SESSIONS_DIR = os.getenv("TWINKLE_SESSIONS_DIR") or str(
+    Path(WORKSPACE_DIR) / ".twinkle_data" / "sessions"
+)
+
 # --- LLM (OpenAI-compatible) ---
 # Point at any OpenAI-compatible endpoint by overriding these env vars
 # (or by setting them in .env at the repo root).

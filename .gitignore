@@ -49,3 +49,6 @@ web/.vite/
 
 # Logs
 *.log
+
+# Session persistence (disk-backed sessions, per-user local data)
+.twinkle_data/
