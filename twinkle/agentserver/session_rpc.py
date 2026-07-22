@@ -20,7 +20,7 @@ from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 log = logging.getLogger("twinkle.agentserver.session_rpc")
 
-_SESSION_METHODS = {"session.create", "session.list", "session.delete", "history.get"}
+_SESSION_METHODS = {"session.create", "session.list", "session.delete", "history.get", "session.files", "file.read"}
 
 
 def handles(method: str) -> bool:
@@ -45,6 +45,13 @@ async def dispatch_session_rpc(
         elif method == "history.get":
             records = store.get_history(sid)
             body = {"type": "history.get", "messages": records}
+        elif method == "session.files":
+            files = store.list_files(sid)
+            body = {"type": "session.files", "files": files}
+        elif method == "file.read":
+            name = envelope.params.get("name")
+            content = store.read_file(sid, name)
+            body = {"type": "file.read", "name": name, "content": content}
         else:
             return  # not a session RPC — caller routes to AgentLoop
         yield E2AResponse(

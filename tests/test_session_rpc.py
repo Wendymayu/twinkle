@@ -89,3 +89,42 @@ def test_history_get_unknown_session_returns_empty(session_store):
     frames = _run(_frames(_env("history.get", session_id="nope"), session_store))
     f = frames[0]
     assert f.body["messages"] == []
+
+
+def test_session_files_returns_result_frame(session_store):
+    _run(session_store.create_session("s1"))
+    _run(session_store.append("s1", {"role": "user", "content": "hi"}, request_id="r1"))
+    frames = _run(_frames(_env("session.files", session_id="s1"), session_store))
+    f = frames[0]
+    assert f.response_kind == "e2a.result"
+    assert f.is_final is True
+    assert f.body["type"] == "session.files"
+    names = {x["name"] for x in f.body["files"]}
+    assert "metadata.json" in names
+    assert "history.json" in names
+
+
+def test_file_read_returns_content(session_store):
+    _run(session_store.create_session("s1"))
+    frames = _run(_frames(
+        _env("file.read", session_id="s1", params={"name": "metadata.json"}),
+        session_store,
+    ))
+    f = frames[0]
+    assert f.body["type"] == "file.read"
+    assert f.body["name"] == "metadata.json"
+    import json as _json
+    meta = _json.loads(f.body["content"])
+    assert meta["session_id"] == "s1"
+
+
+def test_file_read_unsafe_name_returns_failed_frame(session_store):
+    _run(session_store.create_session("s1"))
+    frames = _run(_frames(
+        _env("file.read", session_id="s1", params={"name": "../etc/passwd"}),
+        session_store,
+    ))
+    f = frames[0]
+    assert f.status == "failed"
+    assert f.body["type"] == "file.read"
+    assert "error" in f.body

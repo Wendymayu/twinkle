@@ -52,3 +52,6 @@ web/.vite/
 
 # Session persistence (disk-backed sessions, per-user local data)
 .twinkle_data/
+
+# TS incremental build artifact
+web/tsconfig.tsbuildinfo

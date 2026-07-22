@@ -22,6 +22,19 @@ const busy = ref(false)
 const loading = ref(false)
 const todo = ref<TodoState | null>(null)
 
+type NavKey = 'chat' | 'sessions'
+const activeNav = ref<NavKey>('chat')
+const selectedSessionId = ref<string>('')
+const sessionFiles = ref<{ name: string; is_dir: boolean; size: number }[]>([])
+const previewFile = ref<string | null>(null)
+const previewContent = ref<string>('')
+const previewLoading = ref(false)
+const historyAsBubbles = ref(true)
+
+function setNav(key: NavKey) {
+  activeNav.value = key
+}
+
 const completedCount = computed(() =>
   todo.value ? todo.value.tasks.filter((t) => t.status === 'completed').length : 0,
 )
@@ -73,6 +86,45 @@ async function deleteSession(id: string) {
   await loadSessions()
 }
 
+async function loadSessionFiles(sid: string) {
+  if (!sid) {
+    sessionFiles.value = []
+    previewFile.value = null
+    previewContent.value = ''
+    return
+  }
+  selectedSessionId.value = sid
+  const payload = await client.request('session.files', { session_id: sid })
+  sessionFiles.value = payload?.files ?? []
+  // auto-select the first file
+  const first = sessionFiles.value.find((f) => !f.is_dir)
+  if (first) {
+    await readSessionFile(sid, first.name)
+  } else {
+    previewFile.value = null
+    previewContent.value = ''
+  }
+}
+
+async function readSessionFile(sid: string, name: string) {
+  if (!sid || !name) return
+  previewLoading.value = true
+  previewFile.value = name
+  try {
+    const payload = await client.request('file.read', { session_id: sid, name })
+    previewContent.value = payload?.content ?? ''
+  } catch {
+    previewContent.value = ''
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function restoreSession(sid: string) {
+  await selectSession(sid) // loads chat history + sets currentSessionId
+  setNav('chat')
+}
+
 function sendQuery(q: string) {
   if (!q.trim() || !connected.value) return
   messages.value.push({ role: 'user', content: q })
@@ -110,7 +162,11 @@ function init() {
 export function useSessions() {
   return {
     sessions, currentSessionId, messages, connected, busy, loading, todo,
-    completedCount, box,
+    completedCount, box, fromHistory,
+    activeNav, setNav,
+    selectedSessionId, sessionFiles, previewFile, previewContent,
+    previewLoading, historyAsBubbles,
     init, loadSessions, createSession, selectSession, deleteSession, sendQuery,
+    loadSessionFiles, readSessionFile, restoreSession,
   }
 }

@@ -2,7 +2,7 @@
 import { ref, nextTick } from 'vue'
 import { useSessions } from '../composables/useSessions'
 
-const { messages, connected, busy, loading, sendQuery } = useSessions()
+const { messages, connected, busy, loading, sendQuery, createSession } = useSessions()
 const input = ref('')
 const logEl = ref<HTMLUListElement | null>(null)
 
@@ -33,6 +33,7 @@ function send() {
       <li v-if="loading" class="row assistant"><div class="bubble processing">加载历史…</div></li>
     </ul>
     <footer>
+      <button class="new-btn" @click="createSession" :disabled="!connected" title="新对话">➕</button>
       <input v-model="input" @keyup.enter="send" :disabled="!connected" placeholder="说点什么…" />
       <button @click="send" :disabled="!connected">发送</button>
     </footer>
@@ -62,4 +63,10 @@ input:focus { border-color: #4f46d5; }
 button { padding: .6rem 1.2rem; border: 0; border-radius: 12px; background: #4f46d5; color: #fff; font-size: .95rem; cursor: pointer; }
 button:hover:not(:disabled) { background: #4338ca; }
 button:disabled { background: #cbd5e1; cursor: not-allowed; }
+.new-btn {
+  padding: .6rem 1rem; border: 0; border-radius: 12px; background: #fff;
+  border: 1px solid #cbd5e1; color: #4f46e5; font-size: 1rem; cursor: pointer;
+}
+.new-btn:hover:not(:disabled) { background: #f1f5f9; }
+.new-btn:disabled { opacity: .5; cursor: not-allowed; }
 </style>

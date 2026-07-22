@@ -154,3 +154,57 @@ def test_get_history_skips_corrupt_lines(session_store, sessions_dir):
     )
     rows = session_store.get_history("s1")
     assert [r["content"] for r in rows] == ["good", "ok"]
+
+
+def test_list_files_lists_session_files(session_store):
+    _run(session_store.create_session("s1"))
+    _run(session_store.append("s1", {"role": "user", "content": "hi"}, request_id="r1"))
+    files = session_store.list_files("s1")
+    names = {f["name"] for f in files}
+    assert "metadata.json" in names
+    assert "history.json" in names
+    for f in files:
+        assert f["is_dir"] is False
+        assert f["size"] >= 0
+
+
+def test_list_files_unknown_session_returns_empty(session_store):
+    assert session_store.list_files("never") == []
+
+
+def test_read_file_returns_metadata_json(session_store):
+    _run(session_store.create_session("s1"))
+    import json as _json
+    content = session_store.read_file("s1", "metadata.json")
+    meta = _json.loads(content)
+    assert meta["session_id"] == "s1"
+    assert meta["message_count"] == 0
+
+
+def test_read_file_returns_history_jsonl(session_store):
+    _run(session_store.create_session("s1"))
+    _run(session_store.append("s1", {"role": "user", "content": "hi"}, request_id="r1"))
+    content = session_store.read_file("s1", "history.json")
+    import json as _json
+    lines = [_json.loads(l) for l in content.splitlines() if l.strip()]
+    assert lines[0]["role"] == "user"
+    assert lines[0]["content"] == "hi"
+
+
+def test_read_file_rejects_path_traversal(session_store):
+    _run(session_store.create_session("s1"))
+    for bad in ["../etc/passwd", "a/b", "..", ".", "a\\b", ""]:
+        try:
+            session_store.read_file("s1", bad)
+            assert False, f"expected ValueError for {bad!r}"
+        except ValueError:
+            pass
+
+
+def test_read_file_missing_raises_filenotfound(session_store):
+    _run(session_store.create_session("s1"))
+    try:
+        session_store.read_file("s1", "nope.json")
+        assert False, "expected FileNotFoundError"
+    except FileNotFoundError:
+        pass

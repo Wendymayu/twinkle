@@ -145,6 +145,37 @@ class SessionStore:
                 log.warning("skipping corrupt history line in %s", session_id)
         return out
 
+    def list_files(self, session_id: str) -> list[dict]:
+        """List top-level files in a session dir. Flat (no recursion) — Twinkle
+        session dirs are flat. Unknown session -> []."""
+        sdir = self._session_dir(session_id)
+        if not sdir.is_dir():
+            return []
+        out: list[dict] = []
+        for p in sdir.iterdir():
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append({"name": p.name, "is_dir": p.is_dir(), "size": st.st_size})
+        out.sort(key=lambda f: f["name"])
+        return out
+
+    def read_file(self, session_id: str, name: str) -> str:
+        """Read a file's text content from a session dir. ``name`` MUST be a
+        bare filename — path traversal is rejected (name comes from the browser
+        and content is echoed back to the preview pane)."""
+        if not name or "/" in name or "\\" in name or name in (".", ".."):
+            raise ValueError(f"unsafe file name: {name!r}")
+        base = self._session_dir(session_id).resolve()
+        target = (base / name).resolve()
+        if target != base and base not in target.parents:
+            raise ValueError(f"path escapes session dir: {name!r}")
+        p = self._session_dir(session_id) / name
+        if not p.is_file():
+            raise FileNotFoundError(f"no such file: {name}")
+        return p.read_text(encoding="utf-8")
+
     # --- message store (AgentLoop-facing) ---
 
     def get_messages(self, session_id: str) -> list[dict]:

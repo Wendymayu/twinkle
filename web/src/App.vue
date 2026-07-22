@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useSessions } from './composables/useSessions'
-import SessionSidebar from './components/SessionSidebar.vue'
-import ChatPanel from './components/ChatPanel.vue'
-import TodoPanel from './components/TodoPanel.vue'
+import LeftNav from './components/LeftNav.vue'
+import ChatView from './components/ChatView.vue'
+import SessionsView from './components/SessionsView.vue'
 
-const { init } = useSessions()
+const { init, activeNav } = useSessions()
 
 onMounted(() => { init() })
 </script>
 
 <template>
   <div class="app">
-    <SessionSidebar />
-    <ChatPanel />
-    <TodoPanel />
+    <LeftNav />
+    <main class="content">
+      <ChatView v-if="activeNav === 'chat'" />
+      <SessionsView v-else />
+    </main>
   </div>
 </template>
 
@@ -22,6 +24,6 @@ onMounted(() => { init() })
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; }
 body { background: #f8fafc; }
-.app { display: flex; height: 100%; max-width: 1280px; margin: 0 auto; }
-@media (max-width: 640px) { .app { flex-direction: column; max-width: 100%; } }
+.app { display: flex; height: 100%; }
+.content { flex: 1; min-width: 0; display: flex; }
 </style>

@@ -217,3 +217,66 @@ def test_session_rpc_round_trip(tmp_path, port_factory) -> None:
             await server.wait_closed()
 
     asyncio.run(run())
+
+
+def test_session_files_ws_round_trip(tmp_path, port_factory) -> None:
+    """Exercises the full browser -> gateway -> AgentServer ws path for
+    session.files + file.read RPCs, asserting result events carry the
+    file list + content. RPCs don't run the ReAct loop, so a trivial
+    scripted LLM (no scripts) is fine."""
+    agentserver_port = port_factory()
+    gateway_port = port_factory()
+    store = SessionStore(str(tmp_path / "sessions"))
+    asyncio.run(store.create_session("s-files"))
+    asyncio.run(store.append("s-files", {"role": "user", "content": "hello"},
+                              request_id="r0"))
+    loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo(), LongTermMemory())
+
+    async def run() -> None:
+        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+        try:
+            agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
+            await agent_client.connect()
+            message_handler = MessageHandler(agent_client)
+            channel_manager = ChannelManager(message_handler)
+            web_channel = WebChannel("127.0.0.1", gateway_port)
+            channel_manager.register_channel(web_channel)
+            await channel_manager.start()
+            web_server = await serve(web_channel.handler, "127.0.0.1", gateway_port)
+            try:
+                async with connect(f"ws://127.0.0.1:{gateway_port}") as browser:
+                    await browser.recv()  # connection.ack
+
+                    # session.files
+                    await browser.send(json.dumps({
+                        "type": "req", "id": "rf1", "method": "session.files",
+                        "params": {"session_id": "s-files"},
+                    }))
+                    await asyncio.wait_for(browser.recv(), timeout=5)  # ack
+                    payload = await _collect_result(browser)
+                    assert payload["type"] == "session.files"
+                    names = {f["name"] for f in payload["files"]}
+                    assert "metadata.json" in names
+                    assert "history.json" in names
+
+                    # file.read
+                    await browser.send(json.dumps({
+                        "type": "req", "id": "rf2", "method": "file.read",
+                        "params": {"session_id": "s-files", "name": "metadata.json"},
+                    }))
+                    await asyncio.wait_for(browser.recv(), timeout=5)  # ack
+                    payload = await _collect_result(browser)
+                    assert payload["type"] == "file.read"
+                    assert payload["name"] == "metadata.json"
+                    meta = json.loads(payload["content"])
+                    assert meta["session_id"] == "s-files"
+            finally:
+                web_server.close()
+                await web_server.wait_closed()
+                await channel_manager.stop()
+                await agent_client.close()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
