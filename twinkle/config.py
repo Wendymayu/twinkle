@@ -42,22 +42,34 @@ AGENTSERVER_PORT = int(os.getenv("TWINKLE_AGENTSERVER_PORT", "18000"))
 GATEWAY_HOST = os.getenv("TWINKLE_GATEWAY_HOST", "127.0.0.1")
 GATEWAY_PORT = int(os.getenv("TWINKLE_GATEWAY_PORT", "19000"))
 
-# --- Workspace (sandbox root for the command_exec tool) ---
-# Defaults to the repo root (this file's parent.parent). Override with
-# TWINKLE_WORKSPACE_DIR to point elsewhere. command_exec confines `workdir`
-# under this root so the agent cannot escape the workspace.
-WORKSPACE_DIR = os.getenv("TWINKLE_WORKSPACE_DIR") or str(
-    Path(__file__).resolve().parent.parent
+# --- Workspace (sandbox root for command_exec / file_tools) ---
+# Defaults to ~/.twinkle (the user home) so generated files land under the
+# user's directory, not the repo / code dir (mirrors jiuwenswarm's
+# ~/.jiuwenswarm). Override with TWINKLE_WORKSPACE_DIR (~/... expanded) to
+# point elsewhere. command_exec / file_tools confine file ops under this root
+# so the agent cannot escape the workspace.
+WORKSPACE_DIR = os.path.expanduser(
+    os.getenv("TWINKLE_WORKSPACE_DIR") or str(Path.home() / ".twinkle")
 )
 
 # --- Sessions persistence (disk-backed session store) ---
 # Per-session dir layout: <SESSIONS_DIR>/<session_id>/{metadata.json,history.json}.
-# Defaults to <repo_root>/.twinkle_data/sessions (gitignored). If you want strict
-# isolation from the command_exec sandbox (workdir confined under WORKSPACE_DIR),
-# point this outside WORKSPACE_DIR.
+# Defaults to <WORKSPACE_DIR>/.twinkle_data/sessions (which lives under ~/.twinkle
+# unless TWINKLE_WORKSPACE_DIR is overridden). Gitignored. If you want strict
+# isolation from the command_exec / file_tools sandbox, point this outside WORKSPACE_DIR.
 SESSIONS_DIR = os.getenv("TWINKLE_SESSIONS_DIR") or str(
     Path(WORKSPACE_DIR) / ".twinkle_data" / "sessions"
 )
+
+
+def ensure_workspace_dir() -> str:
+    """Create WORKSPACE_DIR if missing (idempotent). Call at server startup
+    so read/list/glob work on a fresh ~/.twinkle without a "not found" error.
+    Not called at import time to keep tests (which monkeypatch WORKSPACE_DIR)
+    side-effect-free on the host.
+    """
+    os.makedirs(WORKSPACE_DIR, exist_ok=True)
+    return WORKSPACE_DIR
 
 # --- LLM (OpenAI-compatible) ---
 # Point at any OpenAI-compatible endpoint by overriding these env vars

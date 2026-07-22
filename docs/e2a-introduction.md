@@ -314,7 +314,7 @@ AgentServer 逐帧 yield `E2AResponse`：
 
 ```json
 {"protocol_version":"1.0","request_id":"r1","sequence":3,"is_final":true,
- "status":"failed","response_kind":"e2a.error","body":{"error":"agent loop exceeded max_steps=8"}}
+ "status":"failed","response_kind":"e2a.error","body":{"error":"agent loop exceeded max_steps=1000"}}
 ```
 
 > **为何砍掉 unary**：Twinkle 是单用户 + 单 web 通道，所有交互都是"用户等待逐字输出"的流式场景。unary 模式在 jiuwenclaw 里用于非聊天 RPC（如 `history.get`），但 Twinkle roadmap 不做这些 RPC。保留 unary 只增加了 `if/else` 分支而无实际收益。

@@ -98,3 +98,25 @@ def test_tool_manager_schemas_have_required_url_or_query() -> None:
     assert by_name["web_search"]["function"]["parameters"]["properties"]["max_results"] == {
         "type": "integer", "default": 5
     }
+
+
+def test_tool_manager_registers_file_tools() -> None:
+    tm = tool_manager()
+    names = {t.card.name for t in tm.list()}
+    assert {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "glob",
+    } <= names
+
+
+def test_file_tool_schemas_have_required_params() -> None:
+    tm = tool_manager()
+    by_name = {s["function"]["name"]: s for s in tm.schemas()}
+    assert by_name["read_file"]["function"]["parameters"]["required"] == ["file_path"]
+    assert by_name["write_file"]["function"]["parameters"]["required"] == ["file_path", "content"]
+    assert by_name["edit_file"]["function"]["parameters"]["required"] == ["file_path", "old_string", "new_string"]
+    assert by_name["list_files"]["function"]["parameters"]["required"] == []
+    assert by_name["glob"]["function"]["parameters"]["required"] == ["pattern"]

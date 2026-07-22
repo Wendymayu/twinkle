@@ -364,7 +364,7 @@ LLMClient  SessionStore  ToolManager
 ```
 用户 query → store.append(user) → memory.recall(stub空) → msgs = store.get_messages()
     │
-    ▼  ReAct 循环（max_steps=8 守护）
+    ▼  ReAct 循环（max_steps 守护）
     │
     ├── llm.stream(msgs, tools)
     │   ├── TextDelta → yield E2AResponse(e2a.chunk)
@@ -377,7 +377,7 @@ LLMClient  SessionStore  ToolManager
 关键设计：
 - `run_stream` 是 **async generator**，yield E2AResponse — loop 对 ws 零依赖，单测无需起 ws
 - 工具结果回灌是命门：`{role:"tool", tool_call_id, content:result}` append 进 store，下一轮 `get_messages` 自然带上
-- `max_steps=8` 防止工具循环不收敛
+- `max_steps` 防止工具循环不收敛
 
 ### 4.3 SessionStore — 会话记忆（磁盘落盘 + 内存缓存）
 
@@ -890,6 +890,7 @@ cd web && npm install && npm run dev   # Vite(:5173)
 | `TWINKLE_LLM_BASE_URL` | `https://api.openai.com/v1` | LLM API 端点 |
 | `TWINKLE_LLM_API_KEY` | 空 | LLM API key（**放在 .env 文件，不暴露在环境变量中**） |
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | 模型名 |
+| `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | `command_exec`/`file_tools` 的工作区根（agent 文件操作收敛其下）。默认用户家,生成物不污染仓库;可覆盖 |
 
 配置从 [config.py](../twinkle/config.py) 读取，优先级：环境变量 > `.env` 文件 > 默认值。
 
@@ -923,10 +924,11 @@ twinkle/
       decorator.py         # @tool 装饰器
       manager.py           # ToolManager（容器，存 dict[str, Tool]）
       __init__.py           # 框架 re-export + tool_manager() 预注册 builtin 工具
-      builtin/             # 具体工具（web/shell/todo）：框架/实现分层
+      builtin/             # 具体工具（web/shell/file/todo）：框架/实现分层
         web_fetch.py          # URL → markdown/文本
         web_search.py         # DuckDuckGo Lite 搜索
         command_exec.py       # 跨平台 shell 执行（blocklist + workspace 收敛 + 超时 + 后台）
+        file_tools.py         # @tool 文件工具：read_file / write_file / edit_file / list_files / glob（workspace 收敛 + 先读后写）
         todo_tools.py         # @tool todo 工具：create / complete / list
   gateway/
     __main__.py            # python -m 入口，装配四件 + 起 web_channel
@@ -955,6 +957,7 @@ tests/
   test_memory_stub.py       # 记忆 stub 单测
   test_web_fetch.py         # web_fetch 单测
   test_web_search.py        # web_search 单测
+  test_file_tools.py        # 文件工具单测
 scripts/
   start_services.py         # 一键启动两进程
 ```
