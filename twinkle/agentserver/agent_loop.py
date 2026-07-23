@@ -20,7 +20,13 @@ from twinkle.agentserver.plan_todo_context import (
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
-from twinkle.config import AGENT_MAX_STEPS as MAX_STEPS
+from twinkle.agentserver.context_compression import compress_messages
+from twinkle.config import (
+    AGENT_MAX_STEPS as MAX_STEPS,
+    CONTEXT_KEEP_RECENT_PAIRS,
+    CONTEXT_SUMMARY_PROMPT,
+    CONTEXT_TOKEN_THRESHOLD,
+)
 
 TODO_SYSTEM_PROMPT = (
     "You have todo tools to plan and track multi-step work: "
@@ -72,6 +78,13 @@ class AgentLoop:
         full_text = ""
         for _step in range(MAX_STEPS):
             msgs = self._store.get_messages(session_id)
+            msgs = await compress_messages(
+                msgs,
+                self._llm,
+                token_threshold=CONTEXT_TOKEN_THRESHOLD,
+                keep_recent_pairs=CONTEXT_KEEP_RECENT_PAIRS,
+                summary_system_prompt=CONTEXT_SUMMARY_PROMPT,
+            )
             async for ev in self._llm.stream(messages=msgs, tools=self._tools.schemas()):
                 if isinstance(ev, TextDelta):
                     full_text += ev.content

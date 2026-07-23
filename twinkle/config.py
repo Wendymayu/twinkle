@@ -84,3 +84,15 @@ LLM_MODEL = os.getenv("TWINKLE_LLM_MODEL", "gpt-4o-mini")
 # This is a runaway backstop, not a target: a non-converging loop burns up to
 # this many LLM calls before being caught.
 AGENT_MAX_STEPS = int(os.getenv("TWINKLE_AGENT_MAX_STEPS", "1000"))
+
+# --- context compression (Phase 3) ---
+# When estimated tokens of the session messages exceed this threshold, the
+# agent loop compresses prior history (sliding window + LLM summary) before
+# feeding the LLM. Estimate is char-based (//3) — imprecise for glm but fine
+# for a learning project. See context_compression.py.
+CONTEXT_TOKEN_THRESHOLD = int(os.getenv("TWINKLE_CONTEXT_TOKEN_THRESHOLD", "60000"))
+CONTEXT_KEEP_RECENT_PAIRS = int(os.getenv("TWINKLE_CONTEXT_KEEP_RECENT_PAIRS", "6"))
+CONTEXT_SUMMARY_PROMPT = os.getenv(
+    "TWINKLE_CONTEXT_SUMMARY_PROMPT",
+    "你是对话上下文压缩器。把给定历史对话压成一段摘要，保留关键事实、用户偏好、已做决策、工具调用结果，丢弃寒暄与冗余。用中文。",
+)
