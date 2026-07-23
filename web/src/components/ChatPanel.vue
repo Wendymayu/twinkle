@@ -20,10 +20,6 @@ function send() {
 
 <template>
   <div class="chat">
-    <header>
-      <span class="title">✨ Twinkle</span>
-      <span class="status" :class="{ on: connected }">{{ connected ? '已连接' : '连接中…' }}</span>
-    </header>
     <ul ref="logEl" class="log">
       <li v-for="(m, i) in messages" :key="i" :class="['row', m.role]">
         <div v-if="m.role === 'tool'" class="tool-line">{{ m.content }}</div>
@@ -33,8 +29,8 @@ function send() {
       <li v-if="loading" class="row assistant"><div class="bubble processing">加载历史…</div></li>
     </ul>
     <footer>
-      <button class="new-btn" @click="createSession" :disabled="!connected" title="新对话">➕</button>
       <input v-model="input" @keyup.enter="send" :disabled="!connected" placeholder="说点什么…" />
+      <button class="new-btn" @click="createSession" :disabled="!connected" title="新对话">➕ 新对话</button>
       <button @click="send" :disabled="!connected">发送</button>
     </footer>
   </div>
@@ -43,10 +39,6 @@ function send() {
 <style scoped>
 .chat { display: flex; flex-direction: column; flex: 1; min-width: 0; background: #f8fafc;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #1e293b; }
-header { display: flex; align-items: baseline; gap: .6rem; padding: .9rem 1rem; border-bottom: 1px solid #e2e8f0; background: #fff; }
-.title { font-weight: 700; font-size: 1.05rem; }
-.status { margin-left: auto; font-size: .8rem; color: #ef4444; }
-.status.on { color: #10b981; }
 .log { list-style: none; margin: 0; padding: 1rem; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: .55rem; }
 .row { display: flex; }
 .row.user { justify-content: flex-end; }
