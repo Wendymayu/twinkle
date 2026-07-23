@@ -36,7 +36,7 @@
 
 - **Phase 0–2 已落地**：两进程骨架、agent loop 闭环、四层工具系统（含 todo/command_exec/file_ops）。
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M11 ✅。
-- **Phase 3（长会话上下文压缩）待启动**：`session_store.py` 仍为纯内存 dict，注释已标注 "Phase 3 will add truncate/compress here"。
+- **Phase 3（长会话上下文压缩）**：初版已在 nightly worktree `nightly/phase-3-6-4` 实现（滑窗+LLM 摘要，独立模块 `context_compression.py`，不写回 SessionStore），待 review/merge 进主线；后续优化方向见 §Phase 3。
 - **Phase 4 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
 
 ---
@@ -85,10 +85,19 @@
 **目标**：长对话不爆 token、不丢关键上下文。
 
 内容：
-- 实现 `docs/en/ContextCompression.md` 对应能力：上下文压缩与卸载（在 `session_store.py` 加 truncate/compress）。
+- 实现 `docs/en/ContextCompression.md` 对应能力：上下文压缩与卸载。
 - 这是"短期记忆"里唯一需要后置的非平凡部分（对话记录本身已在 Phase 1）。
 
+**初版**（nightly worktree `nightly/phase-3-6-4`，待 review/merge）：独立模块 `context_compression.py`（115 行），滑窗 + LLM 摘要，**不写回 SessionStore**（history 无损，只塑形 LLM 输入）；token 估算超阈值触发，保 head + 最近 tail（tool 配对不破），summary 失败降级为 head+tail。单模、仅主动、middle 丢弃不可召回。
+
 **验收**：单会话 100 轮对话不爆 token、关键事实不丢。
+
+**后续优化方向（对齐 jiuwenswarm）**——参考 `docs/en/ContextCompression.md` + `jiuwenclaw/agentserver/deep_agent/rails/context_overflow_recovery_rail.py`（`enterprise_dev` 分支，`git show enterprise_dev:<path>` 读取）：
+- **rail 钩子织入**：压缩从 `run_stream` 内联提到框架切面（`before_model_call` / `on_model_exception` / `after_model_call`），与循环解耦，并为 Phase 5 记忆注入复用同一钩子点铺路。
+- **413 反应救火重试**：LLM 抛 413 / `context_length_exceeded` 时解析 token 数（Anthropic / OpenAI / 华为三种格式），强压 + `request_retry()` 重试 + 连续失败熔断。初版只赌主动压缩能防住，赌错则请求直接挂。
+- **触发条件多维度**：现仅 `estimate_tokens` 单阈值；加 message 计数维度、`large_message_threshold`（优先压大消息）、`offload_message_type`（可只压 tool 输出保对话）等旋钮。
+- **窗口预算**：现固定阈值 60000；改为按模型窗口动态算（jiuwenswarm `threshold_override = 窗口 × 0.85`，预留 15% 给输出），随模型切换自适应。
+- **异常降级增强**：现 summary 失败→丢 middle 保 head+tail；可加 offload 归档 + `[[OFFLOAD:...]]` 索引可检索召回（非丢弃），长会话早期被压事实能拉回。
 
 ---
 
