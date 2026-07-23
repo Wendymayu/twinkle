@@ -35,7 +35,7 @@
 ## 现状速览
 
 - **Phase 0–2 已落地**：两进程骨架、agent loop 闭环、四层工具系统（含 todo/command_exec/file_ops）。
-- **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M11 ✅。
+- **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 3（长会话上下文压缩）**：初版已在 nightly worktree `nightly/phase-3-6-4` 实现（滑窗+LLM 摘要，独立模块 `context_compression.py`，不写回 SessionStore），待 review/merge 进主线；后续优化方向见 §Phase 3。
 - **Phase 4 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
 
@@ -156,7 +156,33 @@
 
 ---
 
-### Phase 8 — Skill 自进化
+### Phase 8 — 子 Agent（subagent）
+**目标**：从"单 agent 串行 ReAct"升级到"主 agent 可委派子 agent 并行/隔离执行子任务"，结果回灌由主 agent 整合。
+
+内容：
+- **工具化委派**：把 subagent 暴露成 builtin tool（`tools/builtin/subagent_tools.py` + `@tool`），主 `AgentLoop` 像调普通工具一样调用，工具阻塞到子 agent 收敛，结果作为 `{role:"tool"}` 消息回灌、主 agent 再总结——**复用 Phase 2 ToolManager 的 `schemas()`/`execute()` 面，agent_loop 零结构改动**。
+- **两种原语**（对照 jiuwenswarm）：
+  - `spawn_subagent`：**隔离上下文**（子 agent 用独立 SessionStore session `<parent_sid>__sub_<id>`，不继承父历史）。默认选择，天然适合并发处理不同子任务。
+  - `fork_agent`：**共享上下文**（继承父 agent 消息前缀，KVCache 复用 / 一致文档理解）。仅用于需共享理解的并行任务；fork 不可再 fork（无递归），spawn→fork 嵌套允许。
+- **子 AgentLoop 复用**：子 agent 即另开一个 `AgentLoop` 实例（复用 `LLMClient`/`SessionStore`/`ToolManager`），跑同一 `run_stream` 闭环，收敛后取 `e2a.complete` body 作 tool result。子 `ToolManager` 裁剪掉 subagent 自身 + 主 agent 级工具（防越权）。
+- **ContextVar 隔离**：新增 `subagent_context.py`（`SUBAGENT_PARENT_*` ContextVar，**与 `plan_todo_context.py` 同款**），`run_stream` 入口设父 session/request_id，子 agent 据此解析父上下文，并发请求 / 子 agent 间不串扰。
+- **超时与防失控**：硬超时（`TWINKLE_SUBAGENT_TIMEOUT`，默认 300s）+ 软超时（无流式响应 N 秒）兜底；结果包 `[SYSTEM]` 停止提示防主 agent 重复委派；子 agent `max_steps` 用更紧上限。
+
+**参考实现**：`jiuwenclaw/agentserver/tools/subagent_executor/`（`executor.py` 的 `ForkAgentExecutor`/软硬超时、`session_proxy.py` 的 `SubagentSessionProxy` 事件转发、`context_vars.py` 的 ContextVar 隔离）+ `subagent_tools.py`（`fork_agent`/`spawn_subagent` 工具入口）+ `subagent_models.py`（`SubagentTaskSpec`/`ForkAgentTaskSpec`/Result）。`enterprise_dev` 分支，`git show enterprise_dev:<path>` 读取。
+
+**范围控制（不做/推迟）**：
+- **流式转发**初版可不做——subagent 当黑盒，只回最终结果字符串；事件转发到父流（带来源标记 + 嵌套 session_id trace 层级）列为后续，需扩 `E2AResponse` + 前端渲染。
+- **skill 声明角色**（`SubagentConfig` frontmatter 的 roles/system_prompt/allowed_tools/parallel_max）依赖 Phase 7 skill 系统，本 Phase 先支持 `objective`+`prompt`+可选 `system_prompt` 覆盖的裸形态，skill 绑定角色后置。
+- **model_tier（lite/pro）降档**：Twinkle 无 tier 配置，先复用 `TWINKLE_LLM_MODEL` + 可选 `model_name` 覆盖，tier 体系不做。
+- **fork 与嵌套**：先做 spawn，fork（消息前缀继承）列为紧随其后的第二步；多级嵌套与 team 编排（`team/member_subagents.py`）不进。
+- **递归保护**：子 agent 工具集排除 subagent 工具自身（单层委派），避免失控。
+- **无硬前置依赖**：AgentLoop/ToolManager 已落地即可做；富形态（skill 声明角色）依赖 Phase 7。
+
+**验收**：主 agent 调 `spawn_subagent` 委派子任务 → 子 agent 独立跑完 ReAct 收敛 → 结果回灌 → 主 agent 总结给用户；并发两个 spawn 处理不同子任务互不串扰；超时/异常有兜底不挂死主循环。
+
+---
+
+### Phase 9 — Skill 自进化
 **目标**：skill 定义能根据运行反馈自动改进。
 
 内容：
@@ -170,7 +196,7 @@
 
 ---
 
-### Phase 9 — MCP 工具接入
+### Phase 10 — MCP 工具接入
 **目标**：让 twinkle 能挂载标准 MCP（Model Context Protocol）server 的工具，补足工具生态。
 
 内容：
@@ -195,9 +221,10 @@
 | M6 有长期记忆 | 跨会话事实召回 + RAG 注入 | |
 | M7 会定时跑 | cron 唤醒 agent + 结果推送通道 | |
 | M8 能用 skill | skill 加载 / 选择 / 注入指导多步任务 | |
-| M9 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
-| M10 能挂外部工具 | MCP server 工具接入并受策略管控 | |
-| M11 可观测 | OTel span 链 + 关键指标 | ✅ |
+| M9 能委派子 agent | spawn/fork 委派 + 结果回灌 + 并发隔离 | |
+| M10 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
+| M11 能挂外部工具 | MCP server 工具接入并受策略管控 | |
+| M12 可观测 | OTel span 链 + 关键指标 | ✅ |
 
 ---
 
