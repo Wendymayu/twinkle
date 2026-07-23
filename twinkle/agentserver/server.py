@@ -14,6 +14,7 @@ import logging
 from websockets.asyncio.server import serve
 
 from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.hooks.builtin import LoggingHook
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.session_rpc import dispatch_session_rpc, handles as handles_session_rpc
@@ -42,19 +43,23 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
         log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-def build_agent_loop():
+def build_agent_loop(hooks=None):
     """Production wiring — config-driven LLM + disk-backed SessionStore.
 
     Returns ``(loop, store)`` so the caller can share ONE store instance
     between the AgentLoop (chat/reagent path) and ``ws_handler`` (RPC path),
     mirroring jiuwenclaw's remote storage mode where both flows see the same
-    sessions.
+    sessions. *hooks* is an optional list of AgentHook instances to register.
     """
     llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     store = SessionStore(SESSIONS_DIR)
     tools = tool_manager()
     memory = LongTermMemory()
-    return AgentLoop(llm, store, tools, memory), store
+    loop = AgentLoop(llm, store, tools, memory)
+    if hooks:
+        for h in hooks:
+            loop.register_hook(h)
+    return loop, store
 
 
 def agent_loop() -> AgentLoop:
@@ -109,7 +114,7 @@ def ws_handler(loop: AgentLoop, store: SessionStore):
 
 
 async def main() -> None:
-    loop, store = build_agent_loop()
+    loop, store = build_agent_loop(hooks=[LoggingHook()])
     handler = ws_handler(loop, store)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
