@@ -4,9 +4,11 @@ def test_build_agent_loop_wires_permission(monkeypatch):
     import twinkle.config as cfg
 
     importlib.reload(cfg)
+    from twinkle.agentserver.sessions import SessionStore, session_store
     from twinkle.agentserver.server import build_agent_loop
 
-    loop, store = build_agent_loop()
+    store = session_store()
+    loop = build_agent_loop(store)
     assert loop._permission is not None
     assert loop._permission._enabled is True
     from twinkle.agentserver.hooks.base import HookEvent

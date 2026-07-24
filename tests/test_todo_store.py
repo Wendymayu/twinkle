@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from twinkle.agentserver.todo_store import TodoError, TodoStore
+from twinkle.agentserver.todo import TodoError, TodoStore
 
 
 def test_create_then_list() -> None:

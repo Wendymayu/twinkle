@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from twinkle.agentserver.session_rpc import dispatch_session_rpc
+from twinkle.agentserver.sessions import dispatch_session_rpc
 from twinkle.e2a.models import E2AEnvelope
 
 

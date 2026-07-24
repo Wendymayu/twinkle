@@ -42,7 +42,10 @@ def test_full_approval_flow_through_gateway_and_agentserver(free_port, tmp_path,
                             "function": {"name": "echo", "arguments": '{"text":"hi"}'}}]})],
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
-    loop, store = build_agent_loop(llm=scripted)
+    from twinkle.agentserver.sessions import session_store
+
+    store = session_store()
+    loop = build_agent_loop(store, llm=scripted)
     loop._tools.register(echo)  # echo isn't in the default tool_manager(); register it so execute("echo") works
 
     async def scenario():

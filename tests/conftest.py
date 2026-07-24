@@ -35,5 +35,5 @@ def sessions_dir(tmp_path) -> "Path":
 @pytest.fixture
 def session_store(sessions_dir):
     """A SessionStore rooted in a per-test tmp dir (no repo pollution)."""
-    from twinkle.agentserver.session_store import SessionStore
+    from twinkle.agentserver.sessions import SessionStore
     return SessionStore(str(sessions_dir))

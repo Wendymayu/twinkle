@@ -7,7 +7,7 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from twinkle.agentserver.server import ws_handler
-from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.sessions import SessionStore
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 

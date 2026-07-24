@@ -15,10 +15,10 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
-from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.sessions.store import SessionStore
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
-log = logging.getLogger("twinkle.agentserver.session_rpc")
+log = logging.getLogger("twinkle.agentserver.sessions.rpc")
 
 _SESSION_METHODS = {"session.create", "session.list", "session.delete", "history.get", "session.files", "file.read"}
 

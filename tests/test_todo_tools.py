@@ -1,7 +1,7 @@
 # tests/test_todo_tools.py
 import asyncio
 
-from twinkle.agentserver.plan_todo_context import (
+from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
     drain_todo_events,
     reset_todo_events,

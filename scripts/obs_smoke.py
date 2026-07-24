@@ -25,7 +25,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.memory import LongTermMemory
-from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.config import SESSIONS_DIR

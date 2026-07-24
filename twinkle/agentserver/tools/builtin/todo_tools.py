@@ -11,14 +11,14 @@ session_id,操作模块级 TodoStore 单例,返回 markdown 串(附当前列表,
 """
 from __future__ import annotations
 
-from twinkle.agentserver.plan_todo_context import (
+from twinkle.agentserver.todo import (
     get_plan_todo_session_id,
     publish_todo_update,
+    TodoError, TodoStore, TodoTask,
 )
 from twinkle.agentserver.tools.decorator import tool
-from twinkle.agentserver.todo_store import TodoError, TodoStore, TodoTask
 
-_store = TodoStore()  # 模块级单例;session 隔离靠 ContextVar 路由
+_todo_store = TodoStore()  # 模块级单例;session 隔离靠 ContextVar 路由
 
 _ICON = {"waiting": "[ ]", "running": "[>]", "completed": "[x]"}
 
@@ -58,11 +58,11 @@ async def todo_create(tasks: list[str]) -> str:
     """
     sid = get_plan_todo_session_id()
     try:
-        created = await _store.create(sid, tasks)
+        created = await _todo_store.create(sid, tasks)
         publish_todo_update(_snapshot(created))
         return _append_list(f"Created {len(created)} todo tasks.", created)
     except TodoError as exc:
-        current = await _store.list_tasks(sid)
+        current = await _todo_store.list_tasks(sid)
         return _append_list(f"Error: {exc}", current)
 
 
@@ -72,11 +72,11 @@ async def todo_complete(idx: int, result: str = "") -> str:
     """
     sid = get_plan_todo_session_id()
     try:
-        tasks = await _store.complete(sid, idx, result)
+        tasks = await _todo_store.complete(sid, idx, result)
         publish_todo_update(_snapshot(tasks))
         return _append_list(f"Task {idx} marked as completed.", tasks)
     except TodoError as exc:
-        current = await _store.list_tasks(sid)
+        current = await _todo_store.list_tasks(sid)
         return _append_list(f"Error: {exc}", current)
 
 
@@ -85,5 +85,5 @@ async def todo_list() -> str:
     """List all current todo tasks with their status. Returns 'No todo tasks.' when empty.
     """
     sid = get_plan_todo_session_id()
-    tasks = await _store.list_tasks(sid)
+    tasks = await _todo_store.list_tasks(sid)
     return _format_tasks(tasks)

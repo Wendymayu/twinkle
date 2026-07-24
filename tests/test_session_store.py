@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.sessions import SessionStore
 
 
 def _run(coro):

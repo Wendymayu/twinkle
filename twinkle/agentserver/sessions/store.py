@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("twinkle.agentserver.session_store")
+log = logging.getLogger("twinkle.agentserver.sessions.store")
 
 _TITLE_MAX_LEN = 50
 _OPENAI_FIELDS = ("role", "content", "tool_calls", "tool_call_id")

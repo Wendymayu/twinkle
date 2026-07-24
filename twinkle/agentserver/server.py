@@ -3,24 +3,27 @@
 Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
 AgentLoop (ReAct: think -> tool -> result -> re-decide). Stream-only; no
 unary mode. ws_handler(loop, store) lets tests inject a fake loop;
-agent_loop() wires the real config-driven loop for production.
+build_agent_loop(store) wires the real config-driven loop for production.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 
-from websockets.asyncio.server import serve
+from websockets.asyncio.server import ServerConnection, serve
 
 from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.hooks.base import AgentHook
 from twinkle.agentserver.hooks.builtin import LoggingHook
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.memory import LongTermMemory
-from twinkle.agentserver.session_rpc import dispatch_session_rpc, handles as handles_session_rpc
-from twinkle.agentserver.session_store import SessionStore
+from twinkle.agentserver.sessions import (
+    SessionStore, session_store, dispatch_session_rpc, handles_session_rpc,
+)
 from twinkle.agentserver.tools import tool_manager
-from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, SESSIONS_DIR
+from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
 
@@ -33,7 +36,7 @@ ACK_FRAME = {
 }
 
 
-async def _safe_send(ws, resp: E2AResponse) -> None:
+async def _safe_send(ws: ServerConnection, resp: E2AResponse) -> None:
     """Send an E2AResponse; silently swallow ConnectionClosed (client gone)."""
     try:
         await ws.send(resp.model_dump_json())
@@ -43,23 +46,20 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
         log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-def build_agent_loop(hooks=None, llm=None):
-    """Production wiring — config-driven LLM + disk-backed SessionStore.
+def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, llm: LLMClient | None = None) -> AgentLoop:
+    """Production wiring — config-driven AgentLoop backed by *store*.
 
-    Returns ``(loop, store)`` so the caller can share ONE store instance
-    between the AgentLoop (chat/reagent path) and ``ws_handler`` (RPC path),
-    mirroring jiuwenclaw's remote storage mode where both flows see the same
-    sessions. *hooks* is an optional list of AgentHook instances to register
-    IN ADDITION to the always-on PermissionHook (Phase 4). *llm* is an
-    optional LLM override (tests inject a scripted client; default =
-    config-driven LLMClient).
+    *store* is injected so the caller controls which SessionStore instance
+    the loop (chat/ReAct path) and ``ws_handler`` (RPC path) share.
+    *hooks* is an optional list of AgentHook instances to register IN
+    ADDITION to the always-on PermissionHook (Phase 4). *llm* is an optional
+    override (tests inject a scripted client; default = config-driven LLMClient).
     """
     from twinkle.agentserver.permissions import permission_engine
     from twinkle.agentserver.hooks.builtin import PermissionHook
 
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
-    store = SessionStore(SESSIONS_DIR)
     tools = tool_manager()
     memory = LongTermMemory()
     engine = permission_engine()
@@ -68,16 +68,10 @@ def build_agent_loop(hooks=None, llm=None):
     if hooks:
         for h in hooks:
             loop.register_hook(h)
-    return loop, store
-
-
-def agent_loop() -> AgentLoop:
-    """Thin shim kept for any existing one-arg caller."""
-    loop, _ = build_agent_loop()
     return loop
 
 
-def ws_handler(loop: AgentLoop, store: SessionStore):
+def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnection], Awaitable[None]]:
     """Return a ws handler bound to the given AgentLoop + SessionStore.
 
     Phase 4: concurrent per-request task model so a suspended run_stream
@@ -88,7 +82,7 @@ def ws_handler(loop: AgentLoop, store: SessionStore):
     """
     from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
 
-    async def handler(ws) -> None:
+    async def handler(ws: ServerConnection) -> None:
         try:
             await ws.send(json.dumps(ACK_FRAME, ensure_ascii=False))
         except Exception:
@@ -150,7 +144,8 @@ def ws_handler(loop: AgentLoop, store: SessionStore):
 
 
 async def main() -> None:
-    loop, store = build_agent_loop(hooks=[LoggingHook()])
+    store = session_store()
+    loop = build_agent_loop(store, hooks=[LoggingHook()])
     handler = ws_handler(loop, store)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):

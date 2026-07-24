@@ -17,7 +17,7 @@ import json
 import os
 from pathlib import Path
 
-from twinkle.agentserver.plan_todo_context import get_plan_todo_session_id
+from twinkle.agentserver.todo import get_plan_todo_session_id
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.config import WORKSPACE_DIR
 
