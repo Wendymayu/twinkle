@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-Twinkle is a **learning-focused reimplementation** of the core agent pipeline of `jiuwenswarm` (reference monorepo at `D:\code\opensource\gitcode\jiuwenswarm`, formerly JiuwenClaw; contains `jiuwenswarm/` swarm framework + `jiuwenclaw/` agent app layer + `jiuwenbox/` deploy). It deliberately mirrors jiuwenswarm's two-process + bidirectional-WebSocket architecture so the two can be compared module-by-module. It is **not** a fork, not a SaaS shell, and not feature-complete — see `roadmap.md` for the current phase and scope (Phase 0–2 landed incl. OTel telemetry; Phase 3 context-compression pending; skill / long-term memory / tool permissions / cron are planned future phases; multi-channel & enterprise features out of scope).
+Twinkle is a **learning-focused reimplementation** of the core agent pipeline of `jiuwenswarm` (reference monorepo at `D:\code\opensource\gitcode\jiuwenswarm`, formerly JiuwenClaw; contains `jiuwenswarm/` swarm framework + `jiuwenclaw/` agent app layer + `jiuwenbox/` deploy). It deliberately mirrors jiuwenswarm's two-process + bidirectional-WebSocket architecture so the two can be compared module-by-module. It is **not** a fork, not a SaaS shell, and not feature-complete — see `roadmap.md` for the current phase and scope (Phase 0–4 landed incl. OTel telemetry, context compression, and tool permissions/approval; skill / long-term memory / cron are planned future phases; multi-channel & enterprise features out of scope).
 
 Check `roadmap.md` for the current phase before making architectural changes. The repository README is stale (describes Phase 0 echo); `docs/architecture.md` is the source of truth for the *current* architecture.
 
@@ -117,6 +117,9 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP gRPC collector endpoint (`http://` = insecure, `https://` = TLS) |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | only the gRPC exporter is implemented |
 | `OTEL_SERVICE_NAME` | `twinkle-agentserver` | Resource `service.name` |
+| `TWINKLE_PERMISSIONS` | (disabled) | JSON: {enabled, enabled_channels, global_default, tools, rules, approval_overrides}. false = system off (all ALLOW, command_exec still uses builtin_rules) |
+| `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | runtime allow_always store (mtime hot-reload) |
+| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/.twinkle_data/permission_audit.jsonl` | ToolPermissionLog JSONL |
 
 ## Conventions
 
@@ -125,3 +128,4 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 - **Tests must not use `pytest-asyncio`** — use `asyncio.run()` and the `free_port`/`port_factory` fixtures. This is a deliberate choice to avoid pulling the plugin in for free-port fixtures.
 - The reference impl `jiuwenclaw` is at `D:\opensource\gitcode\jiuwenclaw` — consult it when a module's behavior is unclear; each module docstring / `docs/architecture.md` §11 maps Twinkle files to jiuwenclaw file ranges.
 - **Add a new Hook**: write a class inheriting `AgentHook` in a `*_hook.py` module under `hooks/builtin/`, override the lifecycle methods you care about, set `priority`, then register it in `build_agent_loop()` or at the call site via `loop.register_hook(hook_instance)`. `agent_loop` picks it up with no core changes.
+- **Add a new permission rule**: append a `(re.Pattern, reason)` to `COMMAND_DENY_PATTERNS` in `twinkle/agentserver/permissions/builtin_rules.py` (single source — command_exec + policy both read it). For non-command_exec tools, set the tier in `TWINKLE_PERMISSIONS.tools` or add a user rule to `TWINKLE_PERMISSIONS.rules`.

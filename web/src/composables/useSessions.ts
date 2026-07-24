@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { WebClient, type TodoTask } from '../services/webClient'
+import { WebClient, type TodoTask, type ApprovalDecision } from '../services/webClient'
 
 export interface SessionItem {
   session_id: string
@@ -10,6 +10,14 @@ export interface SessionItem {
 export interface ChatMsg {
   role: 'user' | 'assistant' | 'tool'
   content: string
+  // approval-card fields — only meaningful when kind === 'approval'
+  kind?: 'approval'
+  approvalId?: string
+  tool?: string
+  args?: any
+  reason?: string
+  requestId?: string
+  decided?: ApprovalDecision | null
 }
 interface TodoState { tasks: TodoTask[]; remaining: number; total: number }
 
@@ -21,6 +29,8 @@ const connected = ref(false)
 const busy = ref(false)
 const loading = ref(false)
 const todo = ref<TodoState | null>(null)
+// true while an approval.ask is awaiting a user decision — disables the chat input
+const inputDisabled = ref(false)
 
 type NavKey = 'chat' | 'sessions'
 const activeNav = ref<NavKey>('chat')
@@ -139,18 +149,38 @@ function init() {
       (delta, rid) => {
         if (rid !== client.getLastRequestId()) return
         const last = messages.value[messages.value.length - 1]
-        if (last && last.role === 'assistant') last.content += delta
+        // don't append resumed deltas onto an approval card — start a fresh bubble
+        if (last && last.role === 'assistant' && last.kind !== 'approval') last.content += delta
         else messages.value.push({ role: 'assistant', content: delta })
       },
       (text, rid) => {
         if (rid !== client.getLastRequestId()) return
         const last = messages.value[messages.value.length - 1]
-        if (!last || last.role !== 'assistant') messages.value.push({ role: 'assistant', content: text })
+        if (!last || last.role !== 'assistant' || last.kind === 'approval')
+          messages.value.push({ role: 'assistant', content: text })
         else if (!last.content) last.content = text
         busy.value = false
+        inputDisabled.value = false // defensive: clear in case an approval was still pending
         loadSessions() // refresh to pick up a fresh auto-title
       },
       (t) => { todo.value = t },
+      (payload, rid) => {
+        // approval.ask: payload={approval_id,tool,args,tool_call_id,reason},
+        // rid is the ORIGINAL chat.send request_id — store it so the card can
+        // pass it back as original_request_id when responding.
+        messages.value.push({
+          role: 'assistant',
+          kind: 'approval',
+          content: '',
+          approvalId: payload.approval_id,
+          tool: payload.tool,
+          args: payload.args,
+          reason: payload.reason,
+          requestId: rid,
+          decided: null,
+        })
+        inputDisabled.value = true // disable input while an approval is pending
+      },
     )
     const saved = client.getSessionId()
     loadSessions()
@@ -159,14 +189,27 @@ function init() {
   })
 }
 
+/** Mark an approval card as decided so its action buttons swap for a result
+ * label. Mutates the message in-place — reactive because messages is a deep ref. */
+function markApprovalDecided(approvalId: string, decision: ApprovalDecision) {
+  for (const m of messages.value) {
+    if (m.kind === 'approval' && m.approvalId === approvalId) {
+      m.decided = decision
+      break
+    }
+  }
+}
+
 export function useSessions() {
   return {
     sessions, currentSessionId, messages, connected, busy, loading, todo,
+    inputDisabled, markApprovalDecided,
     completedCount, box, fromHistory,
     activeNav, setNav,
     selectedSessionId, sessionFiles, previewFile, previewContent,
     previewLoading, historyAsBubbles,
     init, loadSessions, createSession, selectSession, deleteSession, sendQuery,
     loadSessionFiles, readSessionFile, restoreSession,
+    webClient: client,
   }
 }

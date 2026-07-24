@@ -19,6 +19,8 @@ from twinkle.agentserver.plan_todo_context import (
     drain_todo_events,
     reset_todo_events,
 )
+from twinkle.agentserver.permission_context import set_permission_channel
+from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
 from twinkle.agentserver.session_store import SessionStore
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.agentserver.hooks.base import (
@@ -62,11 +64,13 @@ class AgentLoop:
         store: SessionStore,
         tools: ToolManager,
         memory: LongTermMemory,
+        permission=None,
     ) -> None:
         self._llm = llm
         self._store = store
         self._tools = tools
         self._memory = memory
+        self._permission = permission
         self._hooks = HookManager(self)
 
     def register_hook(self, hook_instance: AgentHook) -> None:
@@ -135,6 +139,8 @@ class AgentLoop:
         session_id = envelope.session_id
         PLAN_TODO_SESSION_ID.set(session_id or "default")
         reset_todo_events()
+        set_permission_channel(envelope.channel or "web")
+        await self._sanitize_orphan_tool_calls(session_id, envelope.request_id)
         # Insert the todo-guidance system message once per session
         existing = self._store.get_messages(session_id)
         if not existing or existing[0].get("role") != "system":
@@ -224,16 +230,32 @@ class AgentLoop:
                                     )
                                     try:
                                         result = await self._raided_tool_call(ctx, name, args)
-                                    except HookInterrupt:
+                                    except HookInterrupt as hi:
+                                        if "approval_id" not in hi.data:
+                                            yield E2AResponse(
+                                                request_id=envelope.request_id, sequence=seq, is_final=True,
+                                                status="failed", response_kind="e2a.error",
+                                                body={"error": "tool execution interrupted"})
+                                            return
+                                        # ASK: register Future + yield e2a.ask + suspend await
+                                        approval_id = hi.data["approval_id"]
+                                        future = APPROVAL_REGISTRY.register(approval_id)
                                         yield E2AResponse(
-                                            request_id=envelope.request_id,
-                                            sequence=seq,
-                                            is_final=True,
-                                            status="failed",
-                                            response_kind="e2a.error",
-                                            body={"error": "tool execution interrupted"},
-                                        )
-                                        return
+                                            request_id=envelope.request_id, sequence=seq, is_final=False,
+                                            status="in_progress", response_kind="e2a.ask",
+                                            body={"approval_id": approval_id, "tool": hi.data["tool"],
+                                                  "args": hi.data["args"], "tool_call_id": tc["id"],
+                                                  "reason": hi.data["reason"]})
+                                        seq += 1
+                                        decision = await future  # SUSPEND — ws_handler concurrency resumes it
+                                        if decision in ("allow", "allow_always"):
+                                            if decision == "allow_always" and self._permission is not None:
+                                                await self._permission.persist_allow_always(hi.data)
+                                            ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
+                                            result = await self._raided_tool_call(ctx, name, args)
+                                        else:
+                                            result = (f"[tool denied by user: {hi.data['tool']}] "
+                                                      f"{hi.data.get('reason', '')}")
                                     for snap in drain_todo_events():
                                         yield E2AResponse(
                                             request_id=envelope.request_id,
@@ -299,6 +321,35 @@ class AgentLoop:
             response_kind="e2a.error",
             body={"error": f"agent loop exceeded max_steps={MAX_STEPS}"},
         )
+
+    async def _sanitize_orphan_tool_calls(self, session_id: str, request_id: str) -> None:
+        """If the session's most recent assistant-with-tool_calls message lacks
+        results for some of its tool_calls (a crash mid-approval, possibly after
+        some results were already appended), inject a synthetic tool_result for
+        each missing tool_call_id so the next LLM call doesn't error on orphan
+        tool_calls."""
+        msgs = self._store.get_messages(session_id)
+        if not msgs:
+            return
+        # find the LAST assistant message that carries tool_calls — the only one
+        # that could be orphaned by a mid-batch crash (earlier assistants are
+        # complete, or the LLM would have errored before reaching this one).
+        last_assistant = None
+        for m in reversed(msgs):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                last_assistant = m
+                break
+        if last_assistant is None:
+            return
+        for tc in last_assistant["tool_calls"]:
+            tc_id = tc.get("id")
+            if tc_id and not any(m.get("role") == "tool" and m.get("tool_call_id") == tc_id
+                                for m in msgs):
+                await self._store.append(
+                    session_id,
+                    {"role": "tool", "tool_call_id": tc_id,
+                     "content": "[interrupted: previous request did not complete]"},
+                    request_id=request_id)
 
     # --- @hook-decorated methods --- #
 

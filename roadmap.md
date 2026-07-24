@@ -37,7 +37,8 @@
 - **Phase 0–2 已落地**：两进程骨架、agent loop 闭环、四层工具系统（含 todo/command_exec/file_ops）。
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 3（长会话上下文压缩）**：初版已在 nightly worktree `nightly/phase-3-6-4` 实现（滑窗+LLM 摘要，独立模块 `context_compression.py`，不写回 SessionStore），待 review/merge 进主线；后续优化方向见 §Phase 3。
-- **Phase 4 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
+- **Phase 4（工具权限 / 审批 + 命令安全）**：已落地（spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md` + plan `docs/superpowers/plans/2026-07-24-phase4-permissions.md`）。`permissions/` 包 + `PermissionHook` + ASK 挂起/恢复 + JSONL 审计 + `TWINKLE_PERMISSIONS` opt-in；3-axis / shell-AST 仍 deferred（见 §Phase 4 精简范围）。
+- **Phase 5 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
 
 ---
 
@@ -101,7 +102,7 @@
 
 ---
 
-### Phase 4 — 工具权限 / 审批 + 命令安全
+### Phase 4 — 工具权限 / 审批 + 命令安全  `[已完成]`
 **目标**：从"裸跑工具"升级到"工具可被策略管控，危险操作需审批"。
 
 内容：
@@ -111,6 +112,8 @@
 - **command_exec 安全增强**：在现有 blocklist + workspace 收敛基础上，借鉴 `bash_tool_safety.py` 补路径安全 / 预算控制。
 - **审计日志** `ToolPermissionLog`：tool / decision(ALLOW/DENY/ASK) / source / rule / channel / session / timestamp，每决策都记。
 - **精简范围（不做）**：shell AST 解析、三轴文件路径判定——复杂度高、对学习项目偏重，留作后续可选增强。`PERMISSION_ENABLED_CHANNELS` 按通道门控（其余通道全量放行）。
+
+**初版**（已落地，见 spec / plan）：`twinkle/agentserver/permissions/` 包（models / builtin_rules / policy / audit / approval_registry / engine）+ `permission_context.py` ContextVar + `PermissionHook`（before_tool_call：ALLOW no-op / DENY force_finish / ASK raise HookInterrupt）。ASK 挂起/恢复用进程内 `ApprovalRegistry`（approval_id → asyncio.Future 单例）：`agent_loop` 的 `except HookInterrupt` 注册 Future + yield `e2a.ask`（is_final=false）后 `await future` 挂起；`ws_handler` 内联路由 `approval.respond`（在 active-run guard 之前）→ resolve Future + 回 e2a.result ack（R2）；挂起的 run_stream 在**原 request_id**（R）上恢复 → 执行工具（allow）或注入 deny 消息回灌 → 再查模型。command_exec 的 blocklist 上提为 `builtin_rules.py` 单一真源（8 + 9 = 17 条），command_exec 与 PermissionPolicy 共读，disabled 模式下 command_exec 仍走它做 defense-in-depth。`TWINKLE_PERMISSIONS` 单 JSON env（对齐 OTEL opt-in），`enabled=false` 默认 = 系统关（全 ALLOW、无审计、无 ASK）。**精简范围仍 deferred**：shell AST 解析、三轴文件路径判定。
 
 **验收**：危险工具调用前必须过策略；`require-approval` 工具触发用户审批卡；拒绝带 `[PERMISSION_DENIED]` 消息回灌；审计日志可查。
 
@@ -217,7 +220,7 @@
 | M2 能调工具 | 真模型 + 只读工具闭环 + 多轮上下文 | ✅ |
 | M3 能管工具 | 多工具选择 + 任务规划 | ✅ |
 | M4 能扛长会话 | 100 轮不爆 token、不丢关键事实 | ⏳ |
-| M5 工具可管控 | 危险工具审批 + 命令安全 + 审计日志 | |
+| M5 工具可管控 | 危险工具审批 + 命令安全 + 审计日志 | ✅ |
 | M6 有长期记忆 | 跨会话事实召回 + RAG 注入 | |
 | M7 会定时跑 | cron 唤醒 agent + 结果推送通道 | |
 | M8 能用 skill | skill 加载 / 选择 / 注入指导多步任务 | |

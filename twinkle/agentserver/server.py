@@ -43,19 +43,28 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
         log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-def build_agent_loop(hooks=None):
+def build_agent_loop(hooks=None, llm=None):
     """Production wiring — config-driven LLM + disk-backed SessionStore.
 
     Returns ``(loop, store)`` so the caller can share ONE store instance
     between the AgentLoop (chat/reagent path) and ``ws_handler`` (RPC path),
     mirroring jiuwenclaw's remote storage mode where both flows see the same
-    sessions. *hooks* is an optional list of AgentHook instances to register.
+    sessions. *hooks* is an optional list of AgentHook instances to register
+    IN ADDITION to the always-on PermissionHook (Phase 4). *llm* is an
+    optional LLM override (tests inject a scripted client; default =
+    config-driven LLMClient).
     """
-    llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
+    from twinkle.agentserver.permissions import permission_engine
+    from twinkle.agentserver.hooks.builtin import PermissionHook
+
+    if llm is None:
+        llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     store = SessionStore(SESSIONS_DIR)
     tools = tool_manager()
     memory = LongTermMemory()
-    loop = AgentLoop(llm, store, tools, memory)
+    engine = permission_engine()
+    loop = AgentLoop(llm, store, tools, memory, permission=engine)
+    loop.register_hook(PermissionHook(engine))
     if hooks:
         for h in hooks:
             loop.register_hook(h)
@@ -71,44 +80,71 @@ def agent_loop() -> AgentLoop:
 def ws_handler(loop: AgentLoop, store: SessionStore):
     """Return a ws handler bound to the given AgentLoop + SessionStore.
 
-    Routes ``session.*/history.get`` envelopes to ``dispatch_session_rpc``
-    (single ``e2a.result`` frame per RPC); everything else falls through to
-    ``loop.run_stream`` (the ReAct chat path). Both paths share ``store``.
+    Phase 4: concurrent per-request task model so a suspended run_stream
+    (awaiting approval) does not block reading the next inbound message
+    (approval.respond). Routes ``approval.respond`` to the ApprovalRegistry
+    inline; session RPCs inline; everything else spawns a run_stream task,
+    one active per session.
     """
+    from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
 
     async def handler(ws) -> None:
         try:
             await ws.send(json.dumps(ACK_FRAME, ensure_ascii=False))
         except Exception:
-            return  # client closed before we even greeted
-        async for raw in ws:
+            return
+        send_lock = asyncio.Lock()
+        active: dict[str, asyncio.Task] = {}
+
+        async def send(resp: E2AResponse) -> None:
+            async with send_lock:
+                try:
+                    await ws.send(resp.model_dump_json())
+                except Exception:
+                    log.debug("send on closed connection, dropping %s", resp.request_id)
+
+        async def run_task(envelope: E2AEnvelope) -> None:
             try:
-                envelope = E2AEnvelope.model_validate_json(raw)
-            except Exception as exc:
-                err = E2AResponse(
-                    request_id="?",
-                    status="failed",
-                    response_kind="e2a.error",
-                    body={"error": str(exc)},
-                )
-                await _safe_send(ws, err)
-                continue
-            try:
-                if handles_session_rpc(envelope.method):
-                    async for frame in dispatch_session_rpc(envelope, store):
-                        await _safe_send(ws, frame)
-                else:
-                    async for frame in loop.run_stream(envelope):
-                        await _safe_send(ws, frame)
+                async for frame in loop.run_stream(envelope):
+                    await send(frame)
             except Exception as exc:
                 log.exception("agent loop failed for %s: %s", envelope.request_id, exc)
-                err = E2AResponse(
-                    request_id=envelope.request_id,
-                    status="failed",
-                    response_kind="e2a.error",
-                    body={"error": str(exc)},
-                )
-                await _safe_send(ws, err)
+                await send(E2AResponse(
+                    request_id=envelope.request_id, is_final=True, status="failed",
+                    response_kind="e2a.error", body={"error": str(exc)}))
+
+        try:
+            async for raw in ws:
+                try:
+                    envelope = E2AEnvelope.model_validate_json(raw)
+                except Exception as exc:
+                    await send(E2AResponse(request_id="?", status="failed",
+                        response_kind="e2a.error", body={"error": str(exc)}))
+                    continue
+                if envelope.method == "approval.respond":
+                    await APPROVAL_REGISTRY.handle_respond(envelope, send)
+                    continue
+                if handles_session_rpc(envelope.method):
+                    async for frame in dispatch_session_rpc(envelope, store):
+                        await send(frame)
+                    continue
+                sid = envelope.session_id or envelope.request_id
+                cur = active.get(sid)
+                if cur is not None and not cur.done():
+                    await send(E2AResponse(
+                        request_id=envelope.request_id, is_final=True, status="failed",
+                        response_kind="e2a.error",
+                        body={"error": "a request is already in progress for this session"}))
+                    continue
+                task = asyncio.create_task(run_task(envelope))
+                active[sid] = task
+                task.add_done_callback(lambda t, sid=sid: active.pop(sid, None) if active.get(sid) is t else None)
+        finally:
+            for t in list(active.values()):
+                t.cancel()
+            await asyncio.gather(*active.values(), return_exceptions=True)
+            active.clear()
+            APPROVAL_REGISTRY.cancel_all()
 
     return handler
 

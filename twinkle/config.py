@@ -96,3 +96,67 @@ CONTEXT_SUMMARY_PROMPT = os.getenv(
     "TWINKLE_CONTEXT_SUMMARY_PROMPT",
     "你是对话上下文压缩器。把给定历史对话压成一段摘要，保留关键事实、用户偏好、已做决策、工具调用结果，丢弃寒暄与冗余。用中文。",
 )
+
+# --- permissions (Phase 4) ---
+# Single JSON env var (mirrors OTEL opt-in): enabled=false = system off
+# (all ALLOW, no audit, no ASK; command_exec still uses its own blocklist).
+import json as _json
+
+_PERMISSIONS_DEFAULT = {
+    "enabled": False,
+    "enabled_channels": ["web"],
+    "global_default": "allow",
+    "tools": {
+        "command_exec": "require-approval",
+        "web_fetch": "allow",
+        "web_search": "allow",
+        "todo_create": "allow",
+        "todo_complete": "allow",
+        "todo_list": "allow",
+    },
+    "rules": [],
+    "approval_overrides": {},
+}
+
+
+def _load_permissions() -> dict:
+    defaults = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+                for k, v in _PERMISSIONS_DEFAULT.items()}
+    raw = (os.getenv("TWINKLE_PERMISSIONS") or "").strip()
+    if not raw:
+        return defaults
+    # Bare booleans (true/false/yes/no/1/0) -> {enabled: bool}, matching OTEL_ENABLED's
+    # ergonomics so users can write `TWINKLE_PERMISSIONS=true` (not just JSON).
+    low = raw.lower()
+    if low in ("true", "yes", "1"):
+        defaults["enabled"] = True
+        return defaults
+    if low in ("false", "no", "0"):
+        return defaults  # explicitly disabled
+    # Otherwise: must be a JSON object (full config: {enabled, tools, rules, ...}).
+    try:
+        user = _json.loads(raw)
+    except _json.JSONDecodeError:
+        # invalid JSON -> fall back to defaults (engine stays off; safe, never crashes)
+        return defaults
+    if not isinstance(user, dict):
+        # JSON but not an object (e.g. a bare number `42`, or `true` parsed as a bool)
+        # -> can't merge into the config; fall back to defaults rather than crashing.
+        return defaults
+    merged = dict(_PERMISSIONS_DEFAULT)
+    merged.update(user)
+    return merged
+
+
+PERMISSIONS = _load_permissions()
+PERMISSIONS_ENABLED = bool(PERMISSIONS.get("enabled", False))
+PERMISSIONS_ENABLED_CHANNELS = set(PERMISSIONS.get("enabled_channels", ["web"]))
+PERMISSIONS_GLOBAL_DEFAULT = PERMISSIONS.get("global_default", "allow")
+PERMISSIONS_TOOLS = PERMISSIONS.get("tools", {})
+PERMISSIONS_RULES = PERMISSIONS.get("rules", [])
+PERMISSION_OVERRIDES_FILE = os.getenv("TWINKLE_PERMISSION_OVERRIDES_FILE") or str(
+    Path(WORKSPACE_DIR) / ".twinkle_data" / "permission_overrides.json"
+)
+PERMISSION_AUDIT_FILE = os.getenv("TWINKLE_PERMISSION_AUDIT_FILE") or str(
+    Path(WORKSPACE_DIR) / ".twinkle_data" / "permission_audit.jsonl"
+)

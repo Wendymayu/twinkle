@@ -9,6 +9,15 @@ export type TodoUpdateHandler = (
   todo: { tasks: TodoTask[]; remaining: number; total: number },
   requestId: string,
 ) => void
+export type ApprovalDecision = 'allow' | 'allow_always' | 'deny'
+export interface ApprovalAskPayload {
+  approval_id: string
+  tool: string
+  args: any
+  tool_call_id?: string
+  reason?: string
+}
+export type ApprovalAskHandler = (payload: ApprovalAskPayload, requestId: string) => void
 
 export interface TodoTask {
   idx: number
@@ -24,6 +33,7 @@ export class WebClient {
   private onDelta: DeltaHandler = () => {}
   private onFinal: FinalHandler = () => {}
   private onTodoUpdate: TodoUpdateHandler = () => {}
+  private onApprovalAsk: ApprovalAskHandler = () => {}
   private seq = 0
   private sessionId = ''
   private lastRequestId = ''
@@ -71,6 +81,7 @@ export class WebClient {
       if (frame.event === 'chat.delta') this.onDelta(content, rid)
       else if (frame.event === 'chat.final') this.onFinal(content, rid)
       else if (frame.event === 'todo.update') this.onTodoUpdate(frame.payload ?? { tasks: [], remaining: 0, total: 0 }, rid)
+      else if (frame.event === 'approval.ask') this.onApprovalAsk(frame.payload ?? {}, rid)
       else if (frame.event === 'result') {
         const resolve = this.pending.get(rid)
         if (resolve) {
@@ -81,10 +92,16 @@ export class WebClient {
     }
   }
 
-  setHandlers(onDelta: DeltaHandler, onFinal: FinalHandler, onTodoUpdate: TodoUpdateHandler): void {
+  setHandlers(
+    onDelta: DeltaHandler,
+    onFinal: FinalHandler,
+    onTodoUpdate: TodoUpdateHandler,
+    onApprovalAsk?: ApprovalAskHandler,
+  ): void {
     this.onDelta = onDelta
     this.onFinal = onFinal
     this.onTodoUpdate = onTodoUpdate
+    this.onApprovalAsk = onApprovalAsk ?? (() => {})
   }
 
   send(method: string, params: Record<string, any>): string {
@@ -102,6 +119,38 @@ export class WebClient {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`timeout waiting for result: ${method}`))
+      }, 15000)
+      this.pending.set(id, (payload: any) => {
+        clearTimeout(timer)
+        if (payload?.error) reject(new Error(payload.error))
+        else resolve(payload)
+      })
+    })
+  }
+
+  /** Send an approval response without polluting lastRequestId. The resumed
+   * chat.delta / chat.final frames carry the ORIGINAL request_id R; if this
+   * method updated lastRequestId to its own id (R2), those frames would be
+   * dropped by the rid !== getLastRequestId() guard in the delta/final
+   * handlers. So we bypass send(), build our own id, and register a pending
+   * resolver keyed by R2 — the gateway returns an e2a.result ack on R2. */
+  respond(
+    approvalId: string,
+    decision: ApprovalDecision,
+    originalRequestId: string,
+  ): Promise<any> {
+    const id = 'apr_' + Date.now().toString(36) + '_' + (this.seq++).toString(36)
+    const params = {
+      approval_id: approvalId,
+      decision,
+      original_request_id: originalRequestId,
+      session_id: this.sessionId,
+    }
+    this.ws?.send(JSON.stringify({ type: 'req', id, method: 'approval.respond', params }))
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error('timeout waiting for result: approval.respond'))
       }, 15000)
       this.pending.set(id, (payload: any) => {
         clearTimeout(timer)
