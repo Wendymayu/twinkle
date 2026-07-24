@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import { useSessions } from '../composables/useSessions'
+import ApprovalCard from './ApprovalCard.vue'
 
-const { messages, connected, busy, loading, sendQuery, createSession } = useSessions()
+const { messages, connected, busy, loading, sendQuery, createSession, inputDisabled } = useSessions()
 const input = ref('')
 const logEl = ref<HTMLUListElement | null>(null)
 
@@ -11,7 +12,7 @@ function scrollDown() {
 }
 function send() {
   const q = input.value.trim()
-  if (!q || !connected.value) return
+  if (!q || !connected.value || inputDisabled.value) return
   input.value = ''
   sendQuery(q)
   scrollDown()
@@ -22,16 +23,25 @@ function send() {
   <div class="chat">
     <ul ref="logEl" class="log">
       <li v-for="(m, i) in messages" :key="i" :class="['row', m.role]">
-        <div v-if="m.role === 'tool'" class="tool-line">{{ m.content }}</div>
+        <ApprovalCard
+          v-if="m.kind === 'approval'"
+          :approval-id="m.approvalId!"
+          :tool="m.tool!"
+          :args="m.args"
+          :reason="m.reason"
+          :request-id="m.requestId!"
+          :decided="m.decided!"
+        />
+        <div v-else-if="m.role === 'tool'" class="tool-line">{{ m.content }}</div>
         <div v-else class="bubble">{{ m.content }}</div>
       </li>
       <li v-if="busy" class="row assistant"><div class="bubble processing">处理中…</div></li>
       <li v-if="loading" class="row assistant"><div class="bubble processing">加载历史…</div></li>
     </ul>
     <footer>
-      <input v-model="input" @keyup.enter="send" :disabled="!connected" placeholder="说点什么…" />
+      <input v-model="input" @keyup.enter="send" :disabled="!connected || inputDisabled" placeholder="说点什么…" />
       <button class="new-btn" @click="createSession" :disabled="!connected" title="新对话">➕ 新对话</button>
-      <button @click="send" :disabled="!connected">发送</button>
+      <button @click="send" :disabled="!connected || inputDisabled">发送</button>
     </footer>
   </div>
 </template>
