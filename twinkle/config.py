@@ -120,16 +120,29 @@ _PERMISSIONS_DEFAULT = {
 
 
 def _load_permissions() -> dict:
-    raw = os.getenv("TWINKLE_PERMISSIONS")
-    if not raw:
-        return {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+    defaults = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
                 for k, v in _PERMISSIONS_DEFAULT.items()}
+    raw = (os.getenv("TWINKLE_PERMISSIONS") or "").strip()
+    if not raw:
+        return defaults
+    # Bare booleans (true/false/yes/no/1/0) -> {enabled: bool}, matching OTEL_ENABLED's
+    # ergonomics so users can write `TWINKLE_PERMISSIONS=true` (not just JSON).
+    low = raw.lower()
+    if low in ("true", "yes", "1"):
+        defaults["enabled"] = True
+        return defaults
+    if low in ("false", "no", "0"):
+        return defaults  # explicitly disabled
+    # Otherwise: must be a JSON object (full config: {enabled, tools, rules, ...}).
     try:
         user = _json.loads(raw)
     except _json.JSONDecodeError:
-        # invalid JSON -> fall back to defaults (engine will log nothing; safe)
-        return {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
-                for k, v in _PERMISSIONS_DEFAULT.items()}
+        # invalid JSON -> fall back to defaults (engine stays off; safe, never crashes)
+        return defaults
+    if not isinstance(user, dict):
+        # JSON but not an object (e.g. a bare number `42`, or `true` parsed as a bool)
+        # -> can't merge into the config; fall back to defaults rather than crashing.
+        return defaults
     merged = dict(_PERMISSIONS_DEFAULT)
     merged.update(user)
     return merged
