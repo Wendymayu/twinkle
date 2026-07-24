@@ -71,3 +71,27 @@ def test_persist_allow_always_non_shell(tmp_path):
     asyncio.run(p.persist_allow_always(
         {"tool": "web_fetch", "args": {"url": "http://x"}}))
     assert p.check("web_fetch", {"url": "http://y"}).level == "allow"
+
+
+def test_override_does_not_bless_metacharacter_chain(tmp_path):
+    p = _policy(tmp_path, tools={"command_exec": "require-approval"},
+                 overrides={"command_exec": ["npm run *"]})
+    # chained dangerous command must NOT be blessed — falls through to deny
+    assert p.check("command_exec", {"command": "npm run build && rm -rf /"}).level == "deny"
+    # but the plain blessed command still works
+    assert p.check("command_exec", {"command": "npm run build"}).level == "allow"
+
+
+def test_persist_empty_command_does_not_create_global_bypass(tmp_path):
+    p = _policy(tmp_path, tools={"command_exec": "require-approval"})
+    import asyncio
+    asyncio.run(p.persist_allow_always({"tool": "command_exec", "args": {"command": ""}}))
+    assert p.check("command_exec", {"command": "rm -rf /"}).level == "deny"
+
+
+def test_override_file_hot_reloads_on_mtime_change(tmp_path):
+    p = _policy(tmp_path, tools={"web_fetch": "require-approval"})
+    assert p.check("web_fetch", {"url": "http://x"}).level == "ask"
+    import json
+    (tmp_path / "ovr.json").write_text(json.dumps({"web_fetch": "allow"}), "utf-8")
+    assert p.check("web_fetch", {"url": "http://x"}).level == "allow"

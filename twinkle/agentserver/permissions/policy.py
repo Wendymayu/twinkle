@@ -13,11 +13,18 @@ import fnmatch
 import json
 import os
 import re
-import shlex
 from pathlib import Path
 from typing import Any
 
+from twinkle.agentserver.permissions.builtin_rules import matches as _cmd_matches
 from twinkle.agentserver.permissions.models import PermissionDecision, PermissionLevel
+
+
+# Shell-chaining / obfuscation metacharacters. A blessed command head must be
+# a single simple command; if any of these appear, refuse to bless via an
+# allow_always override and fall through to deny rules / tier. Otherwise a
+# persisted "npm run *" pattern would bless "npm run build && rm -rf /".
+_SHELL_METACHARS = frozenset(";&|<>`$\n")
 
 
 class PermissionPolicy:
@@ -29,8 +36,8 @@ class PermissionPolicy:
         global_default: str,
         overrides_file: str | None,
     ) -> None:
-        self._tools = tools
-        self._rules = rules
+        self._tools = dict(tools)
+        self._rules = list(rules)
         self._global_default = global_default
         self._overrides_file = overrides_file
         self._mtime = -1.0
@@ -57,6 +64,11 @@ class PermissionPolicy:
         if tool == "command_exec":
             patterns = ovr.get("command_exec", [])
             cmd = args.get("command", "")
+            # Refuse to bless a command that chains / obfuscates via shell
+            # metacharacters — the head-pattern must match a single simple
+            # command, otherwise deny rules could be bypassed.
+            if any(c in cmd for c in _SHELL_METACHARS):
+                return False
             return any(fnmatch.fnmatch(cmd, p) for p in patterns)
         return ovr.get(tool) == "allow"
 
@@ -69,8 +81,7 @@ class PermissionPolicy:
                                       source="override")
         # command_exec builtin deny
         if tool == "command_exec":
-            from twinkle.agentserver.permissions.builtin_rules import matches as cmd_matches
-            reason = cmd_matches(args.get("command", ""))
+            reason = _cmd_matches(args.get("command", ""))
             if reason:
                 return PermissionDecision(level=PermissionLevel.DENY, reason=reason,
                                           source="rule", rule_id=reason,
@@ -98,9 +109,16 @@ class PermissionPolicy:
         ovr = self._load_overrides()
         if tool == "command_exec":
             cmd = (decision_data.get("args") or {}).get("command", "")
-            tokens = shlex.split(cmd) if cmd else []
+            # plain whitespace split — keeps Windows backslashes (shlex would
+            # mangle C:\Users → C:Users); command heads carry no spaces in
+            # their first tokens.
+            tokens = cmd.split() if cmd else []
             head = " ".join(tokens[:2]) if len(tokens) >= 2 else (tokens[0] if tokens else "")
-            pattern = (head + " *") if head else "*"
+            if not head:
+                # An unparseable / empty command must never become a global
+                # "*" allow that would bless e.g. rm -rf /.
+                return
+            pattern = head + " *"
             lst = ovr.setdefault("command_exec", [])
             if pattern not in lst:
                 lst.append(pattern)
