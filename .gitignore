@@ -49,6 +49,11 @@ web/.vite/
 
 # Logs
 *.log
+# Runtime log dir (gateway.log / server.log / audit JSONL) when WORKSPACE is
+# pointed inside the repo; defaults to ~/.twinkle (outside repo) so usually
+# moot, but mirror the .twinkle_data/ precedent so a repo-local WORKSPACE stays
+# clean. *.log above covers gateway.log/server.log; this covers audit .jsonl.
+logs/
 
 # Session persistence (disk-backed sessions, per-user local data)
 .twinkle_data/
