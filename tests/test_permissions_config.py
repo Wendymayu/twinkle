@@ -39,7 +39,7 @@ def test_override_paths_under_workspace(monkeypatch):
         ".twinkle_data/permission_overrides.json"
     )
     assert cfg.PERMISSION_AUDIT_FILE.replace("\\", "/").endswith(
-        ".twinkle_data/permission_audit.jsonl"
+        "logs/audit/permission_audit.jsonl"
     )
 
 

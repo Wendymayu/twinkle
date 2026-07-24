@@ -52,6 +52,13 @@ WORKSPACE_DIR = os.path.expanduser(
     os.getenv("TWINKLE_WORKSPACE_DIR") or str(Path.home() / ".twinkle")
 )
 
+# --- Process logs (gateway.log / server.log / audit JSONL) ---
+# Defaults to <WORKSPACE_DIR>/logs (so ~/.twinkle/logs). gateway.log and
+# server.log are daily-rotated by twinkle.logging_config.setup_logging; the
+# JSONL permission audit lives under logs/audit/ (no rotation, written
+# directly by ToolPermissionLog). Override the whole dir with TWINKLE_LOG_DIR.
+LOG_DIR = os.getenv("TWINKLE_LOG_DIR") or str(Path(WORKSPACE_DIR) / "logs")
+
 # --- Sessions persistence (disk-backed session store) ---
 # Per-session dir layout: <SESSIONS_DIR>/<session_id>/{metadata.json,history.json}.
 # Defaults to <WORKSPACE_DIR>/.twinkle_data/sessions (which lives under ~/.twinkle
@@ -158,5 +165,5 @@ PERMISSION_OVERRIDES_FILE = os.getenv("TWINKLE_PERMISSION_OVERRIDES_FILE") or st
     Path(WORKSPACE_DIR) / ".twinkle_data" / "permission_overrides.json"
 )
 PERMISSION_AUDIT_FILE = os.getenv("TWINKLE_PERMISSION_AUDIT_FILE") or str(
-    Path(WORKSPACE_DIR) / ".twinkle_data" / "permission_audit.jsonl"
+    Path(LOG_DIR) / "audit" / "permission_audit.jsonl"
 )
