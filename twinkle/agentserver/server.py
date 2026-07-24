@@ -43,19 +43,28 @@ async def _safe_send(ws, resp: E2AResponse) -> None:
         log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-def build_agent_loop(hooks=None):
+def build_agent_loop(hooks=None, llm=None):
     """Production wiring — config-driven LLM + disk-backed SessionStore.
 
     Returns ``(loop, store)`` so the caller can share ONE store instance
     between the AgentLoop (chat/reagent path) and ``ws_handler`` (RPC path),
     mirroring jiuwenclaw's remote storage mode where both flows see the same
-    sessions. *hooks* is an optional list of AgentHook instances to register.
+    sessions. *hooks* is an optional list of AgentHook instances to register
+    IN ADDITION to the always-on PermissionHook (Phase 4). *llm* is an
+    optional LLM override (tests inject a scripted client; default =
+    config-driven LLMClient).
     """
-    llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
+    from twinkle.agentserver.permissions import permission_engine
+    from twinkle.agentserver.hooks.builtin import PermissionHook
+
+    if llm is None:
+        llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     store = SessionStore(SESSIONS_DIR)
     tools = tool_manager()
     memory = LongTermMemory()
-    loop = AgentLoop(llm, store, tools, memory)
+    engine = permission_engine()
+    loop = AgentLoop(llm, store, tools, memory, permission=engine)
+    loop.register_hook(PermissionHook(engine))
     if hooks:
         for h in hooks:
             loop.register_hook(h)
