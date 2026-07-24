@@ -63,3 +63,31 @@ def test_cancel_all():
         reg.cancel_all()
         assert fut.cancelled()
     asyncio.run(go())
+
+
+def test_handle_respond_missing_decision_sends_failed_ack_and_leaves_future_pending():
+    async def go():
+        reg = ApprovalRegistry()
+        fut = reg.register("a1")
+        # malformed: approval_id present but no decision
+        env = E2AEnvelope(request_id="r2", method="approval.respond",
+                          params={"approval_id": "a1"})  # no "decision"
+        sent = []
+        await reg.handle_respond(env, lambda r: sent.append(r) or asyncio.sleep(0))
+        # must NOT have resolved the future (no set_result(None))
+        assert not fut.done()
+        # ack must be failed, not a lying "succeeded"
+        assert sent[0].status == "failed" and sent[0].body["accepted"] is False
+    asyncio.run(go())
+
+
+def test_handle_respond_missing_approval_id_sends_failed_ack():
+    async def go():
+        reg = ApprovalRegistry()
+        # malformed: no approval_id at all
+        env = E2AEnvelope(request_id="r2", method="approval.respond",
+                          params={"decision": "allow"})  # no "approval_id"
+        sent = []
+        await reg.handle_respond(env, lambda r: sent.append(r) or asyncio.sleep(0))
+        assert sent[0].status == "failed" and sent[0].body["accepted"] is False
+    asyncio.run(go())

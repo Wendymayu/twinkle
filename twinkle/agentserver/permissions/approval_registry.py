@@ -40,7 +40,9 @@ class ApprovalRegistry:
     ) -> None:
         approval_id = envelope.params.get("approval_id")
         decision = envelope.params.get("decision")
-        ok = self.resolve(approval_id, decision) if approval_id else False
+        ok = self.resolve(approval_id, decision) if (approval_id and decision) else False
+        if not ok:
+            log.warning("approval.respond rejected: approval_id=%r decision=%r", approval_id, decision)
         ack = E2AResponse(
             request_id=envelope.request_id, sequence=0, is_final=True,
             status="succeeded" if ok else "failed",
