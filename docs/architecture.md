@@ -1042,7 +1042,7 @@ cd web && npm install && npm run dev   # Vite(:5173)
 |---|---|---|
 | `TWINKLE_PERMISSIONS` | (disabled) | JSON：`{enabled, enabled_channels, global_default, tools, rules, approval_overrides}`。`enabled=false` = 系统关（全 ALLOW，无审计/无 ASK；command_exec 仍走 builtin_rules） |
 | `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | 运行时 allow_always 存储（mtime 热重载） |
-| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/.twinkle_data/permission_audit.jsonl` | ToolPermissionLog JSONL 审计文件 |
+| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/logs/audit/permission_audit.jsonl` | ToolPermissionLog JSONL 审计文件 |
 
 **Observability 配置**（读自 `twinkle/observability/config.py`，默认全关 = 零成本 no-op；装 `[obs]` extra 才生效）：
 

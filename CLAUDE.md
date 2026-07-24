@@ -112,6 +112,7 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | |
 | `TWINKLE_AGENT_MAX_STEPS` | `1000` | Max ReAct steps before `e2a.error` (runaway backstop, not a target) |
 | `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | Sandbox root for `command_exec`/`file_tools` — agent file ops confined under this. Defaults to the user home so generated files don't pollute the repo; override to point elsewhere |
+| `TWINKLE_LOG_DIR` | `<WORKSPACE>/logs` | Process log dir (gateway.log / server.log daily-rotated by `logging_config.setup_logging`; JSONL audit under `logs/audit/`) |
 | `OTEL_ENABLED` | `false` | Observability master switch (needs `[obs]` extra); false = `setup()` no-op, zero-cost |
 | `OTEL_TRACES_EXPORTER`/`OTEL_METRICS_EXPORTER` | `none` | `otlp` / `console` / `none` (read in `twinkle/observability/config.py`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP gRPC collector endpoint (`http://` = insecure, `https://` = TLS) |
@@ -119,7 +120,7 @@ Read in `twinkle/config.py`, priority: env var > `.env` file > default.
 | `OTEL_SERVICE_NAME` | `twinkle-agentserver` | Resource `service.name` |
 | `TWINKLE_PERMISSIONS` | (disabled) | JSON: {enabled, enabled_channels, global_default, tools, rules, approval_overrides}. false = system off (all ALLOW, command_exec still uses builtin_rules) |
 | `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | runtime allow_always store (mtime hot-reload) |
-| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/.twinkle_data/permission_audit.jsonl` | ToolPermissionLog JSONL |
+| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/logs/audit/permission_audit.jsonl` | ToolPermissionLog JSONL (no rotation) |
 
 ## Conventions
 
