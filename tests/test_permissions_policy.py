@@ -95,3 +95,16 @@ def test_override_file_hot_reloads_on_mtime_change(tmp_path):
     import json
     (tmp_path / "ovr.json").write_text(json.dumps({"web_fetch": "allow"}), "utf-8")
     assert p.check("web_fetch", {"url": "http://x"}).level == "allow"
+
+
+def test_allow_always_blesses_bare_command(tmp_path):
+    p = _policy(tmp_path, tools={"command_exec": "require-approval"})
+    import asyncio
+    asyncio.run(p.persist_allow_always(
+        {"tool": "command_exec", "args": {"command": "git status"}}))
+    # the persisted pattern is "git status *"; the BARE "git status" (no args) must be blessed too
+    assert p.check("command_exec", {"command": "git status"}).level == "allow"
+    # and a command with args still works
+    assert p.check("command_exec", {"command": "git status --short"}).level == "allow"
+    # and a different command is NOT blessed
+    assert p.check("command_exec", {"command": "npm install"}).level == "ask"

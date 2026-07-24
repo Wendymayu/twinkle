@@ -69,7 +69,10 @@ class PermissionPolicy:
             # command, otherwise deny rules could be bypassed.
             if any(c in cmd for c in _SHELL_METACHARS):
                 return False
-            return any(fnmatch.fnmatch(cmd, p) for p in patterns)
+            for p in patterns:
+                if fnmatch.fnmatch(cmd, p) or cmd == p.rstrip(" *"):
+                    return True
+            return False
         return ovr.get(tool) == "allow"
 
     # --- check ---
