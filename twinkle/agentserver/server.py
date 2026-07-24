@@ -138,12 +138,13 @@ def ws_handler(loop: AgentLoop, store: SessionStore):
                     continue
                 task = asyncio.create_task(run_task(envelope))
                 active[sid] = task
-                task.add_done_callback(lambda t, sid=sid: active.pop(sid, None))
+                task.add_done_callback(lambda t, sid=sid: active.pop(sid, None) if active.get(sid) is t else None)
         finally:
             for t in list(active.values()):
                 t.cancel()
             await asyncio.gather(*active.values(), return_exceptions=True)
             active.clear()
+            APPROVAL_REGISTRY.cancel_all()
 
     return handler
 
