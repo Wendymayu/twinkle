@@ -52,6 +52,16 @@ class MessageHandler:
                         payload=dict(resp.body),
                         content="",
                     )
+                elif resp.response_kind == "e2a.ask":
+                    out = Message(
+                        id=msg.id,
+                        type="event",
+                        channel_id=msg.channel_id,
+                        session_id=msg.session_id,
+                        event_type=EventType.APPROVAL_ASK,
+                        payload=dict(resp.body),
+                        content="",
+                    )
                 elif resp.response_kind == "e2a.result":
                     out = Message(
                         id=msg.id,
