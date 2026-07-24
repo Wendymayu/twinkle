@@ -46,5 +46,37 @@ def test_orphan_assistant_tool_calls_sanitized(session_store) -> None:
     assert roles[-1] == "assistant" and msgs[-1]["content"] == "recovered"
 
 
+def test_mid_batch_orphan_sanitized(session_store) -> None:
+    # crash mid-batch: c1 executed + result appended, c2 hit ASK + crashed while suspended.
+    # last message is `tool` (c1's result), NOT assistant — the old sanitize bailed here.
+    asyncio.run(session_store.append("s1", {"role": "system", "content": "sys"}))
+    asyncio.run(session_store.append("s1", {"role": "user", "content": "do x and y"}))
+    asyncio.run(session_store.append("s1", {
+        "role": "assistant", "content": None,
+        "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "echo", "arguments": '{"text":"x"}'}},
+            {"id": "c2", "type": "function", "function": {"name": "echo", "arguments": '{"text":"y"}'}},
+        ]}))
+    asyncio.run(session_store.append("s1", {"role": "tool", "tool_call_id": "c1", "content": "tool-saw:x"}))
+    @tool
+    async def echo(text: str) -> str:
+        """echo"""
+        return f"tool-saw:{text}"
+    tm = ToolManager(); tm.register(echo)
+    llm = _ScriptedLLM([
+        [Finish("stop", {"role": "assistant", "content": "recovered", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, session_store, tm, LongTermMemory())
+    asyncio.run(_collect(loop.run_stream(_env("resume", session_id="s1"))))
+    msgs = session_store.get_messages("s1")
+    # c1's real result preserved; c2's synthetic result injected (this is the I-1 fix)
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    assert tool_msgs[0]["tool_call_id"] == "c1" and tool_msgs[0]["content"] == "tool-saw:x"
+    assert tool_msgs[1]["tool_call_id"] == "c2"
+    assert "interrupted" in tool_msgs[1]["content"]
+    assert msgs[-1]["role"] == "assistant" and msgs[-1]["content"] == "recovered"
+
+
 async def _collect(gen):
     return [f async for f in gen]

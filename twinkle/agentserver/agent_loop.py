@@ -323,16 +323,25 @@ class AgentLoop:
         )
 
     async def _sanitize_orphan_tool_calls(self, session_id: str, request_id: str) -> None:
-        """If the session's last message is an assistant with tool_calls lacking
-        results (a crash mid-approval), inject a synthetic tool_result for each
-        missing tool_call_id so the next LLM call doesn't error on orphan tool_calls."""
+        """If the session's most recent assistant-with-tool_calls message lacks
+        results for some of its tool_calls (a crash mid-approval, possibly after
+        some results were already appended), inject a synthetic tool_result for
+        each missing tool_call_id so the next LLM call doesn't error on orphan
+        tool_calls."""
         msgs = self._store.get_messages(session_id)
         if not msgs:
             return
-        last = msgs[-1]
-        if last.get("role") != "assistant" or not last.get("tool_calls"):
+        # find the LAST assistant message that carries tool_calls — the only one
+        # that could be orphaned by a mid-batch crash (earlier assistants are
+        # complete, or the LLM would have errored before reaching this one).
+        last_assistant = None
+        for m in reversed(msgs):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                last_assistant = m
+                break
+        if last_assistant is None:
             return
-        for tc in last["tool_calls"]:
+        for tc in last_assistant["tool_calls"]:
             tc_id = tc.get("id")
             if tc_id and not any(m.get("role") == "tool" and m.get("tool_call_id") == tc_id
                                 for m in msgs):

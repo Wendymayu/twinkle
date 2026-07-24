@@ -129,3 +129,42 @@ def test_allow_always_persists_then_skips_next_ask(session_store, tmp_path) -> N
     asks = [f for f in frames if f.response_kind == "e2a.ask"]
     assert len(asks) == 1
     assert frames[-1].response_kind == "e2a.complete"
+
+
+def test_multi_tool_batch_each_asks_then_resumes(session_store, tmp_path) -> None:
+    APPROVAL_REGISTRY.cancel_all()
+    @tool
+    async def echo(text: str) -> str:
+        """echo"""
+        return f"tool-saw:{text}"
+    tm = ToolManager(); tm.register(echo)
+    # one assistant message with TWO tool_calls; both require approval (resolve "allow",
+    # NOT allow_always, so the 2nd still asks)
+    llm = _ScriptedLLM([
+        [Finish("tool_calls", {"role": "assistant", "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "echo", "arguments": '{"text":"a"}'}},
+                {"id": "c2", "type": "function", "function": {"name": "echo", "arguments": '{"text":"b"}'}},
+            ]})],
+        [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, session_store, tm, LongTermMemory(), permission=_engine(tmp_path))
+    loop.register_hook(PermissionHook(loop._permission))
+
+    async def run():
+        frames = []
+        async for f in loop.run_stream(_env("batch")):
+            frames.append(f)
+            if f.response_kind == "e2a.ask":
+                APPROVAL_REGISTRY.resolve(f.body["approval_id"], "allow")
+        return frames
+
+    frames = asyncio.run(run())
+    asks = [f for f in frames if f.response_kind == "e2a.ask"]
+    assert len(asks) == 2  # both c1 and c2 asked (allow, not allow_always -> no override persisted)
+    assert frames[-1].response_kind == "e2a.complete"
+    msgs = session_store.get_messages("s1")
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    assert {m["tool_call_id"] for m in tool_msgs} == {"c1", "c2"}
+    assert all("tool-saw:" in m["content"] for m in tool_msgs)
