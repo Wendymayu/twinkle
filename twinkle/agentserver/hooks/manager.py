@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from twinkle.agentserver.hooks.base import AgentHook, HookContext, HookEvent
+from twinkle.agentserver.hooks.base import AgentHook, HookContext, HookEvent, HookInterrupt
 
 log = logging.getLogger("twinkle.hooks.manager")
 
@@ -90,6 +90,8 @@ class HookManager:
         for _pri, method in entries:
             try:
                 await method(ctx)
+            except HookInterrupt:
+                raise  # HITL control-flow signal — must propagate to the caller
             except Exception:
                 log.exception("hook callback %s failed for event %s; continuing",
                               method.__qualname__, event.name)
