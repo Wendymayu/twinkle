@@ -40,7 +40,7 @@ def test_create_twice_returns_error_with_current_list() -> None:
     asyncio.run(todo_create.invoke({"tasks": ["first"]}))
     out = asyncio.run(todo_create.invoke({"tasks": ["second"]}))
     assert "Error:" in out
-    assert "already exists" in out
+    assert "in progress" in out
     assert "first" in out  # current list appended
     assert "second" not in out
 

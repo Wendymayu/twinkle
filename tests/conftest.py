@@ -37,3 +37,18 @@ def session_store(sessions_dir):
     """A SessionStore rooted in a per-test tmp dir (no repo pollution)."""
     from twinkle.agentserver.sessions import SessionStore
     return SessionStore(str(sessions_dir))
+
+
+@pytest.fixture
+def todos_dir(tmp_path) -> "Path":
+    """A fresh per-test todos directory (disk-backed TodoStore target)."""
+    d = tmp_path / "todos"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def todo_store(todos_dir):
+    """A TodoStore rooted in a per-test tmp dir (no repo pollution)."""
+    from twinkle.agentserver.todo.store import TodoStore
+    return TodoStore(str(todos_dir))

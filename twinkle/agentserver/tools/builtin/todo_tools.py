@@ -18,8 +18,9 @@ from twinkle.agentserver.todo import (
     TodoError, TodoStore, TodoTask,
 )
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.config import TODOS_DIR
 
-_todo_store = TodoStore()  # 模块级单例;session 隔离靠 ContextVar 路由
+_todo_store = TodoStore(TODOS_DIR)  # 模块级单例;session 隔离靠 ContextVar 路由
 
 _ICON = {"waiting": "[ ]", "running": "[>]", "completed": "[x]"}
 
