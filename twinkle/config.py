@@ -68,6 +68,16 @@ SESSIONS_DIR = os.getenv("TWINKLE_SESSIONS_DIR") or str(
     Path(WORKSPACE_DIR) / ".twinkle_data" / "sessions"
 )
 
+# --- Todos persistence (disk-backed per-session todo store) ---
+# Flat layout: <TODOS_DIR>/<session_id>.json (one file per session). Defaults
+# to <WORKSPACE_DIR>/.twinkle_data/todos — parallel to sessions/, NOT co-located
+# inside the session dir, so session deletion must explicitly clean up todos
+# (TodoStore.delete wired into the session.delete RPC). Override with
+# TWINKLE_TODOS_DIR (~/... expanded).
+TODOS_DIR = os.getenv("TWINKLE_TODOS_DIR") or str(
+    Path(WORKSPACE_DIR) / ".twinkle_data" / "todos"
+)
+
 
 def ensure_workspace_dir() -> str:
     """Create WORKSPACE_DIR if missing (idempotent). Call at server startup

@@ -7,3 +7,11 @@ def test_context_defaults_present():
     assert config.CONTEXT_TOKEN_THRESHOLD > 0
     assert config.CONTEXT_KEEP_RECENT_PAIRS > 0
     assert isinstance(config.CONTEXT_SUMMARY_PROMPT, str) and config.CONTEXT_SUMMARY_PROMPT
+
+
+def test_todos_dir_default_present():
+    from pathlib import Path
+    assert isinstance(config.TODOS_DIR, str) and config.TODOS_DIR
+    p = Path(config.TODOS_DIR)
+    assert p.name == "todos"
+    assert p.parent.name == ".twinkle_data"
