@@ -35,7 +35,10 @@ class TodoStore:
         # 单线程事件循环下 setdefault 无竞态(同步调用,无 await 间隙)。
         return self._locks.setdefault(session_id, asyncio.Lock())
 
-    async def create(self, session_id: str, tasks: list[str]) -> list[TodoTask]:
+    async def create(self, session_id: str, tasks: list[str]) -> None:
+        """Create a todo list for the session. Raises TodoError if tasks is
+        empty or a list already exists for this session.
+        """
         if not tasks:
             raise TodoError("tasks must be a non-empty list.")
         async with self._lock(session_id):
@@ -49,11 +52,13 @@ class TodoStore:
                 for i, t in enumerate(tasks)
             ]
             self._data[session_id] = new
-            return list(new)
 
     async def complete(
         self, session_id: str, idx: int, result: str = ""
-    ) -> list[TodoTask]:
+    ) -> None:
+        """Mark a task as completed. Raises TodoError if idx not found or
+        the task is already completed.
+        """
         async with self._lock(session_id):
             tasks = self._data.get(session_id, [])
             for t in tasks:
@@ -62,7 +67,7 @@ class TodoStore:
                         raise TodoError(f"Task {idx} is already completed.")
                     t.status = "completed"
                     t.result = (result or "").strip() or "done"
-                    return list(tasks)
+                    return
             raise TodoError(f"Task {idx} not found.")
 
     async def list_tasks(self, session_id: str) -> list[TodoTask]:

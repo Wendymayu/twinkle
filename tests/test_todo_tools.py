@@ -3,19 +3,19 @@ import asyncio
 
 from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
-    drain_todo_events,
+    flush_todo_events,
     reset_todo_events,
 )
 from twinkle.agentserver.tools import tool_manager
 from twinkle.agentserver.tools.builtin.todo_tools import todo_complete, todo_create, todo_list
 
 
-def _set_sid(sid: str) -> None:
-    PLAN_TODO_SESSION_ID.set(sid)
+def _set_session_id(session_id: str) -> None:
+    PLAN_TODO_SESSION_ID.set(session_id)
 
 
 def test_create_returns_markdown_with_tasks() -> None:
-    _set_sid("tools-1")
+    _set_session_id("tools-1")
 
     async def run():
         return await todo_create.invoke({"tasks": ["alpha", "beta"]})
@@ -27,7 +27,7 @@ def test_create_returns_markdown_with_tasks() -> None:
 
 
 def test_complete_marks_and_lists() -> None:
-    _set_sid("tools-2")
+    _set_session_id("tools-2")
     asyncio.run(todo_create.invoke({"tasks": ["x", "y"]}))
     out = asyncio.run(todo_complete.invoke({"idx": 1, "result": "ok"}))
     assert "Task 1 marked as completed." in out
@@ -36,7 +36,7 @@ def test_complete_marks_and_lists() -> None:
 
 
 def test_create_twice_returns_error_with_current_list() -> None:
-    _set_sid("tools-3")
+    _set_session_id("tools-3")
     asyncio.run(todo_create.invoke({"tasks": ["first"]}))
     out = asyncio.run(todo_create.invoke({"tasks": ["second"]}))
     assert "Error:" in out
@@ -46,7 +46,7 @@ def test_create_twice_returns_error_with_current_list() -> None:
 
 
 def test_complete_unknown_idx_error() -> None:
-    _set_sid("tools-4")
+    _set_session_id("tools-4")
     asyncio.run(todo_create.invoke({"tasks": ["a"]}))
     out = asyncio.run(todo_complete.invoke({"idx": 9}))
     assert "Error:" in out
@@ -54,7 +54,7 @@ def test_complete_unknown_idx_error() -> None:
 
 
 def test_list_empty_session() -> None:
-    _set_sid("tools-5-empty")
+    _set_session_id("tools-5-empty")
 
     async def run():
         return await todo_list.invoke({})
@@ -64,11 +64,11 @@ def test_list_empty_session() -> None:
 
 
 def test_sessions_isolated_via_contextvar() -> None:
-    _set_sid("iso-A")
+    _set_session_id("iso-A")
     asyncio.run(todo_create.invoke({"tasks": ["A-task"]}))
-    _set_sid("iso-B")
+    _set_session_id("iso-B")
     asyncio.run(todo_create.invoke({"tasks": ["B-task"]}))
-    _set_sid("iso-A")
+    _set_session_id("iso-A")
     out = asyncio.run(todo_list.invoke({}))
     assert "A-task" in out
     assert "B-task" not in out
@@ -90,12 +90,12 @@ def test_schemas_registered_in_tool_manager() -> None:
 
 
 def test_create_publishes_snapshot() -> None:
-    _set_sid("pub-1")
+    _set_session_id("pub-1")
     reset_todo_events()
     asyncio.run(todo_create.invoke({"tasks": ["a", "b"]}))
-    evs = drain_todo_events()
-    assert len(evs) == 1
-    snap = evs[0]
+    snapshots = flush_todo_events()
+    assert len(snapshots) == 1
+    snap = snapshots[0]
     assert snap["total"] == 2
     assert snap["remaining"] == 2
     assert [t["idx"] for t in snap["tasks"]] == [1, 2]
@@ -104,14 +104,14 @@ def test_create_publishes_snapshot() -> None:
 
 
 def test_complete_publishes_snapshot() -> None:
-    _set_sid("pub-2")
+    _set_session_id("pub-2")
     reset_todo_events()
     asyncio.run(todo_create.invoke({"tasks": ["x", "y"]}))
-    drain_todo_events()  # clear create's snapshot
+    flush_todo_events()  # clear create's snapshot
     asyncio.run(todo_complete.invoke({"idx": 1, "result": "ok"}))
-    evs = drain_todo_events()
-    assert len(evs) == 1
-    snap = evs[0]
+    snapshots = flush_todo_events()
+    assert len(snapshots) == 1
+    snap = snapshots[0]
     assert snap["total"] == 2
     assert snap["remaining"] == 1
     assert snap["tasks"][0]["status"] == "completed"
@@ -119,19 +119,19 @@ def test_complete_publishes_snapshot() -> None:
 
 
 def test_list_does_not_publish() -> None:
-    _set_sid("pub-3")
+    _set_session_id("pub-3")
     reset_todo_events()
     asyncio.run(todo_create.invoke({"tasks": ["a"]}))
-    drain_todo_events()
+    flush_todo_events()
     asyncio.run(todo_list.invoke({}))
-    assert drain_todo_events() == []
+    assert flush_todo_events() == []
 
 
 def test_error_path_does_not_publish() -> None:
-    _set_sid("pub-4")
+    _set_session_id("pub-4")
     reset_todo_events()
     asyncio.run(todo_create.invoke({"tasks": ["first"]}))
-    drain_todo_events()
+    flush_todo_events()
     # second create fails (already exists) — must NOT publish
     asyncio.run(todo_create.invoke({"tasks": ["second"]}))
-    assert drain_todo_events() == []
+    assert flush_todo_events() == []

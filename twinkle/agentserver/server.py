@@ -51,23 +51,20 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
 
     *store* is injected so the caller controls which SessionStore instance
     the loop (chat/ReAct path) and ``ws_handler`` (RPC path) share.
-    *hooks* is an optional list of AgentHook instances to register IN
-    ADDITION to the always-on PermissionHook (Phase 4). *llm* is an optional
-    override (tests inject a scripted client; default = config-driven LLMClient).
+    *hooks* is an optional list of AgentHook instances to register.
+    All hooks are explicit — no hidden always-on hooks. Callers that need
+    permission enforcement pass PermissionHook; minimal test setups pass
+    an empty list. *llm* is an optional override (tests inject a scripted
+    client; default = config-driven LLMClient).
     """
-    from twinkle.agentserver.permissions import permission_engine
-    from twinkle.agentserver.hooks.builtin import PermissionHook
-
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     tools = tool_manager()
     memory = LongTermMemory()
-    engine = permission_engine()
-    loop = AgentLoop(llm, store, tools, memory, permission=engine)
-    loop.register_hook(PermissionHook(engine))
+    loop = AgentLoop(llm, store, tools, memory)
     if hooks:
-        for h in hooks:
-            loop.register_hook(h)
+        for hook in hooks:
+            loop.register_hook(hook)
     return loop
 
 
@@ -144,8 +141,12 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
 
 
 async def main() -> None:
+    from twinkle.agentserver.permissions import permission_engine
+    from twinkle.agentserver.hooks.builtin import PermissionHook, LoggingHook
+
     store = session_store()
-    loop = build_agent_loop(store, hooks=[LoggingHook()])
+    engine = permission_engine()
+    loop = build_agent_loop(store, hooks=[PermissionHook(engine), LoggingHook()])
     handler = ws_handler(loop, store)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):

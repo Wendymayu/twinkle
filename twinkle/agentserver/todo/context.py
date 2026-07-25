@@ -31,24 +31,32 @@ def reset_todo_events() -> None:
     TODO_EVENTS.set([])
 
 
-def publish_todo_update(snapshot: dict) -> None:
-    """Append a structured todo snapshot to the per-request bus.
+def append_todo_event(snapshot: dict) -> None:
+    """Append a structured todo snapshot to the per-request event buffer.
 
-    No-op when the bus is uninitialized (None) — e.g. when a todo tool is
+    No-op when the buffer is uninitialized (None) — e.g. when a todo tool is
     invoked directly outside of run_stream (tests, ad-hoc calls). This keeps
     the tool's return value (markdown string for the model) unchanged.
+
+    The actual publish happens in agent_loop when flush_todo_events() yields
+    e2a.todo_update frames.
     """
-    evs = TODO_EVENTS.get()
-    if evs is None:
+    todo_events = TODO_EVENTS.get()
+    if todo_events is None:
         return
-    evs.append(snapshot)
+    todo_events.append(snapshot)
 
 
-def drain_todo_events() -> list[dict]:
-    """Return and clear pending todo snapshots. Empty list if no bus."""
-    evs = TODO_EVENTS.get()
-    if not evs:
+def flush_todo_events() -> list[dict]:
+    """Flush the per-request event buffer: return pending snapshots and clear.
+
+    Returns the accumulated snapshots for the caller (agent_loop) to yield
+    as e2a.todo_update frames. Empty list when the buffer is uninitialized
+    or already empty.
+    """
+    todo_events = TODO_EVENTS.get()
+    if not todo_events:
         return []
-    out = list(evs)
-    evs.clear()
-    return out
+    snapshots = list(todo_events)
+    todo_events.clear()
+    return snapshots

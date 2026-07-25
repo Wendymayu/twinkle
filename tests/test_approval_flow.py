@@ -35,6 +35,14 @@ def _engine(tmp_path):
                             enabled=True, enabled_channels={"web"})
 
 
+def _make_loop(session_store, tmp_path, llm, tm):
+    """Build AgentLoop + register PermissionHook — engine stays in the hook."""
+    engine = _engine(tmp_path)
+    loop = AgentLoop(llm, session_store, tm, LongTermMemory())
+    loop.register_hook(PermissionHook(engine))
+    return loop
+
+
 def test_ask_then_allow_resumes_and_executes(session_store, tmp_path) -> None:
     APPROVAL_REGISTRY.cancel_all()
     @tool
@@ -48,8 +56,7 @@ def test_ask_then_allow_resumes_and_executes(session_store, tmp_path) -> None:
                             "function": {"name": "echo", "arguments": '{"text":"hi"}'}}]})],
         [TextDelta("ok"), Finish("stop", {"role": "assistant", "content": "ok", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory(), permission=_engine(tmp_path))
-    loop.register_hook(PermissionHook(loop._permission))
+    loop = _make_loop(session_store, tmp_path, llm, tm)
 
     async def run():
         frames = []
@@ -80,8 +87,7 @@ def test_ask_then_denied_injects_deny_result(session_store, tmp_path) -> None:
                             "function": {"name": "echo", "arguments": '{"text":"hi"}'}}]})],
         [Finish("stop", {"role": "assistant", "content": "denied-ok", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory(), permission=_engine(tmp_path))
-    loop.register_hook(PermissionHook(loop._permission))
+    loop = _make_loop(session_store, tmp_path, llm, tm)
 
     async def run():
         frames = []
@@ -114,8 +120,7 @@ def test_allow_always_persists_then_skips_next_ask(session_store, tmp_path) -> N
                             "function": {"name": "echo", "arguments": '{"text":"b"}'}}]})],
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory(), permission=_engine(tmp_path))
-    loop.register_hook(PermissionHook(loop._permission))
+    loop = _make_loop(session_store, tmp_path, llm, tm)
 
     async def run():
         frames = []
@@ -148,8 +153,7 @@ def test_multi_tool_batch_each_asks_then_resumes(session_store, tmp_path) -> Non
             ]})],
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory(), permission=_engine(tmp_path))
-    loop.register_hook(PermissionHook(loop._permission))
+    loop = _make_loop(session_store, tmp_path, llm, tm)
 
     async def run():
         frames = []

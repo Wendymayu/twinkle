@@ -374,7 +374,7 @@ LLMClient  SessionStore  ToolManager
     ├── llm.stream(msgs, tools)  # 返回 TextDelta | Finish
     │   ├── TextDelta → yield E2AResponse(e2a.chunk)
     │   └── Finish → store.append(assistant)
-    │       ├── finish_reason=="tool_calls" → 执行工具 → drain_todo_events
+    │       ├── finish_reason=="tool_calls" → 执行工具 → flush_todo_events
     │       │     → [若有快照] yield e2a.todo_update → store.append(tool) → continue
     │       └── finish_reason=="stop" → yield e2a.complete → return
     │
@@ -385,7 +385,7 @@ LLMClient  SessionStore  ToolManager
 - `run_stream` 是 **async generator**，yield E2AResponse — loop 对 ws 零依赖，单测无需起 ws
 - 工具结果回灌是命门：`{role:"tool", tool_call_id, content:result}` append 进 store，下一轮 `get_messages` 自然带上
 - `max_steps` 防止工具循环不收敛；触顶是"正常 yield `e2a.error` 后返回"，**非异常**——异常才走 §4.1 步骤 5
-- 入口设 plan-todo ContextVar + `reset_todo_events`，会话首次插入 `TODO_SYSTEM_PROMPT`；工具执行后 `drain_todo_events` 产 `e2a.todo_update` 侧信道（结构化快照 `{tasks, remaining, total}`）
+- 入口设 plan-todo ContextVar + `reset_todo_events`，会话首次插入 `TODO_SYSTEM_PROMPT`；工具执行后 `flush_todo_events` 产 `e2a.todo_update` 侧信道（结构化快照 `{tasks, remaining, total}`）
 
 ### 4.3 SessionStore — 会话记忆（磁盘落盘 + 内存缓存）
 

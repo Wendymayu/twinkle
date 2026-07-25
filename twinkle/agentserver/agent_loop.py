@@ -17,7 +17,7 @@ from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
-    drain_todo_events,
+    flush_todo_events,
     reset_todo_events,
 )
 from twinkle.agentserver.permission_context import set_permission_channel
@@ -64,13 +64,11 @@ class AgentLoop:
         store: SessionStore,
         tools: ToolManager,
         memory: LongTermMemory,
-        permission=None,
     ) -> None:
         self._llm = llm
         self._store = store
         self._tools = tools
         self._memory = memory
-        self._permission = permission
         self._hooks = HookManager(self)
 
     def register_hook(self, hook_instance: AgentHook) -> None:
@@ -133,7 +131,7 @@ class AgentLoop:
         """The ReAct loop with hook trigger points + context compression inserted.
 
         Model calls use manual self._hooks.execute() (async generator incompatible with @hook).
-        Tool calls use @hook-decorated _raided_tool_call.
+        Tool calls use @hook-decorated _hooked_tool_call.
         Context compression runs before each LLM call.
         """
         session_id = envelope.session_id
@@ -229,7 +227,7 @@ class AgentLoop:
                                         name=name, args=args, tool_call_id=tc["id"]
                                     )
                                     try:
-                                        result = await self._raided_tool_call(ctx, name, args)
+                                        result = await self._hooked_tool_call(ctx)
                                     except HookInterrupt as hi:
                                         if "approval_id" not in hi.data:
                                             yield E2AResponse(
@@ -249,14 +247,16 @@ class AgentLoop:
                                         seq += 1
                                         decision = await future  # SUSPEND — ws_handler concurrency resumes it
                                         if decision in ("allow", "allow_always"):
-                                            if decision == "allow_always" and self._permission is not None:
-                                                await self._permission.persist_allow_always(hi.data)
+                                            # Record approval decision in ctx.extra so
+                                            # PermissionHook's bypass branch can persist
+                                            # allow_always — AgentLoop doesn't hold engine.
+                                            ctx.extra["_approval_decision"] = decision
                                             ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
-                                            result = await self._raided_tool_call(ctx, name, args)
+                                            result = await self._hooked_tool_call(ctx)
                                         else:
                                             result = (f"[tool denied by user: {hi.data['tool']}] "
                                                       f"{hi.data.get('reason', '')}")
-                                    for snap in drain_todo_events():
+                                    for snap in flush_todo_events():
                                         yield E2AResponse(
                                             request_id=envelope.request_id,
                                             sequence=seq,
@@ -355,11 +355,12 @@ class AgentLoop:
 
     @hook(HookEvent.BEFORE_TOOL_CALL, HookEvent.AFTER_TOOL_CALL,
           on_exception=HookEvent.ON_TOOL_EXCEPTION)
-    async def _raided_tool_call(
-        self,
-        ctx: HookContext,
-        name: str,
-        args: dict,
-    ) -> str:
-        """Tool execution wrapped with @hook lifecycle."""
-        return await self._tools.execute(name, args)
+    async def _hooked_tool_call(self, ctx: HookContext) -> str:
+        """Tool execution wrapped with @hook lifecycle.
+
+        Reads tool name/args from ctx.inputs (ToolCallInputs) — single data
+        channel so hooks that modify ctx.inputs.args (e.g. arg sanitization)
+        take effect in the method body automatically.
+        """
+        inputs: ToolCallInputs = ctx.inputs  # type: ignore[assignment]
+        return await self._tools.execute(inputs.name, inputs.args)

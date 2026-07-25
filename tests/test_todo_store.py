@@ -10,15 +10,13 @@ def test_create_then_list() -> None:
     store = TodoStore()
 
     async def run():
-        created = await store.create("s1", ["a", "b"])
-        listed = await store.list_tasks("s1")
-        return created, listed
+        await store.create("s1", ["a", "b"])
+        return await store.list_tasks("s1")
 
-    created, listed = asyncio.run(run())
-    assert [t.idx for t in created] == [1, 2]
-    assert [t.title for t in created] == ["a", "b"]
-    assert all(t.status == "waiting" for t in created)
-    assert listed == created
+    listed = asyncio.run(run())
+    assert [t.idx for t in listed] == [1, 2]
+    assert [t.title for t in listed] == ["a", "b"]
+    assert all(t.status == "waiting" for t in listed)
 
 
 def test_create_empty_raises() -> None:
@@ -37,7 +35,8 @@ def test_create_twice_raises_already_exists() -> None:
 def test_complete_marks_status_and_result() -> None:
     store = TodoStore()
     asyncio.run(store.create("s1", ["a", "b"]))
-    tasks = asyncio.run(store.complete("s1", 1, result="done A"))
+    await_result = asyncio.run(store.complete("s1", 1, result="done A"))
+    tasks = asyncio.run(store.list_tasks("s1"))
     assert tasks[0].status == "completed"
     assert tasks[0].result == "done A"
     assert tasks[1].status == "waiting"
