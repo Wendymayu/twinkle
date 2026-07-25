@@ -111,6 +111,9 @@ E2A 响应采用**三层结构**：
 | `e2a.chunk` | 流式分片 | `delta_kind`（text/reasoning/tool/custom）、`delta`（字符串或结构化） |
 | `e2a.complete` | 正常终止 | `result`（业务结果对象） |
 | `e2a.error` | 错误终止 | `code`、`message`、`details` |
+| `e2a.todo_update` | Todo 状态旁路推送 | `{tasks, remaining, total}` |
+| `e2a.result` | 单帧 RPC 回复 | `type`（RPC 方法名）+ 业务数据或 `{error}` |
+| `e2a.ask` | 请求人类审批 | `{approval_id, tool, args, tool_call_id, reason}` |
 | `acp.session_update` | ACP 会话更新通知 | 对齐 ACP `session/update` |
 | `acp.prompt_result` | ACP prompt 结果 | 对应 JSON-RPC `result` |
 | `a2a.task` | A2A Task 对象 | A2A 协议 Task 形 |
@@ -118,7 +121,31 @@ E2A 响应采用**三层结构**：
 | `a2a.stream_event` | A2A 流式事件 | branch: task/message/status_update/artifact_update |
 | `ext` | 扩展方法 | `ext_method` + `params` |
 
-> **Twinkle 当前使用**：`e2a.chunk`、`e2a.complete`、`e2a.error`、`e2a.todo_update`。其中 `e2a.error` 的 body 在 Twinkle 里是单键 `{"error": "错误描述"}`（非完整版的 `code`/`message`/`details`）；`e2a.todo_update` 的 body 是 `{tasks, remaining, total}`。ACP/A2A 相关的 response_kind 属于 jiuwenclaw 的互操作能力，Twinkle roadmap 明确不做。
+> **Twinkle 当前使用**：`e2a.chunk`、`e2a.complete`、`e2a.error`、`e2a.todo_update`、`e2a.result`、`e2a.ask`。其中 `e2a.error` 的 body 在 Twinkle 里是单键 `{"error": "错误描述"}`（非完整版的 `code`/`message`/`details`）；`e2a.todo_update` 的 body 是 `{tasks, remaining, total}`。ACP/A2A 相关的 response_kind 属于 jiuwenclaw 的互操作能力，Twinkle roadmap 明确不做。
+
+#### response_kind 的分类：Push vs RPC
+
+`response_kind` 不是平级的——它按**消费模式**分为两类：
+
+**Push（旁路推送）**——前端没有主动请求，帧在聊天流中间被 Agent 主动塞入。前端需要**专用的 event name** 把它路由到特定 UI 组件：
+
+| kind | 专用 event | 前端路由目标 | 为什么需要专用 kind |
+|---|---|---|---|
+| `e2a.todo_update` | `todo.update` → `onTodoUpdate` | TodoPanel | 前端不知道它要来，专用 kind 让 Gateway 映射为专用 event，前端按 event name 分流 |
+| `e2a.ask` | `approval.ask` → `onApprovalAsk` | ApprovalCard | 同上——审批请求是 Agent 主动发起的推送 |
+
+**RPC（一问一答）**——前端用 `request(method)` 主动发出，Promise 挂在 `pending` Map 里等回复。前端**已经知道自己在请求什么**，靠 `request_id` 自动关联：
+
+| kind | event | 前端路由方式 | 为什么用通用 kind |
+|---|---|---|---|
+| `e2a.result` | `result` → `pending.get(rid)` | Session RPC + approval ACK | 前端知道自己问了什么（`session.list` / `approval.respond`），`request_id` 已足够做关联，`body.type` 只是确认 |
+
+两种模式的不对称是**合理的**：
+
+- Push 事件没有请求上下文——前端不知道它会来、也不知道它属于哪个请求——必须靠专用 kind 做 event 级路由。
+- RPC 回复天然有 `request_id` 关联——前端的 `request()` Promise 用 `request_id` key 从 `pending` Map 里取回结果，不需要看 kind 做区分。
+
+如果给每种 RPC 也分配专用 kind（`e2a.session_list`、`e2a.approval_ack`、`e2a.history_get`…），每加一个 RPC 就要改 Gateway 的翻译映射 + EventType enum + 前端 handler——扩展成本高，而 `request_id` 关联已经足够。`e2a.result` 是"ws 通道上的 HTTP 回复"——在纯流式系统里给一问一答的 RPC 复用同一条连接，避免另开 REST 端口。
 
 ---
 
@@ -154,7 +181,7 @@ class E2AResponse(BaseModel):
     sequence: int = 0                    # 同 request_id 下从 0 递增
     is_final: bool = False               # 最后一帧
     status: str = "in_progress"          # succeeded/failed/in_progress
-    response_kind: str = "e2a.chunk"     # e2a.chunk/e2a.complete/e2a.error/e2a.todo_update
+    response_kind: str = "e2a.chunk"     # e2a.chunk/e2a.complete/e2a.error/e2a.todo_update/e2a.result/e2a.ask
     body: dict[str, Any]                 # 载荷内容
     is_stream: bool = True               # 响应总是流式（Twinkle 专用）
 ```
@@ -318,7 +345,7 @@ AgentServer 逐帧 yield `E2AResponse`：
  "status":"failed","response_kind":"e2a.error","body":{"error":"agent loop exceeded max_steps=1000"}}
 ```
 
-> **为何砍掉 unary**：Twinkle 是单用户 + 单 web 通道，所有交互都是"用户等待逐字输出"的流式场景。unary 模式在 jiuwenclaw 里用于非聊天 RPC（如 `history.get`），但 Twinkle roadmap 不做这些 RPC。保留 unary 只增加了 `if/else` 分支而无实际收益。
+> **为何砍掉 unary**：Twinkle 是单用户 + 单 web 通道，所有交互都是"用户等待逐字输出"的流式场景。unary 模式在 jiuwenclaw 里用于非聊天 RPC（如 `history.get`），但 Twinkle 的 session RPC 通过 `e2a.result` 单帧回复复用同一条 ws 连接，不需要单独的 unary 通道。
 
 ---
 
@@ -343,10 +370,12 @@ AgentServer 逐帧 yield `E2AResponse`：
 
 | method | 说明 | Twinkle 是否使用 |
 |---|---|---|
-| `history.get` | 获取对话历史 | ❌ roadmap 不做 |
-| `session.list` | 列出所有会话 | ❌ roadmap 不做 |
-| `session.create` | 创建新会话 | ❌ roadmap 不做 |
-| `session.delete` | 删除会话 | ❌ roadmap 不做 |
+| `history.get` | 获取对话历史 | ✅ |
+| `session.list` | 列出所有会话 | ✅ |
+| `session.create` | 创建新会话 | ✅ |
+| `session.delete` | 删除会话 | ✅ |
+| `session.files` | 列出会话目录文件 | ✅ |
+| `file.read` | 读取会话内文件 | ✅ |
 | `session.rename` | 重命名会话 | ❌ roadmap 不做 |
 
 #### 命令类（slash commands 调用）
@@ -481,17 +510,20 @@ A2A 协议使用 `SendMessage` 等抽象操作，经 `envelope_from_a2a_send_mes
 
 ### 8.5 Twinkle 当前与未来
 
-Twinkle 当前**只使用 `chat.send`**——这是唯一在 `Message.method` 默认值、`web_channel.py` fallback、测试、agent_loop 中出现的 method。
+Twinkle 当前使用以下 method：
 
-Roadmap 中可能逐步引入的 method：
-
-| 未来 method | 对应 roadmap 阶段 | 说明 |
+| method | 说明 | 对应 E2A 响应 |
 |---|---|---|
-| `chat.interrupt` | Phase 2+ | 中断当前 agent loop |
-| `history.get` | Phase 3+ | 获取对话历史（配合上下文压缩） |
-| `command.compact` | Phase 3 | 手动触发上下文压缩 |
+| `chat.send` | 发送聊天消息（最常用） | 流式 `e2a.chunk` → `e2a.complete` |
+| `session.create` | 创建新会话 | 单帧 `e2a.result` |
+| `session.list` | 列出所有会话 | 单帧 `e2a.result` |
+| `session.delete` | 删除会话 | 单帧 `e2a.result` |
+| `history.get` | 获取对话历史 | 单帧 `e2a.result` |
+| `session.files` | 列出会话目录文件 | 单帧 `e2a.result` |
+| `file.read` | 读取会话内文件 | 单帧 `e2a.result` |
+| `approval.respond` | 回复审批请求 | 单帧 `e2a.result`（ACK） |
 
-其余 jiuwenclaw method（skill 系统、多通道、权限、文件传输等）明确不在 Twinkle roadmap 范围内，需要时参考 jiuwenclaw 对应实现即可。
+其中 `chat.send` 走 AgentLoop 的 ReAct 循环产出流式帧；session RPC 和 `approval.respond` 走独立的 handler 产出单帧 `e2a.result`（`is_final=True`，`sequence=0`）。
 
 ---
 
@@ -559,7 +591,7 @@ E2A 的核心价值不只是"统一格式"，而是**流式分片 + 请求关联
 | E2AEnvelope 字段数 | 20+（含 provenance/auth/file/a2a/acp/is_stream） | 7（含 timestamp，无 is_stream） |
 | E2AResponse 字段数 | 15+（含 projections/metadata/a2a/acp） | 8（只保留核心，is_stream=True 固定） |
 | 响应模式 | 流式 + 单次（unary），通过 is_stream 切换 | **流式专用**，无 is_stream 切换 |
-| response_kind | 11 种（含 ACP/A2A/cron/ext） | 4 种（e2a.chunk/complete/error/todo_update） |
+| response_kind | 11 种（含 ACP/A2A/cron/ext） | 6 种（e2a.chunk/complete/error/todo_update/result/ask） |
 | 序列化 | dataclass + 手写 to_dict/from_dict + legacy fallback | Pydantic BaseModel + model_dump_json/model_validate_json |
 | wire_codec | 完整（legacy AgentChunk/AgentResponse 兜底） | 无（不需要兼容旧格式） |
 | adapters | 完整（ACP↔E2A、A2A↔E2A 双向适配） | 无（roadmap 不做互操作） |
