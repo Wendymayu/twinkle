@@ -17,7 +17,7 @@ from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
-    drain_todo_events,
+    flush_todo_events,
     reset_todo_events,
 )
 from twinkle.agentserver.permission_context import set_permission_channel
@@ -256,7 +256,7 @@ class AgentLoop:
                                         else:
                                             result = (f"[tool denied by user: {hi.data['tool']}] "
                                                       f"{hi.data.get('reason', '')}")
-                                    for snap in drain_todo_events():
+                                    for snap in flush_todo_events():
                                         yield E2AResponse(
                                             request_id=envelope.request_id,
                                             sequence=seq,
