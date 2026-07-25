@@ -52,3 +52,16 @@ def todo_store(todos_dir):
     """A TodoStore rooted in a per-test tmp dir (no repo pollution)."""
     from twinkle.agentserver.todo.store import TodoStore
     return TodoStore(str(todos_dir))
+
+
+@pytest.fixture
+def isolated_todo_store(tmp_path):
+    """Construct a tmp-backed TodoStore, set it as the process singleton (so
+    get_todo_store() returns it during tests), yield it, and reset after.
+    For tests that drive the todo tools or the agent loop's todo path."""
+    from twinkle.agentserver.todo import _set_todo_store
+    from twinkle.agentserver.todo.store import TodoStore
+    s = TodoStore(str(tmp_path / "todos"))
+    _set_todo_store(s)
+    yield s
+    _set_todo_store(None)
