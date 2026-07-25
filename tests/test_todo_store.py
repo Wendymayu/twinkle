@@ -113,3 +113,16 @@ def test_save_writes_json_with_full_fields(todo_store, todos_dir) -> None:
     asyncio.run(todo_store.create("s1", ["a"]))
     on_disk = json.loads((todos_dir / "s1.json").read_text(encoding="utf-8"))
     assert on_disk == [{"idx": 1, "title": "a", "status": "waiting", "result": ""}]
+
+
+def test_delete_removes_file(todo_store, todos_dir) -> None:
+    asyncio.run(todo_store.create("s1", ["a"]))
+    p = todos_dir / "s1.json"
+    assert p.is_file()
+    assert asyncio.run(todo_store.delete("s1")) is True
+    assert not p.exists()
+    assert asyncio.run(todo_store.list_tasks("s1")) == []
+
+
+def test_delete_missing_returns_false(todo_store) -> None:
+    assert asyncio.run(todo_store.delete("never")) is False

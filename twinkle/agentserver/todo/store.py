@@ -136,3 +136,18 @@ class TodoStore:
     async def list_tasks(self, session_id: str) -> list[TodoTask]:
         async with self._lock(session_id):
             return list(self._load(session_id))
+
+    async def delete(self, session_id: str) -> bool:
+        """Remove the session's todo file. Returns False if absent. Holds the
+        per-session lock so a concurrent create/complete can't recreate the
+        file mid-delete (orphan). Called by the session.delete RPC."""
+        async with self._lock(session_id):
+            p = self._todo_path(session_id)
+            if not p.is_file():
+                return False
+            try:
+                p.unlink()
+            except OSError as exc:
+                log.warning("todo delete failed for %s: %s", session_id, exc)
+                return False
+            return True
