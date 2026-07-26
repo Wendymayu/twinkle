@@ -134,13 +134,16 @@ Vue 响应式系统检测到 `todo.value` 变化，触发 TodoPanel 重渲染。
 
 ## 存储策略
 
-**纯内存**，不持久化。与 SessionStore 的"磁盘 + 缓存"策略不同，原因：
+**磁盘持久化**，per-session flat 文件 `<TODOS_DIR>/<session_id>.json`，每次操作 load→改→save，跨进程重启存活。与 SessionStore 的"磁盘 + 缓存"策略不同（todo 无内存缓存——数据极小、操作稀疏，缓存收益微乎其微），但同属 disk-backed。
 
-- Todo 是短期规划辅助，session 结束就失效。
-- 内存存储让 `create` 的"已有列表"判定天然正确——重启后列表自然消失。
-- 与 jiuwenclaw 的 todo.md 文件不同，Twinkle 不需要跨进程共享 todo。
+- `TODOS_DIR` 默认 `<WORKSPACE>/.twinkle_data/todos`，与 `sessions/` 并列（不 co-locate 进 session 目录），故 `session.delete` RPC 显式调 `TodoStore.delete(sid)` 清孤儿文件。
+- 格式 JSON（`dataclass asdict` 精确往返），不存 markdown（与 jiuwenclaw 的 todo.md 不同——避免解析器/bug 面）。
+- `TodoStore` 用 per-session `asyncio.Lock` 串行化 read-modify-write；进程级单例 `get_todo_store()` 让工具与 `session.delete` 清理共享同一实例/同一套锁。
+- 文件缺失/损坏 → `_load` 返 `[]` 不抛（对齐 SessionStore 坏行跳过）；写盘 `OSError` → 包 `TodoError` 回给模型，不炸 `run_stream`。
 
-TodoStore 用 `dict[session_id, list[TodoTask]]` + 每 session 一把 `asyncio.Lock` 串行化 read-modify-write。
+### `create` 语义
+
+持久化后旧列表跨重启存活，`create` 不再"已有即拒绝"：旧列表**有未完成任务**时拒绝（防误覆盖进行中规划）；**全部完成**时允许 `create` 替换（长会话内可多次规划）；无列表则创建。过往规划已在 `history.json`（tool 消息）留底，结构化 todo 只持"当前这条"。
 
 ---
 
@@ -180,7 +183,7 @@ TodoStore 用 `dict[session_id, list[TodoTask]]` + 每 session 一把 `asyncio.L
 | | jiuwenclaw | Twinkle |
 |---|---|---|
 | 工具数 | 7 (start/insert/remove/batch…) | 3 (create/complete/list) |
-| 存储 | todo.md 文件 | 纯内存 dict |
+| 存储 | todo.md 文件 | 磁盘 JSON（`<TODOS_DIR>/<sid>.json`，独立目录，`session.delete` 显式清理） |
 | 事件发布 | op-result 总线 | ContextVar 缓冲区 + agent_loop yield |
 | session 路由 | team session 解析 | ContextVar 直取 session_id |
 

@@ -1080,7 +1080,7 @@ twinkle/
     session_store.py       # 磁盘+内存会话存储（<sid>/{metadata,history}.json）
     memory.py              # 长期记忆 stub
     plan_todo_context.py   # ContextVar：当前请求的 todo session 路由
-    todo_store.py          # TodoStore：内存 dict[session_id, list[TodoTask]] + 每 session 一把 asyncio.Lock
+    todo_store.py          # TodoStore：磁盘持久化 <TODOS_DIR>/<sid>.json (load→save per op) + 每 session 一把 asyncio.Lock；delete(sid) 由 session.delete RPC 清理
     permission_context.py  # ContextVar：当前请求的 channel（PermissionHook 用）
     permissions/           # 工具权限 / 审批切面（Phase 4，opt-in，默认关）
       __init__.py             # permission_engine() builder + re-exports
