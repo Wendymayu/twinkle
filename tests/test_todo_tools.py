@@ -1,13 +1,25 @@
 # tests/test_todo_tools.py
 import asyncio
 
+import pytest
 from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
+    _set_todo_store,
     flush_todo_events,
     reset_todo_events,
 )
+from twinkle.agentserver.todo.store import TodoStore
 from twinkle.agentserver.tools import tool_manager
 from twinkle.agentserver.tools.builtin.todo_tools import todo_complete, todo_create, todo_list
+
+
+@pytest.fixture(autouse=True)
+def _isolated_todo_store(tmp_path):
+    """Each test gets a tmp-backed todo singleton so the tools' get_todo_store()
+    never writes to the real ~/.twinkle."""
+    _set_todo_store(TodoStore(str(tmp_path / "todos")))
+    yield
+    _set_todo_store(None)
 
 
 def _set_session_id(session_id: str) -> None:

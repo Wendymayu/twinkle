@@ -158,7 +158,7 @@ def test_max_steps_emits_error(session_store, monkeypatch) -> None:
     assert frames[-1].status == "failed"
 
 
-def test_todo_create_round_trip_through_loop(session_store) -> None:
+def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store) -> None:
     """Model calls todo_create then answers — verifies the ContextVar is set
     to the envelope's session_id (via the store assertions below; without
     PLAN_TODO_SESSION_ID.set the tool would fall back to "default" and the
@@ -198,12 +198,13 @@ def test_todo_create_round_trip_through_loop(session_store) -> None:
     # "default" fallback — otherwise both store keys below would be empty
     # except "default". This makes run_stream's PLAN_TODO_SESSION_ID.set(...)
     # load-bearing rather than silently skippable.
-    from twinkle.agentserver.tools.builtin.todo_tools import _todo_store
-    assert len(asyncio.run(_todo_store.list_tasks("s-todo"))) == 2
-    assert asyncio.run(_todo_store.list_tasks("default")) == []
+    # ContextVar was set to the envelope's session_id; the loop's todo_create
+    # wrote to the shared singleton (= isolated_todo_store).
+    assert len(asyncio.run(isolated_todo_store.list_tasks("s-todo"))) == 2
+    assert asyncio.run(isolated_todo_store.list_tasks("default")) == []
 
 
-def test_todo_update_frame_emitted_on_create(session_store) -> None:
+def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store) -> None:
     """run_stream yields an e2a.todo_update frame after todo_create executes,
     carrying the structured snapshot (not just the markdown tool string)."""
     from twinkle.agentserver.tools import tool_manager
