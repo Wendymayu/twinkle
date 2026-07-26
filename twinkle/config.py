@@ -78,6 +78,17 @@ TODOS_DIR = os.getenv("TWINKLE_TODOS_DIR") or str(
     Path(WORKSPACE_DIR) / ".twinkle_data" / "todos"
 )
 
+# --- skills (Phase 7) ---
+# SKILLS_DIR: skill 目录(用户往里放 <name>/SKILL.md)。默认 <WORKSPACE>/skills
+# (放 workspace 下而非 .twinkle_data,用户可见、好操作)。
+# SKILL_MODE: "all" = 框架每步把 skill 清单注入上下文;"auto_list" = 模型要时调
+# list_skill 拉。默认 all(skill 少时体验顺)。单值配置,不并存。
+# ENABLED_SKILLS: 逗号分隔白名单(空 = 全开)。
+SKILLS_DIR = os.getenv("TWINKLE_SKILLS_DIR") or str(Path(WORKSPACE_DIR) / "skills")
+SKILL_MODE = os.getenv("TWINKLE_SKILL_MODE", "all")  # "all" | "auto_list"
+_enabled_raw = (os.getenv("TWINKLE_ENABLED_SKILLS") or "").strip()
+ENABLED_SKILLS = [s.strip() for s in _enabled_raw.split(",") if s.strip()]
+
 
 def ensure_workspace_dir() -> str:
     """Create WORKSPACE_DIR if missing (idempotent). Call at server startup
