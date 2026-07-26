@@ -65,7 +65,7 @@ def test_history_get_returns_messages(session_store):
     assert f.body["messages"][0]["content"] == "hi"
 
 
-def test_session_delete_removes_and_returns_result(session_store, sessions_dir):
+def test_session_delete_removes_and_returns_result(session_store, sessions_dir, isolated_todo_store):
     _run(session_store.create_session("s1"))
     frames = _run(_frames(
         _env("session.delete", session_id="s1"), session_store,
@@ -74,6 +74,18 @@ def test_session_delete_removes_and_returns_result(session_store, sessions_dir):
     assert f.body["type"] == "session.delete"
     assert f.body["session_id"] == "s1"
     assert not (sessions_dir / "s1").exists()
+
+
+def test_session_delete_cleans_todo(session_store, isolated_todo_store):
+    _run(session_store.create_session("s1"))
+    _run(isolated_todo_store.create("s1", ["a", "b"]))
+    assert _run(isolated_todo_store.list_tasks("s1"))  # has tasks
+
+    frames = _run(_frames(_env("session.delete", session_id="s1"), session_store))
+    f = frames[0]
+    assert f.body["type"] == "session.delete"
+    # todo file cleaned up by the RPC -> list returns []
+    assert _run(isolated_todo_store.list_tasks("s1")) == []
 
 
 def test_unknown_session_method_returns_no_frames(session_store):

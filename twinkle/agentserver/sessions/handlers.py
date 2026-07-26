@@ -16,6 +16,7 @@ import logging
 from typing import AsyncIterator
 
 from twinkle.agentserver.sessions.store import SessionStore
+from twinkle.agentserver.todo import get_todo_store
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 log = logging.getLogger("twinkle.agentserver.sessions.rpc")
@@ -41,6 +42,7 @@ async def dispatch_session_rpc(
             body = {"type": "session.list", "sessions": rows}
         elif method == "session.delete":
             await store.delete_session(sid)
+            await get_todo_store().delete(sid)
             body = {"type": "session.delete", "session_id": sid}
         elif method == "history.get":
             records = store.get_history(sid)
