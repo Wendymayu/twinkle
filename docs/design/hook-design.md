@@ -202,13 +202,12 @@ ctx.request_retry(delay=0.5)
 
 ```python
 class HookManager:
-    def __init__(self, agent: Any):
-        self._agent = agent
+    def __init__(self) -> None:
         self._callbacks: dict[HookEvent, list[tuple[int, Callable]]] = {}
         self._hooks: list[AgentHook] = []
 
     def register_hook(self, hook: AgentHook) -> None:
-        hook.init(self._agent)       # 初始化
+        hook.init(None)  # HookManager 不持有 agent；hook 要 agent 走 ctx.agent
         callbacks = hook.get_callbacks()  # 只取覆写的方法
         for event, method in callbacks.items():
             entries = self._callbacks.setdefault(event, [])
@@ -233,6 +232,48 @@ class HookManager:
 
 2. **fail-soft**：普通异常只 log 不传播，其他 Hook 继续执行。只有 `HookInterrupt` 传播——因为它不是错误，是控制流信号。选择 fail-soft 是因为 Hook 是"旁观者/拦截者"，一个旁观者崩溃不应该炸掉主流程。
 
+### 注册数据流：get_callbacks → _callbacks
+
+注册一个 hook 实际是两步，`get_callbacks()` 只负责第一步"自查"，真正把回调塞进分发表的是 `register_hook`：
+
+```
+register_hook(hook)
+  ├─ hook.init(None)                           # HookManager 不持有 agent
+  ├─ callbacks = hook.get_callbacks()          # ① hook 自查：{HookEvent: method}
+  │     只含这个 hook 真正重写的方法，每 event 最多 1 个，不带 priority
+  └─ for event, method in callbacks.items():   # ② 塞进分发表
+        entries = self._callbacks.setdefault(event, [])
+        entries.append((hook.priority, method))    # ← 这行才真正入表
+        entries.sort(key=lambda p: p[0], reverse=True)
+```
+
+两步涉及的两个 dict 长得不一样：
+
+| | `get_callbacks()` 返回 | `HookManager._callbacks`（分发表）|
+|---|---|---|
+| 形状 | `{HookEvent: Callable}` | `{HookEvent: list[(priority, Callable)]}` |
+| 范围 | 单个 hook 自己重写的 | 所有已注册 hook 汇总 |
+| 每 event | 最多 1 个（hook 只能 override 一次）| 多个，按 priority 降序排 |
+| priority | 不在里面（hook 的 `priority` 字段单独存）| 每条都带 |
+| 寿命 | 临时的，调完即弃 | 持久，`execute()` 读的就是它 |
+
+一个 hook 装上去，`get_callbacks()` 返回比如 `{BEFORE_TOOL_CALL: <method>}`（1 条）；但 `self._callbacks[BEFORE_TOOL_CALL]` 可能是个 list 里好几条（PermissionHook、LoggingHook 各一条，按 priority 排好）。`execute()` 跑的是后者。
+
+### `_is_base_method`：怎么知道"重写了没"
+
+`get_callbacks()` 遍历 `_EVENT_METHOD_MAP`（11 个回调名 → HookEvent 的映射），用 `_is_base_method` 过滤出子类实际重写的：
+
+```python
+name = method.__func__.__name__          # bound method → 取底层函数名
+base_method = getattr(AgentHook, name)   # 基类上的同名方法
+actual = method.__func__                 # self 上的底层函数
+return actual is base_method             # 同一个函数对象 → 没重写 → 跳过
+```
+
+关键点：比 `__func__`（用 `is`）而不是比 bound method 本身——因为 **bound method 每次访问都是新对象**，直接 `is` 比永远不相等；`__func__` 才是稳定的底层函数。子类重写了 `before_tool_call`，`self` 上拿到的 `__func__` 是子类的函数对象，和 `AgentHook.before_tool_call` 不是同一个 → 收进 dict；没重写则两边是同一个函数对象 → 跳过。
+
+`init` / `uninit` 不在 `_EVENT_METHOD_MAP` 里，所以 `get_callbacks()` 天然不返回它们——它们不是"事件回调"，是注册/注销钩子，由 `register_hook` / `unregister_hook` 单独调（传 `None`；hook 要 agent 走 `ctx.agent`）。
+
 ---
 
 ## `@hook` 装饰器：方法的自动包装
@@ -242,29 +283,30 @@ class HookManager:
 ```python
 @hook(HookEvent.BEFORE_TOOL_CALL, HookEvent.AFTER_TOOL_CALL,
       on_exception=HookEvent.ON_TOOL_EXCEPTION)
-async def _hooked_tool_call(self, ctx, name, args) -> str:
-    return await self._tools.execute(name, args)
+async def _hooked_tool_call(self, ctx: HookContext) -> str:
+    inputs: ToolCallInputs = ctx.inputs
+    return await self._tool_manager.execute(inputs.name, inputs.args)
 ```
 
 装饰器自动执行 5 步流程：
 
 ```
-1. await hooks.execute(BEFORE_TOOL_CALL, ctx)    → 触发 before 回调
+1. await hook_manager.execute(BEFORE_TOOL_CALL, ctx)    → 触发 before 回调
 2. ctx.consume_force_finish_request()             → 检查短路信号
    └─ 有 → 直接返回 ff.result，跳过方法体
 3. await method(self, ctx, ...)                   → 执行方法体
-4. await hooks.execute(AFTER_TOOL_CALL, ctx)      → 成功后触发 after 回调
+4. await hook_manager.execute(AFTER_TOOL_CALL, ctx)      → 成功后触发 after 回调
 5. 异常时：
    ├─ HookInterrupt → raise（传播控制流信号）
    ├─ CancelledError → raise（不干扰取消）
-   └─ 其他异常 → hooks.execute(ON_TOOL_EXCEPTION, ctx)
+   └─ 其他异常 → hook_manager.execute(ON_TOOL_EXCEPTION, ctx)
       └─ ctx.consume_retry_request() → 有 → sleep(delay) + 重试（最多 3 次）
       └─ 无 → raise（异常传播）
 ```
 
 **为什么 `_hooked_tool_call` 用装饰器而 `_inner_run_stream` 不用**：
 
-`_inner_run_stream` 是 **async generator**（用 `yield` 产出 `E2AResponse` 帧），`@hook` 装饰器无法包装 async generator（装饰器只能处理 `return`，不能处理 `yield`）。所以 `_inner_run_stream` 用**手动** `self._hooks.execute()` 调用，而工具执行（普通 async 方法）用**装饰器**自动包装。
+`_inner_run_stream` 是 **async generator**（用 `yield` 产出 `E2AResponse` 帧），`@hook` 装饰器无法包装 async generator（装饰器只能处理 `return`，不能处理 `yield`）。所以 `_inner_run_stream` 用**手动** `self._hook_manager.execute()` 调用，而工具执行（普通 async 方法）用**装饰器**自动包装。
 
 两种方式共享同一套信号机制（`consume_force_finish_request` / `consume_retry_request` / `HookInterrupt`），只是触发方式不同：
 
@@ -283,19 +325,24 @@ Hook 的注册发生在两个地方：
 
 ```python
 def build_agent_loop(store, hooks=None, llm=None):
-    loop = AgentLoop(llm, store, tools, memory, permission=engine)
-    loop.register_hook(PermissionHook(engine))  # 始终注册——Phase 4 核心切面
+    if llm is None:
+        llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
+    tools = tool_manager()
+    memory = LongTermMemory()
+    loop = AgentLoop(llm, store, tools, memory)
     if hooks:
-        for h in hooks:
-            loop.register_hook(h)
+        for hook in hooks:
+            loop.register_hook(hook)
     return loop
 ```
 
-`main()` 调用时额外传入 `LoggingHook`：
+`build_agent_loop` 只注册传入的 `hooks`，**不自动注册任何 Hook**——装哪些由调用方决定。`main()` 把 `PermissionHook` 和 `LoggingHook` 一起传进去：
 
 ```python
-loop = build_agent_loop(store, hooks=[LoggingHook()])
+loop = build_agent_loop(store, hooks=[PermissionHook(engine), LoggingHook()])
 ```
+
+`PermissionHook(engine)` 的 `engine` 由 `permission_engine()` 从配置构造，在 `main()` 里建好再注入（不是 `build_agent_loop` 的事）。
 
 ### 测试注入：直接调用 `register_hook`
 
@@ -339,15 +386,22 @@ class LoggingHook(AgentHook):
 class PermissionHook(AgentHook):
     priority = 100
 
-    async def before_tool_call(self, ctx) -> None:
-        # bypass 检查——ASK 恢复后的重调用不再拦截
-        if inp.tool_call_id in ctx.extra.get("_approved_tool_call_ids", set()):
+    async def before_tool_call(self, ctx: HookContext) -> None:
+        inputs: ToolCallInputs = ctx.inputs
+        # bypass：ASK 恢复后的重调用不再拦截
+        if inputs.tool_call_id in ctx.extra.get("_approved_tool_call_ids", set()):
+            if ctx.extra.get("_approval_decision") == "allow_always":
+                await self._engine.persist_allow_always({...})  # 持久化覆盖
             return
-        decision = self._engine.check(tool=inp.name, args=inp.args, ...)
+        decision = self._engine.check(
+            tool=inputs.name, args=inputs.args,
+            channel=get_permission_channel(), ...)
         if decision.level == "deny":
             ctx.request_force_finish(decision.deny_message)    # 短路
         elif decision.level == "ask":
-            raise HookInterrupt(message="approval required", data={...})  # 挂起
+            raise HookInterrupt(message="approval required",
+                data={"approval_id": str(uuid.uuid4()),
+                      "tool": inputs.name, "args": inputs.args, ...})  # 挂起
         # allow → no-op
 ```
 
@@ -436,7 +490,7 @@ class ContextCompressionHook(AgentHook):
 | `hooks/builtin/logging_hook.py` | `LoggingHook`——日志观察者（priority=10） |
 | `hooks/builtin/permission_hook.py` | `PermissionHook`——权限拦截（priority=100，ALLOW/DENY/ASK） |
 | `agent_loop.py` | Hook 触发点——手动 `execute()` + `@hook` 装饰器 + `HookInterrupt` 捕获 + ASK 恢复流 |
-| `server.py` | `build_agent_loop()` 组装——始终注册 PermissionHook，可选传入其他 Hook |
+| `server.py` | `build_agent_loop()` 组装——只注册传入的 `hooks`；`main()` 传 `PermissionHook` + `LoggingHook` |
 | `permission_context.py` | `APPROVAL_CHANNEL` ContextVar——PermissionHook 的 channel 路由 |
 
 ---
