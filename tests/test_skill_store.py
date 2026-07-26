@@ -115,3 +115,22 @@ def test_skill_manager_get_skill(tmp_path):
     mgr = SkillManager(str(tmp_path))
     assert mgr.get_skill("a") is not None
     assert mgr.get_skill("nope") is None
+
+
+def test_get_skill_manager_singleton(tmp_path):
+    from twinkle.agentserver.skills import get_skill_manager, _set_skill_manager
+    _set_skill_manager(SkillManager(str(tmp_path)))
+    try:
+        a = get_skill_manager()
+        b = get_skill_manager()
+        assert a is b  # 同一实例
+    finally:
+        _set_skill_manager(None)
+
+
+def test_set_skill_manager_reset(tmp_path):
+    from twinkle.agentserver.skills import get_skill_manager, _set_skill_manager
+    _set_skill_manager(SkillManager(str(tmp_path)))
+    _set_skill_manager(None)
+    import twinkle.agentserver.skills as sk
+    assert sk._SKILL_MANAGER is None
