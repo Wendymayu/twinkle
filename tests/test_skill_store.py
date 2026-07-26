@@ -1,3 +1,5 @@
+import os
+import time
 from pathlib import Path
 from twinkle.agentserver.skills.store import Skill, SkillManager, parse_skill_md, parse_frontmatter
 
@@ -92,10 +94,11 @@ def test_skill_manager_mtime_reload(tmp_path):
     _make_skill(tmp_path / "a", "a", "v1")
     mgr = SkillManager(str(tmp_path))
     assert mgr.list_skills()[0].description == "v1"
-    # 改 SKILL.md 内容(mtime 变)→ 重新扫到新描述
-    (tmp_path / "a" / "SKILL.md").write_text(
-        "---\nname: a\ndescription: v2\n---\n\nbody\n", encoding="utf-8"
-    )
+    p = tmp_path / "a" / "SKILL.md"
+    p.write_text("---\nname: a\ndescription: v2\n---\n\nbody\n", encoding="utf-8")
+    # NTFS mtime resolution can make two rapid writes share st_mtime — force a later mtime
+    later = time.time() + 5
+    os.utime(p, (later, later))
     assert mgr.list_skills()[0].description == "v2"
 
 
