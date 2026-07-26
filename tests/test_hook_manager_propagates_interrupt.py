@@ -23,7 +23,7 @@ class _ExplodingHook(AgentHook):
 def test_hookinterrupt_propagates_not_swallowed():
     class _Agent: ...
     from twinkle.agentserver.hooks.manager import HookManager
-    hm = HookManager(_Agent())
+    hm = HookManager()
     hm.register_hook(_RaisingHook())
     ctx = HookContext(agent=None, event=HookEvent.BEFORE_TOOL_CALL, inputs=None,
                       session_id="s", request_id="r", extra={})
@@ -39,7 +39,7 @@ def test_hookinterrupt_propagates_not_swallowed():
 def test_other_exceptions_still_fail_soft():
     class _Agent: ...
     from twinkle.agentserver.hooks.manager import HookManager
-    hm = HookManager(_Agent())
+    hm = HookManager()
     hm.register_hook(_ExplodingHook())
     ctx = HookContext(agent=None, event=HookEvent.BEFORE_TOOL_CALL, inputs=None,
                       session_id="s", request_id="r", extra={})

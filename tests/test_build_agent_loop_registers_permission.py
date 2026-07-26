@@ -14,7 +14,7 @@ def test_build_agent_loop_wires_permission(monkeypatch):
     store = session_store()
     engine = permission_engine()
     loop = build_agent_loop(store, hooks=[PermissionHook(engine)])
-    assert loop._hooks.has_callbacks_for(HookEvent.BEFORE_TOOL_CALL)
+    assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_TOOL_CALL)
 
 
 def test_build_agent_loop_without_hooks_has_no_callbacks():
@@ -26,4 +26,4 @@ def test_build_agent_loop_without_hooks_has_no_callbacks():
     store = session_store()
     loop = build_agent_loop(store)
     for event in HookEvent:
-        assert not loop._hooks.has_callbacks_for(event)
+        assert not loop._hook_manager.has_callbacks_for(event)

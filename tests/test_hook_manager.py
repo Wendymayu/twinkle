@@ -53,7 +53,7 @@ class _LowPriHook(AgentHook):
 
 
 def test_register_hook_adds_callbacks():
-    mgr = HookManager(agent=None)
+    mgr = HookManager()
     h = _RecorderHook()
     mgr.register_hook(h)  # sync — no asyncio.run needed
     assert mgr.has_callbacks_for(HookEvent.BEFORE_INVOKE)
@@ -70,14 +70,14 @@ def test_register_hook_calls_init():
             self.inited = False
         def init(self, agent):
             self.inited = True
-    mgr = HookManager(agent="fake_agent")
+    mgr = HookManager()
     h = InitRecorder()
     mgr.register_hook(h)  # sync
     assert h.inited is True
 
 
 def test_unregister_hook_removes_callbacks():
-    mgr = HookManager(agent=None)
+    mgr = HookManager()
     h = _RecorderHook()
     mgr.register_hook(h)  # sync
     mgr.unregister_hook(h)  # sync
@@ -90,7 +90,7 @@ def test_unregister_hook_calls_uninit():
             self.uninited = False
         def uninit(self, agent):
             self.uninited = True
-    mgr = HookManager(agent="fake_agent")
+    mgr = HookManager()
     h = UninitRecorder()
     mgr.register_hook(h)  # sync
     mgr.unregister_hook(h)  # sync
@@ -99,7 +99,7 @@ def test_unregister_hook_calls_uninit():
 
 def test_execute_calls_hooks_in_priority_order():
     """Higher priority runs first."""
-    mgr = HookManager(agent=None)
+    mgr = HookManager()
     high = _HighPriHook()
     low = _LowPriHook()
     mgr.register_hook(low)   # register low first
@@ -119,7 +119,7 @@ def test_execute_calls_hooks_in_priority_order():
 
 def test_execute_no_hooks_is_noop():
     """Executing an event with no registered hooks should not error."""
-    mgr = HookManager(agent=None)
+    mgr = HookManager()
     ctx = HookContext(
         agent=None,
         event=HookEvent.BEFORE_INVOKE,
@@ -133,7 +133,7 @@ def test_execute_no_hooks_is_noop():
 
 def test_execute_updates_ctx_event():
     """execute() should set ctx.event to the event being triggered."""
-    mgr = HookManager(agent=None)
+    mgr = HookManager()
     h = _RecorderHook()
     mgr.register_hook(h)  # sync
     ctx = HookContext(
@@ -165,7 +165,7 @@ def test_execute_fail_soft_continues_after_exception():
         async def before_invoke(self, ctx):
             self.calls.append("safe:before_invoke")
 
-    mgr = HookManager(agent=None)
+    mgr = HookManager()
     mgr.register_hook(FailingHook())
     safe = SafeHook()
     mgr.register_hook(safe)

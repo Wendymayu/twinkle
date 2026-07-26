@@ -66,18 +66,18 @@ class AgentLoop:
         memory: LongTermMemory,
     ) -> None:
         self._llm = llm
-        self._store = store
-        self._tools = tools
+        self._session_store = store
+        self._tool_manager = tools
         self._memory = memory
-        self._hooks = HookManager(self)
+        self._hook_manager = HookManager()
 
     def register_hook(self, hook_instance: AgentHook) -> None:
         """Register an AgentHook on this loop (sync — safe to call from build_agent_loop)."""
-        self._hooks.register_hook(hook_instance)
+        self._hook_manager.register_hook(hook_instance)
 
     def unregister_hook(self, hook_instance: AgentHook) -> None:
         """Unregister an AgentHook from this loop."""
-        self._hooks.unregister_hook(hook_instance)
+        self._hook_manager.unregister_hook(hook_instance)
 
     # --- Public entry point — signature unchanged --- #
 
@@ -100,7 +100,7 @@ class AgentLoop:
             extra={},
         )
 
-        await self._hooks.execute(HookEvent.BEFORE_INVOKE, ctx)
+        await self._hook_manager.execute(HookEvent.BEFORE_INVOKE, ctx)
 
         try:
             async for frame in self._inner_run_stream(ctx, envelope):
@@ -116,10 +116,10 @@ class AgentLoop:
             )
         except Exception as exc:
             ctx.exception = exc
-            await self._hooks.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
+            await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
             raise
         finally:
-            await self._hooks.execute(HookEvent.AFTER_INVOKE, ctx)
+            await self._hook_manager.execute(HookEvent.AFTER_INVOKE, ctx)
 
     # --- ReAct core with hook trigger points --- #
 
@@ -130,7 +130,7 @@ class AgentLoop:
     ) -> AsyncIterator[E2AResponse]:
         """The ReAct loop with hook trigger points + context compression inserted.
 
-        Model calls use manual self._hooks.execute() (async generator incompatible with @hook).
+        Model calls use manual self._hook_manager.execute() (async generator incompatible with @hook).
         Tool calls use @hook-decorated _hooked_tool_call.
         Context compression runs before each LLM call.
         """
@@ -140,15 +140,15 @@ class AgentLoop:
         set_permission_channel(envelope.channel or "web")
         await self._sanitize_orphan_tool_calls(session_id, envelope.request_id)
         # Insert the todo-guidance system message once per session
-        existing = self._store.get_messages(session_id)
+        existing = self._session_store.get_messages(session_id)
         if not existing or existing[0].get("role") != "system":
-            await self._store.append(
+            await self._session_store.append(
                 session_id,
                 {"role": "system", "content": TODO_SYSTEM_PROMPT},
                 request_id=envelope.request_id,
             )
         query = (envelope.params or {}).get("query", "")
-        await self._store.append(
+        await self._session_store.append(
             session_id,
             {"role": "user", "content": query},
             request_id=envelope.request_id,
@@ -158,7 +158,7 @@ class AgentLoop:
         seq = 0
         full_text = ""
         for _step in range(MAX_STEPS):
-            msgs = self._store.get_messages(session_id)
+            msgs = self._session_store.get_messages(session_id)
 
             # -- Context compression (before hook trigger) -- #
             msgs = await compress_messages(
@@ -170,8 +170,8 @@ class AgentLoop:
             )
 
             # -- BEFORE_MODEL_CALL -- #
-            ctx.inputs = ModelCallInputs(messages=msgs, tools=self._tools.schemas())
-            await self._hooks.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
+            ctx.inputs = ModelCallInputs(messages=msgs, tools=self._tool_manager.schemas())
+            await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
 
             # Check force_finish — skip LLM call if requested
             ff = ctx.consume_force_finish_request()
@@ -208,7 +208,7 @@ class AgentLoop:
                             )
                             seq += 1
                         elif isinstance(ev, Finish):
-                            await self._store.append(
+                            await self._session_store.append(
                                 session_id,
                                 ev.assistant_message,
                                 request_id=envelope.request_id,
@@ -266,7 +266,7 @@ class AgentLoop:
                                             body=snap,
                                         )
                                         seq += 1
-                                    await self._store.append(
+                                    await self._session_store.append(
                                         session_id,
                                         {
                                             "role": "tool",
@@ -277,7 +277,7 @@ class AgentLoop:
                                         event_type="chat.tool_result",
                                     )
                                 # AFTER_MODEL_CALL for tool_calls turn
-                                await self._hooks.execute(HookEvent.AFTER_MODEL_CALL, ctx)
+                                await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                                 _reask = True
                                 break  # exit async-for loop; retry loop will also break
                             # AFTER_MODEL_CALL for final answer turn
@@ -289,12 +289,12 @@ class AgentLoop:
                                 response_kind="e2a.complete",
                                 body={"result": {"content": full_text}},
                             )
-                            await self._hooks.execute(HookEvent.AFTER_MODEL_CALL, ctx)
+                            await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                             return
                     if _reask:
                         break  # exit retry loop; outer _step loop will continue
                     # LLM stream ended without Finish — shouldn't happen, but handle gracefully
-                    await self._hooks.execute(HookEvent.AFTER_MODEL_CALL, ctx)
+                    await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                     break  # exit retry loop, fall through to next step
                 except asyncio.CancelledError:
                     raise  # never interfere with cancellation
@@ -302,7 +302,7 @@ class AgentLoop:
                     raise  # interrupt propagates immediately
                 except Exception as exc:
                     ctx.exception = exc
-                    await self._hooks.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
+                    await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
                     retry_req = ctx.consume_retry_request()
                     if retry_req is not None and retry_attempt < _MAX_HOOK_RETRIES:
                         log.info("hook requested LLM retry, attempt %d/%d",
@@ -328,7 +328,7 @@ class AgentLoop:
         some results were already appended), inject a synthetic tool_result for
         each missing tool_call_id so the next LLM call doesn't error on orphan
         tool_calls."""
-        msgs = self._store.get_messages(session_id)
+        msgs = self._session_store.get_messages(session_id)
         if not msgs:
             return
         # find the LAST assistant message that carries tool_calls — the only one
@@ -345,7 +345,7 @@ class AgentLoop:
             tc_id = tc.get("id")
             if tc_id and not any(m.get("role") == "tool" and m.get("tool_call_id") == tc_id
                                 for m in msgs):
-                await self._store.append(
+                await self._session_store.append(
                     session_id,
                     {"role": "tool", "tool_call_id": tc_id,
                      "content": "[interrupted: previous request did not complete]"},
@@ -363,4 +363,4 @@ class AgentLoop:
         take effect in the method body automatically.
         """
         inputs: ToolCallInputs = ctx.inputs  # type: ignore[assignment]
-        return await self._tools.execute(inputs.name, inputs.args)
+        return await self._tool_manager.execute(inputs.name, inputs.args)

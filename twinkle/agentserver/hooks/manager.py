@@ -10,7 +10,7 @@ No filter, circuit breaker, chain, or transform support.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from typing import Callable
 
 from twinkle.agentserver.hooks.base import AgentHook, HookContext, HookEvent, HookInterrupt
 
@@ -25,8 +25,7 @@ class HookManager:
     callback methods.
     """
 
-    def __init__(self, agent: Any) -> None:
-        self._agent = agent
+    def __init__(self) -> None:
         # {HookEvent: [(priority, callback_method)]} — sorted descending per event
         self._callbacks: dict[HookEvent, list[tuple[int, Callable]]] = {}
         self._hooks: list[AgentHook] = []
@@ -40,7 +39,9 @@ class HookManager:
 
         This is a sync method because AgentHook.init() is sync.
         """
-        hook.init(self._agent)
+        # HookManager is agent-agnostic (holds no agent reference); init/uninit
+        # receive None. Hooks that need the agent get it via ctx.agent in callbacks.
+        hook.init(None)
         callbacks = hook.get_callbacks()
         for event, method in callbacks.items():
             entries = self._callbacks.setdefault(event, [])
@@ -57,7 +58,7 @@ class HookManager:
 
         This is a sync method because AgentHook.uninit() is sync.
         """
-        hook.uninit(self._agent)
+        hook.uninit(None)  # agent-agnostic — see register_hook
         callbacks = hook.get_callbacks()
         for event, method in callbacks.items():
             entries = self._callbacks.get(event, [])

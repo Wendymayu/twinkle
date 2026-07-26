@@ -20,7 +20,7 @@ from twinkle.agentserver.hooks.manager import HookManager
 
 class _FakeAgent:
     def __init__(self):
-        self._hooks = HookManager(self)
+        self._hook_manager = HookManager()
         self.call_log: list[str] = []
 
 
@@ -45,7 +45,7 @@ def test_hook_decorator_triggers_before_then_body_then_after():
     """@hook(BEFORE, AFTER) wraps a method: before -> body -> after."""
     agent = _FakeAgent()
     rec = _RecorderHook()
-    agent._hooks.register_hook(rec)
+    agent._hook_manager.register_hook(rec)
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL)
     async def do_work(self, ctx):
@@ -69,7 +69,7 @@ def test_hook_decorator_on_exception_triggers_exception_hook():
     """When method raises, on_exception hook is called."""
     agent = _FakeAgent()
     rec = _RecorderHook()
-    agent._hooks.register_hook(rec)
+    agent._hook_manager.register_hook(rec)
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL,
           on_exception=HookEvent.ON_MODEL_EXCEPTION)
@@ -102,7 +102,7 @@ def test_hook_decorator_force_finish_skips_body():
             ctx.request_force_finish(result="blocked")
 
     agent = _FakeAgent()
-    agent._hooks.register_hook(ForceFinishHook())
+    agent._hook_manager.register_hook(ForceFinishHook())
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL)
     async def do_work(self, ctx):
@@ -133,7 +133,7 @@ def test_hook_decorator_retry_re_executes_body():
                 ctx.request_retry(delay=0)
 
     agent = _FakeAgent()
-    agent._hooks.register_hook(RetryHook())
+    agent._hook_manager.register_hook(RetryHook())
 
     agent.attempt = 0
 
@@ -163,7 +163,7 @@ def test_hook_decorator_interrupt_propagates_immediately():
     without triggering on_exception."""
     agent = _FakeAgent()
     rec = _RecorderHook()
-    agent._hooks.register_hook(rec)
+    agent._hook_manager.register_hook(rec)
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL,
           on_exception=HookEvent.ON_MODEL_EXCEPTION)
@@ -190,7 +190,7 @@ def test_hook_decorator_cancelled_error_propagates_immediately():
     on_exception or after hooks."""
     agent = _FakeAgent()
     rec = _RecorderHook()
-    agent._hooks.register_hook(rec)
+    agent._hook_manager.register_hook(rec)
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL,
           on_exception=HookEvent.ON_MODEL_EXCEPTION)
@@ -228,7 +228,7 @@ def test_hook_decorator_max_retries_exceeded_boundary():
 
     agent = _FakeAgent()
     always_retry = AlwaysRetryHook()
-    agent._hooks.register_hook(always_retry)
+    agent._hook_manager.register_hook(always_retry)
 
     agent.exec_count = 0
 
@@ -260,7 +260,7 @@ def test_hook_decorator_on_exception_none_propagates_without_hooks():
     directly — no exception hook is triggered, and after is NOT called."""
     agent = _FakeAgent()
     rec = _RecorderHook()
-    agent._hooks.register_hook(rec)
+    agent._hook_manager.register_hook(rec)
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL,
           on_exception=None)

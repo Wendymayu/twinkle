@@ -9,7 +9,7 @@ For regular async methods (not async generators). The decorator:
    re-executes if retry requested (max 3 attempts)
 
 For async generators (like AgentLoop.run_stream), use manual
-self._hooks.execute() calls instead — @hook cannot wrap generators.
+self._hook_manager.execute() calls instead — @hook cannot wrap generators.
 """
 from __future__ import annotations
 
@@ -45,10 +45,10 @@ def hook(
     def decorator(method: Callable) -> Callable:
         @functools.wraps(method)
         async def wrapper(self: Any, ctx: HookContext, *args: Any, **kwargs: Any) -> Any:
-            hooks = self._hooks  # HookManager on the instance
+            hook_manager = self._hook_manager  # HookManager on the instance
 
             # 1. Trigger before event
-            await hooks.execute(before, ctx)
+            await hook_manager.execute(before, ctx)
 
             # 2. Check force_finish — skip method body if set
             ff = ctx.consume_force_finish_request()
@@ -62,7 +62,7 @@ def hook(
                 try:
                     result = await method(self, ctx, *args, **kwargs)
                     # 4. Trigger after event on success
-                    await hooks.execute(after, ctx)
+                    await hook_manager.execute(after, ctx)
                     return result
                 except asyncio.CancelledError:
                     raise  # never interfere with cancellation
@@ -72,7 +72,7 @@ def hook(
                     ctx.exception = exc
                     if on_exception is not None:
                         # 5. Trigger on_exception event
-                        await hooks.execute(on_exception, ctx)
+                        await hook_manager.execute(on_exception, ctx)
                         # Check retry request
                         retry = ctx.consume_retry_request()
                         if retry is not None and attempt < _MAX_RETRY_ATTEMPTS:
