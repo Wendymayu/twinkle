@@ -1,5 +1,5 @@
 from pathlib import Path
-from twinkle.agentserver.skills.store import Skill, parse_skill_md, parse_frontmatter
+from twinkle.agentserver.skills.store import Skill, SkillManager, parse_skill_md, parse_frontmatter
 
 
 def test_parse_frontmatter_basic():
@@ -49,3 +49,66 @@ def test_parse_skill_md_no_file_returns_none(tmp_path):
     d = tmp_path / "empty"
     d.mkdir()
     assert parse_skill_md(d) is None
+
+
+def _make_skill(dir_: Path, name: str, desc: str = "d") -> None:
+    dir_.mkdir(parents=True)
+    (dir_ / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {desc}\n---\n\nbody\n", encoding="utf-8"
+    )
+
+
+def test_skill_manager_scans(tmp_path):
+    _make_skill(tmp_path / "a", "a")
+    _make_skill(tmp_path / "b", "b")
+    mgr = SkillManager(str(tmp_path))
+    names = sorted(s.name for s in mgr.list_skills())
+    assert names == ["a", "b"]
+
+
+def test_skill_manager_empty_dir(tmp_path):
+    assert SkillManager(str(tmp_path)).list_skills() == []
+
+
+def test_skill_manager_missing_dir(tmp_path):
+    assert SkillManager(str(tmp_path / "nope")).list_skills() == []
+
+
+def test_skill_manager_skips_malformed(tmp_path):
+    _make_skill(tmp_path / "a", "a")
+    bad = tmp_path / "bad"; bad.mkdir()
+    (bad / "SKILL.md").write_text("---\ndescription: no name\n---\n", encoding="utf-8")
+    assert [s.name for s in SkillManager(str(tmp_path)).list_skills()] == ["a"]
+
+
+def test_skill_manager_whitelist(tmp_path):
+    _make_skill(tmp_path / "a", "a")
+    _make_skill(tmp_path / "b", "b")
+    mgr = SkillManager(str(tmp_path), enabled=["a"])
+    assert [s.name for s in mgr.list_skills()] == ["a"]
+
+
+def test_skill_manager_mtime_reload(tmp_path):
+    _make_skill(tmp_path / "a", "a", "v1")
+    mgr = SkillManager(str(tmp_path))
+    assert mgr.list_skills()[0].description == "v1"
+    # 改 SKILL.md 内容(mtime 变)→ 重新扫到新描述
+    (tmp_path / "a" / "SKILL.md").write_text(
+        "---\nname: a\ndescription: v2\n---\n\nbody\n", encoding="utf-8"
+    )
+    assert mgr.list_skills()[0].description == "v2"
+
+
+def test_skill_manager_add_skill_dir(tmp_path):
+    _make_skill(tmp_path / "a", "a")
+    mgr = SkillManager(str(tmp_path))
+    assert len(mgr.list_skills()) == 1
+    _make_skill(tmp_path / "b", "b")  # 新增子目录 → 签名变 → 重扫
+    assert len(mgr.list_skills()) == 2
+
+
+def test_skill_manager_get_skill(tmp_path):
+    _make_skill(tmp_path / "a", "a")
+    mgr = SkillManager(str(tmp_path))
+    assert mgr.get_skill("a") is not None
+    assert mgr.get_skill("nope") is None

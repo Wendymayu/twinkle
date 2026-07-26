@@ -48,3 +48,59 @@ def parse_skill_md(directory: Path) -> Skill | None:
     if not name or not description:
         return None
     return Skill(name=name, description=description, directory=directory.resolve())
+
+
+class SkillManager:
+    """扫 <skills_dir>/<name>/SKILL.md,mtime 热重载,可选白名单。坏 skill 跳过不崩。"""
+
+    def __init__(self, skills_dir: str, enabled: list[str] | None = None) -> None:
+        self._dir = Path(skills_dir)
+        self._enabled: set[str] | None = set(enabled) if enabled else None
+        self._sig: tuple = ()
+        self._skills: list[Skill] = []
+
+    def list_skills(self) -> list[Skill]:
+        self._refresh_if_changed()
+        return self._skills
+
+    def get_skill(self, name: str) -> Skill | None:
+        for s in self.list_skills():
+            if s.name == name:
+                return s
+        return None
+
+    def _refresh_if_changed(self) -> None:
+        sig = self._build_signature()
+        if sig != self._sig:
+            self._skills = self._scan()
+            self._sig = sig
+
+    def _build_signature(self) -> tuple:
+        """每个子目录的 (name, SKILL.md.mtime) —— 内容编辑 + 增删子目录都触发重扫。"""
+        if not self._dir.is_dir():
+            return ()
+        sigs: list[tuple] = []
+        for sub in sorted(self._dir.iterdir()):
+            if not sub.is_dir():
+                continue
+            skill_md = sub / "SKILL.md"
+            try:
+                sigs.append((sub.name, skill_md.stat().st_mtime))
+            except OSError:
+                sigs.append((sub.name, -1.0))
+        return tuple(sigs)
+
+    def _scan(self) -> list[Skill]:
+        if not self._dir.is_dir():
+            return []
+        out: list[Skill] = []
+        for sub in sorted(self._dir.iterdir()):
+            if not sub.is_dir():
+                continue
+            skill = parse_skill_md(sub)
+            if skill is None:
+                continue
+            if self._enabled is not None and skill.name not in self._enabled:
+                continue
+            out.append(skill)
+        return out
