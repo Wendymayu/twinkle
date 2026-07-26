@@ -8,7 +8,7 @@ tool under ``builtin/``, then register it in :func:`tool_manager`.
 from __future__ import annotations
 
 from twinkle.agentserver.tools.base import Tool, ToolCard
-from twinkle.agentserver.tools.builtin import command_exec, file_tools, todo_tools, web_fetch, web_search
+from twinkle.agentserver.tools.builtin import command_exec, file_tools, skill_tools, todo_tools, web_fetch, web_search
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.local_function import LocalFunction
 from twinkle.agentserver.tools.manager import ToolManager
@@ -28,6 +28,8 @@ def tool_manager() -> ToolManager:
     tm.register(todo_tools.todo_create)
     tm.register(todo_tools.todo_complete)
     tm.register(todo_tools.todo_list)
+    tm.register(skill_tools.list_skill)
+    tm.register(skill_tools.read_skill)
     return tm
 
 
