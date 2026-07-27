@@ -53,10 +53,10 @@ def parse_skill_md(directory: Path) -> Skill | None:
 class SkillManager:
     """扫 <skills_dir>/<name>/SKILL.md,mtime 热重载,可选白名单。坏 skill 跳过不崩。"""
 
-    def __init__(self, skills_dir: str, enabled: list[str] | None = None) -> None:
+    def __init__(self, skills_dir: str, enabled_skills: list[str] | None = None) -> None:
         self._dir = Path(skills_dir)
-        self._enabled: set[str] | None = set(enabled) if enabled else None
-        self._sig: tuple = ()
+        self._enabled_skills: set[str] | None = set(enabled_skills) if enabled_skills else None
+        self._mtime_signature: tuple = ()
         self._skills: list[Skill] = []
 
     def list_skills(self) -> list[Skill]:
@@ -70,25 +70,25 @@ class SkillManager:
         return None
 
     def _refresh_if_changed(self) -> None:
-        sig = self._build_signature()
-        if sig != self._sig:
+        signature = self._build_mtime_signature()
+        if signature != self._mtime_signature:
             self._skills = self._scan()
-            self._sig = sig
+            self._mtime_signature = signature
 
-    def _build_signature(self) -> tuple:
+    def _build_mtime_signature(self) -> tuple:
         """每个子目录的 (name, SKILL.md.mtime) —— 内容编辑 + 增删子目录都触发重扫。"""
         if not self._dir.is_dir():
             return ()
-        sigs: list[tuple] = []
+        entries: list[tuple] = []
         for sub in sorted(self._dir.iterdir()):
             if not sub.is_dir():
                 continue
             skill_md = sub / "SKILL.md"
             try:
-                sigs.append((sub.name, skill_md.stat().st_mtime))
+                entries.append((sub.name, skill_md.stat().st_mtime))
             except OSError:
-                sigs.append((sub.name, -1.0))
-        return tuple(sigs)
+                entries.append((sub.name, -1.0))
+        return tuple(entries)
 
     def _scan(self) -> list[Skill]:
         if not self._dir.is_dir():
@@ -100,7 +100,7 @@ class SkillManager:
             skill = parse_skill_md(sub)
             if skill is None:
                 continue
-            if self._enabled is not None and skill.name not in self._enabled:
+            if self._enabled_skills is not None and skill.name not in self._enabled_skills:
                 continue
             out.append(skill)
         return out

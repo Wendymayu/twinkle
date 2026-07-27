@@ -25,20 +25,20 @@ class SkillHook(AgentHook):
         skills = get_skill_manager().list_skills()
         if not skills:
             return  # 无 skill → no-op
-        mode = self._mode or _resolve_mode()
+        mode = self._mode or _get_skill_mode()
         if mode == "auto_list":
-            self._prepend(ctx, "你有 skills 可用。需要时先调 list_skill 看清单,再调 read_skill(name) 载入指令。")
-        else:  # "all"(默认)；未知 mode 也落到 all 并告警，避免静默误配置
+            self._prepend_system_message(ctx, "你有 skills 可用。需要时先调 list_skill 看清单,再调 read_skill(name) 载入指令。")
+        else:  # "all"(默认);未知 mode 也落到 all 并告警,避免静默误配置
             if mode != "all":
                 log.warning("unknown SKILL_MODE %r, falling back to 'all'", mode)
             lines = ["## 可用技能"] + [f"{i}. {s.name}: {s.description}" for i, s in enumerate(skills)]
-            self._prepend(ctx, "\n".join(lines))
+            self._prepend_system_message(ctx, "\n".join(lines))
 
-    def _prepend(self, ctx: HookContext, content: str) -> None:
+    def _prepend_system_message(self, ctx: HookContext, content: str) -> None:
         # 赋新 list(不原地 insert——msgs 可能是 store 的内部 list,in-place 会污染历史)
         ctx.inputs.messages = [{"role": "system", "content": content}] + ctx.inputs.messages
 
 
-def _resolve_mode() -> str:
+def _get_skill_mode() -> str:
     from twinkle.config import SKILL_MODE
     return SKILL_MODE

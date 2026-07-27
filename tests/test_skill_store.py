@@ -86,7 +86,7 @@ def test_skill_manager_skips_malformed(tmp_path):
 def test_skill_manager_whitelist(tmp_path):
     _make_skill(tmp_path / "a", "a")
     _make_skill(tmp_path / "b", "b")
-    mgr = SkillManager(str(tmp_path), enabled=["a"])
+    mgr = SkillManager(str(tmp_path), enabled_skills=["a"])
     assert [s.name for s in mgr.list_skills()] == ["a"]
 
 
