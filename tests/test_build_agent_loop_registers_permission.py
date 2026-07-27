@@ -1,10 +1,12 @@
 """build_agent_loop wires PermissionHook when explicitly passed."""
 def test_build_agent_loop_wires_permission(monkeypatch):
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", '{"enabled": true}')
     import importlib
     import twinkle.config as cfg
 
     importlib.reload(cfg)
+    # Enable via the config constant (TWINKLE_PERMISSIONS env was removed in v1;
+    # permission_engine() reads PERMISSIONS_ENABLED fresh at call time).
+    monkeypatch.setattr(cfg, "PERMISSIONS_ENABLED", True)
     from twinkle.agentserver.sessions import SessionStore, session_store
     from twinkle.agentserver.server import build_agent_loop
     from twinkle.agentserver.permissions import permission_engine

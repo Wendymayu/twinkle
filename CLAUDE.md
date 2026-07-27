@@ -103,30 +103,36 @@ The system is **streaming-only** — unary/single-shot mode was removed in Phase
 
 ## Configuration
 
-Read in `twinkle/config.py`, priority: env var > `.env` file > default.
+Most tunable config now lives in `twinkle/resources/config.yaml` (YAML + `${ENV:-default}` interpolation + pydantic validation, mirroring `jiuwenswarm/resources/config.yaml`). Edit that file for tunables (`agent.max_steps`, `context_compression`, `skills.mode`/`enabled`, `permissions` policy). Only secrets + deploy-variable paths/endpoints/ports remain env vars, resolved into the YAML via `${ENV:-default}`. v1 reads only the packaged `resources/config.yaml`; a user-override path is future work.
+
+Loaded by `twinkle.config.loader.load_config()` → `twinkle/config/schema.py` pydantic models (bad tier/mode → startup `ValidationError`) → `twinkle/config/__init__.py` flattens the validated `settings` into the same module-level constants the rest of the codebase imports (`from twinkle.config import X` unchanged). Priority: real env var > `.env` file > YAML literal default.
 
 | Variable | Default | Notes |
 |---|---|---|
 | `TWINKLE_AGENTSERVER_HOST`/`_PORT` | `127.0.0.1` / `18000` | AgentServer listen |
 | `TWINKLE_GATEWAY_HOST`/`_PORT` | `127.0.0.1` / `19000` | Gateway browser-ws listen |
 | `TWINKLE_LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible |
-| `TWINKLE_LLM_API_KEY` | empty | **put in `.env`, never commit** |
+| `TWINKLE_LLM_API_KEY` | empty | **put in `.env`, never commit**; resolved into YAML `llm.api_key` via `${TWINKLE_LLM_API_KEY:-}` |
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | |
-| `TWINKLE_AGENT_MAX_STEPS` | `1000` | Max ReAct steps before `e2a.error` (runaway backstop, not a target) |
-| `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | Sandbox root for `command_exec`/`file_tools` — agent file ops confined under this. Defaults to the user home so generated files don't pollute the repo; override to point elsewhere |
+| `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | Sandbox root for `command_exec`/`file_tools` — agent file ops confined under this. Defaults to the user home so generated files don't pollute the repo; override to point elsewhere. Empty YAML default → `~/.twinkle` |
 | `TWINKLE_LOG_DIR` | `<WORKSPACE>/logs` | Process log dir (gateway.log / server.log daily-rotated by `logging_config.setup_logging`; JSONL audit under `logs/audit/`) |
+| `TWINKLE_SESSIONS_DIR` | `<WORKSPACE>/.twinkle_data/sessions` | Disk-backed session store root; per-session `<sid>/{metadata.json,history.json}` |
 | `TWINKLE_TODOS_DIR` | `<WORKSPACE>/.twinkle_data/todos` | Todo persistence root; flat `<sid>.json` per session, parallel to `sessions/`; `session.delete` cleans up via `TodoStore.delete` |
-| `OTEL_ENABLED` | `false` | Observability master switch (needs `[obs]` extra); false = `setup()` no-op, zero-cost |
+| `TWINKLE_SKILLS_DIR` | `<WORKSPACE>/skills` | Skill directory; user drops `<name>/SKILL.md` here; mtime hot-reloaded by `SkillManager` |
+| `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | runtime allow_always store (mtime hot-reload) |
+| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/logs/audit/permission_audit.jsonl` | ToolPermissionLog JSONL (no rotation) |
+| `OTEL_ENABLED` | `false` | Observability master switch (needs `[obs]` extra); false = `setup()` no-op, zero-cost. **`OTEL_*` stays in `twinkle/observability/config.py`, not folded into config.yaml (v1).** |
 | `OTEL_TRACES_EXPORTER`/`OTEL_METRICS_EXPORTER` | `none` | `otlp` / `console` / `none` (read in `twinkle/observability/config.py`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP gRPC collector endpoint (`http://` = insecure, `https://` = TLS) |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | only the gRPC exporter is implemented |
 | `OTEL_SERVICE_NAME` | `twinkle-agentserver` | Resource `service.name` |
-| `TWINKLE_PERMISSIONS` | (disabled) | JSON: {enabled, enabled_channels, global_default, tools, rules, approval_overrides}. false = system off (all ALLOW, command_exec still uses builtin_rules) |
-| `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | runtime allow_always store (mtime hot-reload) |
-| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/logs/audit/permission_audit.jsonl` | ToolPermissionLog JSONL (no rotation) |
-| `TWINKLE_SKILLS_DIR` | `<WORKSPACE>/skills` | Skill directory; user drops `<name>/SKILL.md` here; mtime hot-reloaded by `SkillManager` |
-| `TWINKLE_SKILL_MODE` | `all` | `all` = SkillHook injects the skill catalog each step; `auto_list` = injects a "call list_skill" note (model pulls on demand). Single value, not coexisting |
-| `TWINKLE_ENABLED_SKILLS` | (empty = all) | Comma-separated skill-name whitelist; empty = all skills open |
+
+**Removed env vars (now YAML literals in `config.yaml`)** — setting these via env no longer works; edit the YAML instead:
+- `TWINKLE_AGENT_MAX_STEPS` → `agent.max_steps`
+- `TWINKLE_CONTEXT_TOKEN_THRESHOLD` / `TWINKLE_CONTEXT_KEEP_RECENT_PAIRS` / `TWINKLE_CONTEXT_SUMMARY_PROMPT` → `context_compression.*`
+- `TWINKLE_SKILL_MODE` → `skills.mode`
+- `TWINKLE_ENABLED_SKILLS` → `skills.enabled` (list)
+- `TWINKLE_PERMISSIONS` (JSON env) → `permissions:` block (`enabled` / `enabled_channels` / `global_default` / `tools` / `rules` / `approval_overrides` / `overrides_file` / `audit_file`). `enabled: false` = system off (all ALLOW, no audit/no ASK; command_exec still uses builtin_rules). tier 取值域: `allow | require-approval | deny` (`require-approval` 归一为 ASK).
 
 ## Conventions
 

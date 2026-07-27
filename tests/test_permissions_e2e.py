@@ -26,10 +26,15 @@ class _ScriptedLLM:
 
 
 def test_full_approval_flow_through_gateway_and_agentserver(free_port, tmp_path, monkeypatch):
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", '{"enabled": true, "tools": {"echo": "require-approval"}}')
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", str(tmp_path))
     import importlib, twinkle.config as cfg
     importlib.reload(cfg)
+    # Enable permissions + register the echo tool tier via the config constants
+    # that permission_engine() reads fresh at call time (mirrors test_file_tools
+    # monkeypatching WORKSPACE_DIR). TWINKLE_PERMISSIONS env was removed in v1.
+    monkeypatch.setattr(cfg, "PERMISSIONS_ENABLED", True)
+    monkeypatch.setattr(cfg, "PERMISSIONS_TOOLS",
+                        {**cfg.PERMISSIONS_TOOLS, "echo": "require-approval"})
 
     @tool
     async def echo(text: str) -> str:

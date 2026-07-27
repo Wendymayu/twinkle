@@ -20,7 +20,7 @@ def test_ensure_workspace_dir_seeds_example_skill(tmp_path, monkeypatch):
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", str(tmp_path))
     import twinkle.config as cfg
     importlib.reload(cfg)
-    from twinkle.config import ensure_workspace_dir
+    from twinkle.workspace import ensure_workspace_dir
     ensure_workspace_dir()
     # 示例 skill 被拷到 <WORKSPACE>/skills/doc-audit/SKILL.md
     assert (tmp_path / "skills" / "doc-audit" / "SKILL.md").is_file()

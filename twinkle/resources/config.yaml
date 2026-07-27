@@ -1,0 +1,46 @@
+# Twinkle 运行时配置。${ENV:-default} 仅用于机密 + 部署相关变量(路径/端点/端口);
+# 可调参数(max_steps/压缩阈值/skill mode/permissions 策略)直接写值——改它就编辑本文件。
+# 本文件可安全 commit:机密走 .env / 环境变量,不落盘于此。
+agentserver:
+  host: ${TWINKLE_AGENTSERVER_HOST:-127.0.0.1}
+  port: ${TWINKLE_AGENTSERVER_PORT:-18000}
+gateway:
+  host: ${TWINKLE_GATEWAY_HOST:-127.0.0.1}
+  port: ${TWINKLE_GATEWAY_PORT:-19000}
+workspace:
+  dir: ${TWINKLE_WORKSPACE_DIR:-}        # 空 → ~/.twinkle;sandbox 根,command_exec/file_tools 收敛其下
+logging:
+  dir: ${TWINKLE_LOG_DIR:-}              # 空 → <workspace>/logs
+sessions:
+  dir: ${TWINKLE_SESSIONS_DIR:-}         # 空 → <workspace>/.twinkle_data/sessions
+todos:
+  dir: ${TWINKLE_TODOS_DIR:-}            # 空 → <workspace>/.twinkle_data/todos
+llm:
+  base_url: ${TWINKLE_LLM_BASE_URL:-https://api.openai.com/v1}
+  model: ${TWINKLE_LLM_MODEL:-gpt-4o-mini}
+  api_key: ${TWINKLE_LLM_API_KEY:-}       # 机密:放 .env,别 commit
+agent:
+  max_steps: 1000                         # ReAct 最大步数,超限 yield e2a.error(防不收敛硬上限,非目标)
+context_compression:
+  token_threshold: 60000                  # 估算 token(char//3,不精确)超此即压缩历史
+  keep_recent_pairs: 6                    # 保留最近 N 个 user/assistant 对
+  summary_prompt: "你是对话上下文压缩器。把给定历史对话压成一段摘要，保留关键事实、用户偏好、已做决策、工具调用结果，丢弃寒暄与冗余。用中文。"
+skills:
+  dir: ${TWINKLE_SKILLS_DIR:-}            # 空 → <workspace>/skills
+  mode: all                               # all = 每步注入 skill 清单;auto_list = 模型按需调 list_skill 拉
+  enabled: []                             # 列表;空 = 全开
+permissions:
+  enabled: false                          # false = 系统关(全 ALLOW,无审计/无 ASK;command_exec 仍走 builtin_rules)
+  enabled_channels: [web]
+  global_default: allow                   # allow | require-approval | deny
+  tools:
+    command_exec: require-approval         # allow | require-approval | deny(require-approval 引擎归一为 ASK)
+    web_fetch: allow
+    web_search: allow
+    todo_create: allow
+    todo_complete: allow
+    todo_list: allow
+  rules: []                               # 用户规则(同 jiuwenswarm rules[] 形状;v1 可空)
+  approval_overrides: {}
+  overrides_file: ${TWINKLE_PERMISSION_OVERRIDES_FILE:-}   # 空 → <workspace>/.twinkle_data/permission_overrides.json
+  audit_file: ${TWINKLE_PERMISSION_AUDIT_FILE:-}          # 空 → <workspace>/logs/audit/permission_audit.jsonl

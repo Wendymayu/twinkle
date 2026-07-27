@@ -1,79 +1,56 @@
+"""Permission config now loads from resources/config.yaml (no TWINKLE_PERMISSIONS env).
+
+v1 dropped the single JSON env var; enabling/overrides are done by editing the
+YAML (or pointing load_config at a custom YAML in tests)."""
 import importlib
-import os
+
+import pytest
 
 
 def test_defaults_disabled(monkeypatch):
-    # Force empty (not just delenv) so the test is hermetic w.r.t. a real .env
-    # that might set TWINKLE_PERMISSIONS — empty falls through to defaults.
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", "")
+    monkeypatch.delenv("TWINKLE_PERMISSIONS", raising=False)  # no-op now; kept hermetic
+    monkeypatch.delenv("TWINKLE_WORKSPACE_DIR", raising=False)
     import twinkle.config as cfg
     importlib.reload(cfg)
     assert cfg.PERMISSIONS_ENABLED is False
     assert cfg.PERMISSIONS_ENABLED_CHANNELS == {"web"}
     assert cfg.PERMISSIONS_TOOLS.get("command_exec") == "require-approval"
     assert cfg.PERMISSIONS_GLOBAL_DEFAULT == "allow"
-
-
-def test_enabled_via_json(monkeypatch):
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", '{"enabled": true, "tools": {"echo": "deny"}}')
-    import twinkle.config as cfg
-    importlib.reload(cfg)
-    assert cfg.PERMISSIONS_ENABLED is True
-    assert cfg.PERMISSIONS_TOOLS["echo"] == "deny"
-
-
-def test_invalid_json_falls_back(monkeypatch):
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", "{not json")
-    import twinkle.config as cfg
-    importlib.reload(cfg)
-    assert cfg.PERMISSIONS_ENABLED is False  # fell back to defaults
+    assert cfg.PERMISSIONS_RULES == []
 
 
 def test_override_paths_under_workspace(monkeypatch):
-    monkeypatch.delenv("TWINKLE_PERMISSIONS", raising=False)
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", "/tmp/twinkle-test")
     import twinkle.config as cfg
     importlib.reload(cfg)
-    # normalize separators so the assertion is cross-platform (Windows uses \)
     assert cfg.PERMISSION_OVERRIDES_FILE.replace("\\", "/").endswith(
-        ".twinkle_data/permission_overrides.json"
-    )
+        ".twinkle_data/permission_overrides.json")
     assert cfg.PERMISSION_AUDIT_FILE.replace("\\", "/").endswith(
-        "logs/audit/permission_audit.jsonl"
-    )
-
-
-def test_bare_true_enables(monkeypatch):
-    # `TWINKLE_PERMISSIONS=true` (a bare bool, like OTEL_ENABLED) must enable,
-    # not crash the config import (regression: json.loads("true") -> bool -> update crash).
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", "true")
-    import twinkle.config as cfg
+        "logs/audit/permission_audit.jsonl")
+    monkeypatch.delenv("TWINKLE_WORKSPACE_DIR", raising=False)
     importlib.reload(cfg)
-    assert cfg.PERMISSIONS_ENABLED is True
-    # default tools preserved
-    assert cfg.PERMISSIONS_TOOLS.get("command_exec") == "require-approval"
 
 
-def test_bare_yes_and_1_enable(monkeypatch):
-    for val in ("yes", "1"):
-        monkeypatch.setenv("TWINKLE_PERMISSIONS", val)
-        import twinkle.config as cfg
-        importlib.reload(cfg)
-        assert cfg.PERMISSIONS_ENABLED is True, f"{val} should enable"
+def test_bad_tier_in_config_raises(tmp_path):
+    from twinkle.config.loader import load_config
+    custom = tmp_path / "config.yaml"
+    custom.write_text(
+        "permissions:\n  global_default: BOGUS\n", encoding="utf-8")
+    with pytest.raises(Exception):  # pydantic ValidationError
+        load_config(custom)
 
 
-def test_bare_false_disables(monkeypatch):
-    for val in ("false", "no", "0"):
-        monkeypatch.setenv("TWINKLE_PERMISSIONS", val)
-        import twinkle.config as cfg
-        importlib.reload(cfg)
-        assert cfg.PERMISSIONS_ENABLED is False, f"{val} should disable"
-
-
-def test_non_dict_json_does_not_crash(monkeypatch):
-    # a JSON value that isn't an object (e.g. a bare number) must fall back to
-    # defaults, NOT raise TypeError on dict.update.
-    monkeypatch.setenv("TWINKLE_PERMISSIONS", "42")
-    import twinkle.config as cfg
-    importlib.reload(cfg)  # would raise TypeError before the fix
-    assert cfg.PERMISSIONS_ENABLED is False  # safe default
+def test_enable_and_tool_override_via_yaml(tmp_path):
+    from twinkle.config.loader import load_config
+    custom = tmp_path / "config.yaml"
+    custom.write_text(
+        "permissions:\n  enabled: true\n  tools:\n    echo: deny\n",
+        encoding="utf-8")
+    c = load_config(custom)
+    assert c.permissions.enabled is True
+    assert c.permissions.tools["echo"] == "deny"
+    # tools dict is replaced wholesale when provided (matches the old
+    # _load_permissions shallow-merge semantics) — command_exec's default is
+    # NOT auto-merged in. In practice a user edits the packaged config.yaml
+    # (which carries the full tools dict) so they keep command_exec + add echo.
+    assert "command_exec" not in c.permissions.tools

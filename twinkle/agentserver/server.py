@@ -143,7 +143,7 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
 async def main() -> None:
     from twinkle.agentserver.permissions import permission_engine
     from twinkle.agentserver.hooks.builtin import PermissionHook, LoggingHook, SkillHook
-    from twinkle.config import ensure_workspace_dir
+    from twinkle.workspace import ensure_workspace_dir
 
     ensure_workspace_dir()
     store = session_store()

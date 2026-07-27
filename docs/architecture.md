@@ -1040,6 +1040,10 @@ cd web && npm install && npm run dev   # Vite(:5173)
 
 ### 9.2 环境变量
 
+v1 起，可调参数（`max_steps`/`context_compression`/`skills.mode`/`permissions` 策略）改为编辑 `twinkle/resources/config.yaml`（YAML + `${ENV:-default}` 插值 + pydantic 校验，镜像 `jiuwenswarm/resources/config.yaml`）。env 变量仅保留机密 + 部署相关变量（端口/路径/端点），通过 `${ENV:-default}` 解析进 YAML。加载链：`config_loader.load_config()` → `config_schema.py`（pydantic，非法 tier/mode 启动即 `ValidationError`）→ `config.py` 拍平成模块常量（`from twinkle.config import X` 不变）。observability 仍走自己的 `OTEL_*` env（`observability/config.py`），不并进主 YAML（v1）。
+
+**AgentServer 配置**（env 变量 + `${ENV:-default}`，读自 `config.yaml`）：
+
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `TWINKLE_AGENTSERVER_HOST` | `127.0.0.1` | AgentServer 监听地址 |
@@ -1050,13 +1054,13 @@ cd web && npm install && npm run dev   # Vite(:5173)
 | `TWINKLE_LLM_API_KEY` | 空 | LLM API key（**放在 .env 文件，不暴露在环境变量中**） |
 | `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | 模型名 |
 | `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | `command_exec`/`file_tools` 的工作区根（agent 文件操作收敛其下）。默认用户家,生成物不污染仓库;可覆盖 |
-| `TWINKLE_AGENT_MAX_STEPS` | `1000` | ReAct 循环最大步数，超限 yield `e2a.error`（防不收敛的硬上限，非目标值） |
 
-**Permissions 配置**（读自 `twinkle/config.py`，默认关 = 全 ALLOW 零成本；Phase 4）：
+**Permissions 配置**（`permissions:` 块在 `config.yaml`，默认关 = 全 ALLOW 零成本；Phase 4）：
+
+字段：`enabled`/`enabled_channels`/`global_default`/`tools`/`rules`/`approval_overrides`/`overrides_file`/`audit_file`。`enabled: false` = 系统关（全 ALLOW，无审计/无 ASK；command_exec 仍走 builtin_rules）。tier 取值域：`allow | require-approval | deny`（`require-approval` 引擎归一为 ASK）。`overrides_file`/`audit_file` 仍可用 `${ENV:-default}` 覆盖路径。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `TWINKLE_PERMISSIONS` | (disabled) | JSON：`{enabled, enabled_channels, global_default, tools, rules, approval_overrides}`。`enabled=false` = 系统关（全 ALLOW，无审计/无 ASK；command_exec 仍走 builtin_rules） |
 | `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | 运行时 allow_always 存储（mtime 热重载） |
 | `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/logs/audit/permission_audit.jsonl` | ToolPermissionLog JSONL 审计文件 |
 
@@ -1072,7 +1076,7 @@ cd web && npm install && npm run dev   # Vite(:5173)
 | `OTEL_EXPORTER_OTLP_HEADERS` | 空 | 逗号分隔 `k=v`，鉴权用 |
 | `OTEL_SERVICE_NAME` | `twinkle-agentserver` | Resource.service.name |
 
-配置从 [config.py](../twinkle/config.py) 读取，优先级：环境变量 > `.env` 文件 > 默认值。
+配置从 [config.yaml](../twinkle/resources/config.yaml) 读取（[config/loader.py](../twinkle/config/loader.py) 解析 `${ENV:-default}` + [config/schema.py](../twinkle/config/schema.py) pydantic 校验 → [config/__init__.py](../twinkle/config/__init__.py) 拍平成常量）。优先级：真实环境变量 > `.env` 文件 > YAML 字面默认值。observability 的 `OTEL_*` 仍走 [observability/config.py](../twinkle/observability/config.py)。
 
 ---
 
@@ -1080,7 +1084,11 @@ cd web && npm install && npm run dev   # Vite(:5173)
 
 ```
 twinkle/
-  config.py                # 环境变量 + .env 加载
+  config/                  # 配置包：loader 读 YAML + schema 校验 + __init__ 拍平常量
+    __init__.py            # settings = load_config() → 模块常量（from twinkle.config import X 不变）
+    loader.py              # 读 config.yaml + 解析 ${ENV:-default} + yaml.safe_load
+    schema.py              # pydantic 模型（Literal 取值域 + 派生路径 + extra=forbid）
+  workspace.py             # ensure_workspace_dir / _seed_example_skills（运行时副作用，从 config 挪出）
   e2a/
     models.py              # E2AEnvelope / E2AResponse（Pydantic 最小子集）
     __init__.py            # 导出
@@ -1194,7 +1202,7 @@ tests/
   test_permissions_policy.py      # 合并序 + allow_always 持久化
   test_permissions_audit.py        # JSONL fail-soft
   test_permissions_engine.py       # 通道门 + 审计
-  test_permissions_config.py      # TWINKLE_PERMISSIONS JSON 解析
+  test_permissions_config.py      # permissions YAML 加载 + 派生路径
   test_permissions_package.py      # permission_engine() 装配
   test_permission_context.py      # APPROVAL_CHANNEL ContextVar
   test_permission_hook.py         # PermissionHook ALLOW/DENY/ASK 分派
