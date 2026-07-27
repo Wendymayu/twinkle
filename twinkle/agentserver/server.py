@@ -142,11 +142,13 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
 
 async def main() -> None:
     from twinkle.agentserver.permissions import permission_engine
-    from twinkle.agentserver.hooks.builtin import PermissionHook, LoggingHook
+    from twinkle.agentserver.hooks.builtin import PermissionHook, LoggingHook, SkillHook
+    from twinkle.config import ensure_workspace_dir
 
+    ensure_workspace_dir()
     store = session_store()
     engine = permission_engine()
-    loop = build_agent_loop(store, hooks=[PermissionHook(engine), LoggingHook()])
+    loop = build_agent_loop(store, hooks=[PermissionHook(engine), SkillHook(), LoggingHook()])
     handler = ws_handler(loop, store)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):

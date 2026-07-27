@@ -91,13 +91,33 @@ ENABLED_SKILLS = [s.strip() for s in _enabled_raw.split(",") if s.strip()]
 
 
 def ensure_workspace_dir() -> str:
-    """Create WORKSPACE_DIR if missing (idempotent). Call at server startup
-    so read/list/glob work on a fresh ~/.twinkle without a "not found" error.
-    Not called at import time to keep tests (which monkeypatch WORKSPACE_DIR)
-    side-effect-free on the host.
+    """Create WORKSPACE_DIR + SKILLS_DIR if missing (idempotent), seed example
+    skills on first start. Call at server startup so read/list/glob work on a
+    fresh ~/.twinkle without a "not found" error. Not called at import time to
+    keep tests (which monkeypatch WORKSPACE_DIR) side-effect-free on the host.
     """
     os.makedirs(WORKSPACE_DIR, exist_ok=True)
+    os.makedirs(SKILLS_DIR, exist_ok=True)
+    _seed_example_skills(SKILLS_DIR)
     return WORKSPACE_DIR
+
+
+def _seed_example_skills(skills_dir: str) -> None:
+    """First-start: copy bundled example skills (twinkle/resources/skills/*) to
+    <WORKSPACE>/skills. Skip if target exists (preserve user edits). No-op if
+    there are no bundled resources."""
+    import shutil
+    from pathlib import Path
+    src = Path(__file__).resolve().parent / "resources" / "skills"
+    if not src.is_dir():
+        return
+    for skill_dir in src.iterdir():
+        if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").is_file():
+            continue
+        dst = Path(skills_dir) / skill_dir.name
+        if dst.exists():
+            continue  # 用户已有(可能改过),不覆盖
+        shutil.copytree(skill_dir, dst)
 
 # --- LLM (OpenAI-compatible) ---
 # Point at any OpenAI-compatible endpoint by overriding these env vars
