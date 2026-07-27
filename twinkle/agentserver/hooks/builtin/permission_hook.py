@@ -13,6 +13,7 @@ import uuid
 
 from twinkle.agentserver.hooks.base import AgentHook, HookContext, HookInterrupt, ToolCallInputs
 from twinkle.agentserver.permission_context import get_permission_channel
+from twinkle.agentserver.permissions.engine import PermissionEngine
 
 
 class PermissionHook(AgentHook):
@@ -37,7 +38,7 @@ class PermissionHook(AgentHook):
 
     priority = 100  # 先于 LoggingHook 等 before_tool_call hook
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: PermissionEngine) -> None:
         self._engine = engine
 
     async def before_tool_call(self, ctx: HookContext) -> None:
