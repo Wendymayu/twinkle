@@ -38,6 +38,7 @@
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 3（长会话上下文压缩）**：初版已在 nightly worktree `nightly/phase-3-6-4` 实现（滑窗+LLM 摘要，独立模块 `context_compression.py`，不写回 SessionStore），待 review/merge 进主线；后续优化方向见 §Phase 3。
 - **Phase 4（工具权限 / 审批 + 命令安全）**：已落地（spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md` + plan `docs/superpowers/plans/2026-07-24-phase4-permissions.md`）。`permissions/` 包 + `PermissionHook` + ASK 挂起/恢复 + JSONL 审计 + `TWINKLE_PERMISSIONS` opt-in；3-axis / shell-AST 仍 deferred（见 §Phase 4 精简范围）。
+- **Phase 7（Skill 系统）**：已落地（spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`）。`skills/` 包 + `list_skill`/`read_skill` 工具 + `SkillHook`（`all`/`auto_list` 两模式，默认 all，`TWINKLE_SKILL_MODE` 切换）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录 + 示例 `doc-audit`；`skill_turbo`/进化/marketplace 仍 deferred。对应里程碑 M8 ✅。
 - **Phase 5 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
 
 ---
@@ -146,7 +147,7 @@
 
 ---
 
-### Phase 7 — Skill 系统
+### Phase 7 — Skill 系统  `[已完成]`
 **目标**：从"调原子工具"升级到"调用打包的知识+指令束（skill）"，支撑一类多步任务。
 
 内容：
@@ -156,6 +157,8 @@
 - **范围控制**：先做 skill 加载 + 选择注入；planner/executor 子 agent 编排可后置。
 
 **验收**：一个打包 skill 能被 agent 选中并读入上下文指导多步任务执行；skill 与 builtin tool 协同。
+
+**已落地**：`twinkle/agentserver/skills/` 包（`Skill` + `SkillManager` 扫描/mtime 热重载/白名单 + `get_skill_manager` 单例）+ `tools/builtin/skill_tools.py`（`list_skill`/`read_skill` @tool）+ `hooks/builtin/skill_hook.py`（`SkillHook` priority 90，`before_model_call` 按 `TWINKLE_SKILL_MODE` 注入：`all`=每步注入清单 / `auto_list`=注入一句提示，默认 all）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录约定 + 示例 skill `doc-audit`（首次启动 seed）。`trigger` frontmatter 解析后丢弃（模型靠 description 自选，不做关键词自动匹配）。spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`。**仍 deferred**：`skill_turbo` planner/executor（Phase 8）、skill 进化（Phase 9 + 长期记忆）、marketplace/SkillNet/symphony（企业级）。
 
 ---
 
@@ -223,7 +226,7 @@
 | M5 工具可管控 | 危险工具审批 + 命令安全 + 审计日志 | ✅ |
 | M6 有长期记忆 | 跨会话事实召回 + RAG 注入 | |
 | M7 会定时跑 | cron 唤醒 agent + 结果推送通道 | |
-| M8 能用 skill | skill 加载 / 选择 / 注入指导多步任务 | |
+| M8 能用 skill | skill 加载 / 选择 / 注入指导多步任务 | ✅ |
 | M9 能委派子 agent | spawn/fork 委派 + 结果回灌 + 并发隔离 | |
 | M10 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
 | M11 能挂外部工具 | MCP server 工具接入并受策略管控 | |

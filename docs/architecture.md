@@ -548,6 +548,22 @@ agent_loop._inner_run_stream
 
 **opt-in 配置**：`TWINKLE_PERMISSIONS` 单 JSON env（`config.py` `_load_permissions()` 读，merge 默认值 + 用户覆盖），含 `enabled` / `enabled_channels` / `global_default` / `tools` / `rules` / `approval_overrides`。`enabled=false`（默认）→ `PermissionEngine.check` 直接返 ALLOW 透传、不审计、不 ASK；command_exec 仍走 `builtin_rules.matches()` 做 defense-in-depth（disabled 模式下 command_exec 的硬拒不变）。`TWINKLE_PERMISSION_OVERRIDES_FILE` / `TWINKLE_PERMISSION_AUDIT_FILE` 默认落 `<WORKSPACE>/.twinkle_data/` 下。
 
+### 4.10 Skill 系统（Phase 7）
+
+Skill 是比 tool 高一层的抽象——一个 skill 是 `<SKILLS_DIR>/<name>/SKILL.md`（YAML frontmatter `name`/`description`/`trigger` + markdown 指令体），模型按需调 `read_skill` 把指令体读进上下文作 tool_result，再用现有 builtin tool 执行。对位 jiuwenswarm `SkillUseRail`，但用 `before_model_call` hook prepend 到 `ctx.inputs.messages` 替代其 `PromptAttachmentManager` + window-mutator（粗版等价，无新抽象）。
+
+**组件**（`twinkle/agentserver/skills/`）：
+- `store.py`：`Skill(name, description, directory)` dataclass + `parse_frontmatter`（hand-rolled，单行值，partition 首 `:`，无 PyYAML 依赖）+ `parse_skill_md`（`trigger` 解析后丢弃——模型靠 description 自选，不做关键词自动匹配）+ `SkillManager`（扫 `<SKILLS_DIR>/*/SKILL.md`，per-skill `(subdir_name, SKILL.md.mtime)` 签名热重载——内容编辑 + 增删子目录都触发重扫，`ENABLED_SKILLS` 白名单，坏 skill 跳过不崩）。
+- `__init__.py`：`get_skill_manager()` 进程单例 + `_set_skill_manager()` 测试钩子（照 `get_todo_store`）。
+
+**工具**（`tools/builtin/skill_tools.py`，注册进 `tool_manager()`）：`list_skill` 返回 name+desc 清单（空则 `"No skills available."`）；`read_skill(skill_name, relative_file_path="SKILL.md")` 读 SKILL.md 正文作 tool_result，path-traversal-guarded（`is_relative_to` containment）+ `except (OSError, UnicodeDecodeError)` 不抛（ReAct-safe）。
+
+**SkillHook**（`hooks/builtin/skill_hook.py`，priority 90，`before_model_call`）：按 `TWINKLE_SKILL_MODE` 注入——`all`（默认）每步把 skill 清单（`## 可用技能\n0. name: desc...`）prepend 成 system msg；`auto_list` 只 prepend 一句"调 list_skill"提示。无 skills → no-op。注入用 `ctx.inputs.messages = [system] + ctx.inputs.messages`（赋新 list，不 in-place mutate——避免污染 SessionStore 内部 list；每步从 store 重读所以不累积）。`SkillHook(mode=None)` 从 config 读 mode；`main()` 始终注册（always-on，无 enabled flag）。
+
+**配置**（`config.py`）：`TWINKLE_SKILLS_DIR`（默认 `<WORKSPACE>/skills`，用户可见）+ `TWINKLE_SKILL_MODE`（`all`/`auto_list`，默认 all，单值不并存）+ `TWINKLE_ENABLED_SKILLS`（逗号白名单，空=全开）。`ensure_workspace_dir()`（server 启动调）mkdir WORKSPACE+skills + `_seed_example_skills` 把 `twinkle/resources/skills/*`（含示例 `doc-audit`）拷到 `<WORKSPACE>/skills`（已存在不覆盖，mtime 热重载自动扫到）。
+
+**完整设计** 见 spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`。**仍 deferred**：`skill_turbo` planner/executor（Phase 8 subagent）、skill 进化（Phase 9 + 长期记忆）、marketplace/SkillNet/symphony 树检索（企业级）、`agentic` 树索引模式、per-skill 绑定工具（共享 SkillTool 即可）。
+
 ---
 
 ## 5. Channel 机制
