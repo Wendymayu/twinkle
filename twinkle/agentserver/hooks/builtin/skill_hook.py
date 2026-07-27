@@ -7,7 +7,11 @@ mode 传 None 时从 config 读 SKILL_MODE(生产用),测试可直传 mode。
 """
 from __future__ import annotations
 
+import logging
+
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
+
+log = logging.getLogger("twinkle.hooks.skill")
 
 
 class SkillHook(AgentHook):
@@ -24,7 +28,9 @@ class SkillHook(AgentHook):
         mode = self._mode or _resolve_mode()
         if mode == "auto_list":
             self._prepend(ctx, "你有 skills 可用。需要时先调 list_skill 看清单,再调 read_skill(name) 载入指令。")
-        else:  # "all"(默认)
+        else:  # "all"(默认)；未知 mode 也落到 all 并告警，避免静默误配置
+            if mode != "all":
+                log.warning("unknown SKILL_MODE %r, falling back to 'all'", mode)
             lines = ["## 可用技能"] + [f"{i}. {s.name}: {s.description}" for i, s in enumerate(skills)]
             self._prepend(ctx, "\n".join(lines))
 
