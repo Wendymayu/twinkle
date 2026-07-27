@@ -23,13 +23,18 @@ async def list_skill() -> str:
 
 @tool
 async def read_skill(skill_name: str, relative_file_path: str = "SKILL.md") -> str:
-    """Load a skill's instructions. Pass the skill_name from list_skill; default reads SKILL.md.
-    """
+    """Load a skill's instructions. Pass the skill_name from list_skill; default reads SKILL.md."""
     skill = get_skill_manager().get_skill(skill_name)
     if skill is None:
         return f"Skill '{skill_name}' not found. Call list_skill to see available skills."
-    path = Path(skill.directory) / relative_file_path
+    skill_dir = Path(skill.directory).resolve()
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
+        resolved = (skill_dir / relative_file_path).resolve()
+    except OSError:
+        return f"Error: cannot resolve path '{relative_file_path}' for skill '{skill_name}'."
+    if not resolved.is_relative_to(skill_dir):
+        return f"Error: path '{relative_file_path}' escapes skill directory '{skill_name}'."
+    try:
+        return resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
         return f"Error reading skill '{skill_name}/{relative_file_path}': {exc}"
