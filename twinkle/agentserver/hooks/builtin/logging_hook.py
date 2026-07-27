@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from twinkle.agentserver.hooks.base import AgentHook
+from twinkle.agentserver.hooks.base import AgentHook, HookContext
 
 log = logging.getLogger("twinkle.hooks.logging")
 
@@ -18,14 +18,14 @@ class LoggingHook(AgentHook):
 
     priority = 10  # After security (85-100), before observability (0)
 
-    async def before_model_call(self, ctx) -> None:
+    async def before_model_call(self, ctx: HookContext) -> None:
         log.info("LLM call starting, session=%s", ctx.session_id)
 
-    async def after_model_call(self, ctx) -> None:
+    async def after_model_call(self, ctx: HookContext) -> None:
         log.info("LLM call finished, session=%s", ctx.session_id)
 
-    async def before_tool_call(self, ctx) -> None:
+    async def before_tool_call(self, ctx: HookContext) -> None:
         log.info("tool %s starting, args=%s", ctx.inputs.name, ctx.inputs.args)
 
-    async def after_tool_call(self, ctx) -> None:
+    async def after_tool_call(self, ctx: HookContext) -> None:
         log.info("tool %s finished, session=%s", ctx.session_id)

@@ -83,7 +83,7 @@ class TodoStore:
             raise TodoError(f"failed to persist todo: {exc}") from exc
 
     @staticmethod
-    def _record_to_task(rec) -> "TodoTask | None":
+    def _record_to_task(rec: dict) -> "TodoTask | None":
         try:
             return TodoTask(
                 idx=int(rec["idx"]),
