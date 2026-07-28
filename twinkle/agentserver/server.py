@@ -18,7 +18,6 @@ from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.hooks.base import AgentHook
 from twinkle.agentserver.hooks.builtin import LoggingHook
 from twinkle.agentserver.llm_client import LLMClient
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.sessions import (
     SessionStore, session_store, dispatch_session_rpc, handles_session_rpc,
 )
@@ -60,8 +59,7 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     tools = tool_manager()
-    memory = LongTermMemory()
-    loop = AgentLoop(llm, store, tools, memory)
+    loop = AgentLoop(llm, store, tools)
     if hooks:
         for hook in hooks:
             loop.register_hook(hook)
@@ -142,13 +140,13 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
 
 async def main() -> None:
     from twinkle.agentserver.permissions import permission_engine
-    from twinkle.agentserver.hooks.builtin import PermissionHook, LoggingHook, SkillHook
+    from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, PermissionHook, SkillHook
     from twinkle.workspace import ensure_workspace_dir
 
     ensure_workspace_dir()
     store = session_store()
     engine = permission_engine()
-    loop = build_agent_loop(store, hooks=[PermissionHook(engine), SkillHook(), LoggingHook()])
+    loop = build_agent_loop(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook()])
     handler = ws_handler(loop, store)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):

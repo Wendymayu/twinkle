@@ -2,7 +2,6 @@ import asyncio
 
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
 from twinkle.agentserver.permissions.audit import ToolPermissionLog
 from twinkle.agentserver.permissions.engine import PermissionEngine
@@ -38,7 +37,7 @@ def _engine(tmp_path):
 def _make_loop(session_store, tmp_path, llm, tm):
     """Build AgentLoop + register PermissionHook — engine stays in the hook."""
     engine = _engine(tmp_path)
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory())
+    loop = AgentLoop(llm, session_store, tm)
     loop.register_hook(PermissionHook(engine))
     return loop
 

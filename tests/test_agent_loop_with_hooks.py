@@ -17,7 +17,6 @@ from twinkle.agentserver.hooks.base import (
 )
 from twinkle.agentserver.hooks.builtin.logging_hook import LoggingHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.e2a.models import E2AEnvelope
 
@@ -90,7 +89,7 @@ def test_hooks_called_on_plain_answer(session_store) -> None:
     llm = _ScriptedLLM([
         [TextDelta("hi"), Finish("stop", {"role": "assistant", "content": "hi", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, _reg_with_echo_tool(), LongTermMemory())
+    loop = AgentLoop(llm, store, _reg_with_echo_tool())
     loop.register_hook(order_hook)
 
     async def run():
@@ -123,7 +122,7 @@ def test_hooks_called_on_tool_call_round_trip(session_store) -> None:
         # turn 2: model produces final answer
         [TextDelta("ok"), Finish("stop", {"role": "assistant", "content": "ok", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, _reg_with_echo_tool(), LongTermMemory())
+    loop = AgentLoop(llm, store, _reg_with_echo_tool())
     loop.register_hook(order_hook)
 
     async def run():
@@ -155,7 +154,7 @@ def test_existing_tests_still_pass(session_store) -> None:
         [TextDelta("hel"), TextDelta("lo"),
          Finish("stop", {"role": "assistant", "content": "hello", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, _reg_with_echo_tool(), LongTermMemory())
+    loop = AgentLoop(llm, store, _reg_with_echo_tool())
 
     async def run():
         frames = [f async for f in loop.run_stream(_env("hi"))]

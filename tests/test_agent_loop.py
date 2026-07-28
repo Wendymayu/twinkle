@@ -3,7 +3,6 @@ import json
 
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import TextDelta, Finish
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.e2a.models import E2AEnvelope
 
@@ -49,7 +48,7 @@ def test_plain_answer_streams_chunks_and_complete(session_store) -> None:
         [TextDelta("hel"), TextDelta("lo"),
          Finish("stop", {"role": "assistant", "content": "hello", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, _reg_with_echo_tool(), LongTermMemory())
+    loop = AgentLoop(llm, store, _reg_with_echo_tool())
 
     async def run():
         frames = [f async for f in loop.run_stream(_env("hi"))]
@@ -76,7 +75,7 @@ def test_tool_call_round_trip_then_answer(session_store) -> None:
         [TextDelta("result was "), TextDelta("good"),
          Finish("stop", {"role": "assistant", "content": "result was good", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, reg, LongTermMemory())
+    loop = AgentLoop(llm, store, reg)
 
     async def run():
         frames = [f async for f in loop.run_stream(_env("call echo"))]
@@ -118,7 +117,7 @@ def test_cross_turn_remembers_context(session_store) -> None:
         [Finish("stop", {"role": "assistant", "content": "ack1", "tool_calls": None})],
         [Finish("stop", {"role": "assistant", "content": "ack2", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, reg, LongTermMemory())
+    loop = AgentLoop(llm, store, reg)
 
     async def run():
         async for _ in loop.run_stream(_env("turn1", rid="r1", session_id="s1")):
@@ -147,7 +146,7 @@ def test_max_steps_emits_error(session_store, monkeypatch) -> None:
     llm = _ScriptedLLM([ [tool_finish] for _ in range(20) ])
     # default-independent: force a small cap so 20 scripted turns always exceed it
     monkeypatch.setattr("twinkle.agentserver.agent_loop.MAX_STEPS", 2)
-    loop = AgentLoop(llm, store, reg, LongTermMemory())
+    loop = AgentLoop(llm, store, reg)
 
     async def run():
         frames = [f async for f in loop.run_stream(_env("loop"))]
@@ -177,7 +176,7 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
         [TextDelta("planned "), TextDelta("it"),
          Finish("stop", {"role": "assistant", "content": "planned it", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, tool_manager(), LongTermMemory())
+    loop = AgentLoop(llm, store, tool_manager())
 
     async def run():
         return [f async for f in loop.run_stream(_env("plan something", session_id="s-todo"))]
@@ -217,7 +216,7 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
                                            "arguments": '{"tasks": ["one", "two"]}'}}]})],
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, store, tool_manager(), LongTermMemory())
+    loop = AgentLoop(llm, store, tool_manager())
 
     async def run():
         return [f async for f in loop.run_stream(_env("plan", session_id="s-upd"))]

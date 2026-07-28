@@ -13,7 +13,6 @@ from websockets.asyncio.server import serve
 
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.server import ws_handler
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.tools.decorator import tool
@@ -81,7 +80,7 @@ def test_end_to_end_tool_round_trip(tmp_path, port_factory) -> None:
          Finish("stop", {"role": "assistant", "content": "answer:TOOL:ping", "tool_calls": None})],
     ]
     store = SessionStore(str(tmp_path / "sessions"))
-    loop_obj = AgentLoop(_ScriptedLLM(scripts), store, _reg_with_echo(), LongTermMemory())
+    loop_obj = AgentLoop(_ScriptedLLM(scripts), store, _reg_with_echo())
 
     async def run() -> None:
         server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
@@ -146,7 +145,7 @@ def test_session_rpc_round_trip(tmp_path, port_factory) -> None:
     agentserver_port = port_factory()
     gateway_port = port_factory()
     store = SessionStore(str(tmp_path / "sessions"))
-    loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo(), LongTermMemory())
+    loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo())
 
     async def run() -> None:
         # pre-seed a session so session.list has something to report
@@ -230,7 +229,7 @@ def test_session_files_ws_round_trip(tmp_path, port_factory) -> None:
     asyncio.run(store.create_session("s-files"))
     asyncio.run(store.append("s-files", {"role": "user", "content": "hello"},
                               request_id="r0"))
-    loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo(), LongTermMemory())
+    loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo())
 
     async def run() -> None:
         server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)

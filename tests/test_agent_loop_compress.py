@@ -25,11 +25,6 @@ class _Tools:
         return ""
 
 
-class _Memory:
-    def recall(self, q):
-        pass
-
-
 class _LLM:
     """Records the last messages received via stream(); returns ok."""
 
@@ -55,7 +50,7 @@ def test_run_stream_compresses_before_llm(monkeypatch):
     big += [{"role": "user", "content": f"turn{i} " + "x" * 200} for i in range(20)]
     store = _Store(big)
     real_llm = _LLM()
-    loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools(), memory=_Memory())
+    loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools())
 
     env = E2AEnvelope(
         request_id="r1", session_id="s1", method="chat.send", params={"query": "hi"}
@@ -82,7 +77,7 @@ def test_run_stream_no_compress_under_threshold(monkeypatch):
     small = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
     store = _Store(small)
     real_llm = _LLM()
-    loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools(), memory=_Memory())
+    loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools())
 
     env = E2AEnvelope(
         request_id="r2", session_id="s2", method="chat.send", params={"query": "yo"}

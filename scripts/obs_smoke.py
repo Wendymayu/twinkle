@@ -24,7 +24,6 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import LLMClient
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
@@ -139,7 +138,7 @@ async def main() -> None:
     llm = LLMClient(base_url="x", api_key="y", model="smoke-model", client=_FakeClient(scripts))
     tools = ToolManager()
     tools.register(echo)
-    loop = AgentLoop(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools, memory=LongTermMemory())
+    loop = AgentLoop(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools)
 
     print(f"twinkle obs smoke -> OTLP/gRPC {ENDPOINT}")
     async for frame in loop.run_stream(_Env()):

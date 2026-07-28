@@ -2,7 +2,6 @@ import asyncio
 
 from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.e2a.models import E2AEnvelope
@@ -38,7 +37,7 @@ def test_orphan_assistant_tool_calls_sanitized(session_store) -> None:
     llm = _ScriptedLLM([
         [Finish("stop", {"role": "assistant", "content": "recovered", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory())
+    loop = AgentLoop(llm, session_store, tm)
     asyncio.run(_collect(loop.run_stream(_env("resume", session_id="s1"))))
     msgs = session_store.get_messages("s1")
     roles = [m["role"] for m in msgs]
@@ -66,7 +65,7 @@ def test_mid_batch_orphan_sanitized(session_store) -> None:
     llm = _ScriptedLLM([
         [Finish("stop", {"role": "assistant", "content": "recovered", "tool_calls": None})],
     ])
-    loop = AgentLoop(llm, session_store, tm, LongTermMemory())
+    loop = AgentLoop(llm, session_store, tm)
     asyncio.run(_collect(loop.run_stream(_env("resume", session_id="s1"))))
     msgs = session_store.get_messages("s1")
     # c1's real result preserved; c2's synthetic result injected (this is the I-1 fix)

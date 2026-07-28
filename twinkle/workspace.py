@@ -28,6 +28,8 @@ def ensure_workspace_dir() -> str:
     """
     os.makedirs(_cfg.WORKSPACE_DIR, exist_ok=True)
     os.makedirs(_cfg.SKILLS_DIR, exist_ok=True)
+    os.makedirs(_cfg.MEMORY_DIR, exist_ok=True)
+    os.makedirs(os.path.join(_cfg.MEMORY_DIR, "daily_memory"), exist_ok=True)
     _seed_example_skills(_cfg.SKILLS_DIR)
     return _cfg.WORKSPACE_DIR
 

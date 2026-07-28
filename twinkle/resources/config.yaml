@@ -29,6 +29,20 @@ skills:
   dir: ${TWINKLE_SKILLS_DIR:-}            # 空 → <workspace>/skills
   mode: all                               # all = 每步注入 skill 清单;auto_list = 模型按需调 list_skill 拉
   enabled: []                             # 列表;空 = 全开
+memory:
+  dir: ${TWINKLE_MEMORY_DIR:-}           # 空 → <workspace>/.twinkle_data/memory
+  embed_model: text-embedding-3-small     # 复用 llm.api_key + llm.base_url,不另开 embed.* env
+  query:
+    max_results: 10
+  hybrid:
+    vector_weight: 0.7
+    text_weight: 0.3
+    candidate_multiplier: 2.0
+  chunking:
+    tokens: 256
+    overlap: 32
+  cleanup:
+    max_chunks_per_file: 200              # 单文件 chunk 上限,超限 FIFO 丢最旧(5a 唯一自动淘汰;5c Dreaming 取代)
 permissions:
   enabled: false                          # false = 系统关(全 ALLOW,无审计/无 ASK;command_exec 仍走 builtin_rules)
   enabled_channels: [web]
@@ -40,6 +54,10 @@ permissions:
     todo_create: allow
     todo_complete: allow
     todo_list: allow
+    memory_search: allow
+    write_memory: allow
+    read_memory: allow
+    edit_memory: allow
   rules: []                               # 用户规则(同 jiuwenswarm rules[] 形状;v1 可空)
   approval_overrides: {}
   overrides_file: ${TWINKLE_PERMISSION_OVERRIDES_FILE:-}   # 空 → <workspace>/.twinkle_data/permission_overrides.json

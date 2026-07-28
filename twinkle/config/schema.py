@@ -77,6 +77,34 @@ class SkillsConfig(_StrictModel):
     enabled: list[str] = []  # [] = all skills open
 
 
+class MemoryQueryConfig(_StrictModel):
+    max_results: int = 10
+
+
+class MemoryHybridConfig(_StrictModel):
+    vector_weight: float = 0.7
+    text_weight: float = 0.3
+    candidate_multiplier: float = 2.0
+
+
+class MemoryChunkingConfig(_StrictModel):
+    tokens: int = 256
+    overlap: int = 32
+
+
+class MemoryCleanupConfig(_StrictModel):
+    max_chunks_per_file: int = 200
+
+
+class MemoryConfig(_StrictModel):
+    dir: str = ""  # "" -> <workspace>/.twinkle_data/memory
+    embed_model: str = "text-embedding-3-small"
+    query: MemoryQueryConfig = MemoryQueryConfig()
+    hybrid: MemoryHybridConfig = MemoryHybridConfig()
+    chunking: MemoryChunkingConfig = MemoryChunkingConfig()
+    cleanup: MemoryCleanupConfig = MemoryCleanupConfig()
+
+
 class PermissionsConfig(_StrictModel):
     enabled: bool = False
     enabled_channels: list[str] = ["web"]
@@ -88,6 +116,10 @@ class PermissionsConfig(_StrictModel):
         "todo_create": "allow",
         "todo_complete": "allow",
         "todo_list": "allow",
+        "memory_search": "allow",
+        "write_memory": "allow",
+        "read_memory": "allow",
+        "edit_memory": "allow",
     }
     rules: list[dict] = []  # jiuwenswarm rules[] shape; v1 unvalidated internals
     approval_overrides: dict = {}
@@ -106,6 +138,7 @@ class TwinkleConfig(_StrictModel):
     agent: AgentConfig = AgentConfig()
     context_compression: ContextCompressionConfig = ContextCompressionConfig()
     skills: SkillsConfig = SkillsConfig()
+    memory: MemoryConfig = MemoryConfig()
     permissions: PermissionsConfig = PermissionsConfig()
 
     @model_validator(mode="after")
@@ -131,6 +164,10 @@ class TwinkleConfig(_StrictModel):
             self.skills.dir = str(Path(ws) / "skills")
         else:
             self.skills.dir = os.path.expanduser(self.skills.dir)
+        if not self.memory.dir:
+            self.memory.dir = str(Path(ws) / ".twinkle_data" / "memory")
+        else:
+            self.memory.dir = os.path.expanduser(self.memory.dir)
         if not self.permissions.overrides_file:
             self.permissions.overrides_file = str(
                 Path(ws) / ".twinkle_data" / "permission_overrides.json")

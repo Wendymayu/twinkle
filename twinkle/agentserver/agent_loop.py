@@ -13,7 +13,6 @@ import logging
 from typing import AsyncIterator
 
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
-from twinkle.agentserver.memory import LongTermMemory
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
@@ -63,12 +62,10 @@ class AgentLoop:
         llm: LLMClient,
         store: SessionStore,
         tools: ToolManager,
-        memory: LongTermMemory,
     ) -> None:
         self._llm = llm
         self._session_store = store
         self._tool_manager = tools
-        self._memory = memory
         self._hook_manager = HookManager()
 
     def register_hook(self, hook_instance: AgentHook) -> None:
@@ -153,8 +150,6 @@ class AgentLoop:
             {"role": "user", "content": query},
             request_id=envelope.request_id,
         )
-        self._memory.recall(query)
-
         seq = 0
         full_text = ""
         for _step in range(MAX_STEPS):

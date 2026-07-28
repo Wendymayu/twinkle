@@ -120,7 +120,7 @@
 
 ---
 
-### Phase 5 — 长期记忆
+### Phase 5 — 长期记忆  [Phase 5a 已完成]
 **目标**：换掉 `memory.py` stub，agent 具备跨会话事实召回能力（RAG）。
 
 内容：
@@ -131,6 +131,8 @@
 - **不做**：外部记忆 provider 分发（mem0/openviking）、wiki LLM 子 agent 索引——留作后续可选。
 
 **验收**：跨会话记住事实（如"用户偏好/项目约定"），新会话里 `recall` 注入相关记忆进上下文；无 embedding 配置时降级到 FTS 仍可用。
+
+**已落地（Phase 5a）**：`twinkle/agentserver/memory/` 包（`store.MemoryManager` 6 表 SQLite 混合检索：`chunks`/`chunks_fts`/`chunks_vec`/`embedding_cache`/`files`/`meta`；`sqlite-vec` 余弦向量 + FTS5 BM25 加权融合，无 provider / 无 sqlite-vec 自动降级 FTS-only；mtime 增量索引 + embedding cache + 模型变更重建 + 单文件 chunk FIFO 上限 + CJK 逐字分词救 FTS 召回）+ `embeddings.py`（`OpenAICompatibleEmbeddingProvider` 复用 `llm.api_key`/`llm.base_url`；`MockEmbeddingProvider` 仅测试）+ `get_memory_manager` 单例 + `tools/builtin/memory_tools.py`（`memory_search`/`write_memory`/`read_memory`/`edit_memory` @tool，**模型驱动，不自动注入**——MemoryHook 注入的是使用策略 prompt，不是召回结果）+ `hooks/builtin/memory_hook.py`（`MemoryHook` priority 80 < `SkillHook` 90，`before_model_call` 注入策略 prompt，空 store no-op，赋新 list 不原地 mutate）+ `config.yaml` `memory:` 块 + `MEMORY_*` 常量 + `permissions.tools` 默认 4 个 memory tool=allow + `pyproject` `[memory]` extra（sqlite-vec）+ `ensure_workspace_dir` 建 `MEMORY_DIR`/`daily_memory/`。DB 落 `<WORKSPACE>/.twinkle_data/memory/memory.db`。spec `docs/superpowers/specs/2026-07-27-long-term-memory-design.md` + plan `docs/superpowers/plans/2026-07-27-long-term-memory.md`。**仍 deferred**：5b 自动抽取（对话自动写记忆）、5c Dreaming（离线记忆整理，取代 FIFO 上限）。
 
 ---
 

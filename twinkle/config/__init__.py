@@ -34,6 +34,17 @@ SKILLS_DIR = settings.skills.dir
 SKILL_MODE = settings.skills.mode
 ENABLED_SKILLS = list(settings.skills.enabled)
 
+# --- memory (Phase 5a) ---
+MEMORY_DIR = settings.memory.dir
+MEMORY_EMBED_MODEL = settings.memory.embed_model
+MEMORY_QUERY_MAX_RESULTS = settings.memory.query.max_results
+MEMORY_HYBRID_VECTOR_WEIGHT = settings.memory.hybrid.vector_weight
+MEMORY_HYBRID_TEXT_WEIGHT = settings.memory.hybrid.text_weight
+MEMORY_HYBRID_CANDIDATE_MULTIPLIER = settings.memory.hybrid.candidate_multiplier
+MEMORY_CHUNKING_TOKENS = settings.memory.chunking.tokens
+MEMORY_CHUNKING_OVERLAP = settings.memory.chunking.overlap
+MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE = settings.memory.cleanup.max_chunks_per_file
+
 # --- LLM (OpenAI-compatible) ---
 LLM_BASE_URL = settings.llm.base_url
 LLM_API_KEY = settings.llm.api_key
