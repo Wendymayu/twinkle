@@ -62,3 +62,13 @@ permissions:
   approval_overrides: {}
   overrides_file: ${TWINKLE_PERMISSION_OVERRIDES_FILE:-}   # 空 → <workspace>/.twinkle_data/permission_overrides.json
   audit_file: ${TWINKLE_PERMISSION_AUDIT_FILE:-}          # 空 → <workspace>/logs/audit/permission_audit.jsonl
+subagent:
+  enabled: true                  # 父 loop 注册 spawn_subagent + SubagentContextHook + 组装 SubagentExecutor
+  max_steps: 50                  # 子 ReAct 上限（紧于 agent.max_steps=1000）
+  hard_timeout: 300             # 硬超时秒
+  soft_timeout: 120             # 软超时（无活动）秒
+  abort_timeout: 30              # 取消卡死子秒
+  child_permissions: false       # v1 必须 false（true 需流式，未支持→启动拒）
+  model: ""                      # ""=复用 llm.model；否则覆盖子模型
+  max_result_chars: 8000         # 子最终结果截断上限（防父上下文爆炸）
+  list_sessions_filter: true     # session.list 隐藏 __sub_ 前缀

@@ -692,3 +692,102 @@ def test_full_trace_tree(tracer_exporter, meter_metricreader):
     # both children are direct children of the agent span
     assert chat_span.parent.span_id == agent_span.context.span_id
     assert tool_span.parent.span_id == agent_span.context.span_id
+
+
+# --- subagent: nested invoke span must parent to the tool span (not the outer invoke) ---
+# A tool that internally runs another instrumented agent loop (mimics spawn_subagent).
+# With start_as_current_span on the tool, the nested twinkle.agent.invoke span's
+# parent must be the gen_ai.tool span (the current span during the tool's execution).
+# Before the fix (start_span, not current) the nested invoke parented to the outer
+# agent invoke instead.
+
+class _SubLLM:
+    """Fresh LLM class for this test only (NOT shared with test_full_trace_tree,
+    so apply_instrumentors' idempotency guard doesn't trip on a pre-patched class)."""
+
+    def __init__(self):
+        self._model = "sub-model"
+
+    async def stream(self, messages, tools):
+        yield TextDelta("ans")
+        yield Finish(
+            finish_reason="stop",
+            assistant_message={"role": "assistant", "content": "ans", "tool_calls": None},
+            usage={"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5},
+        )
+
+
+class _RecurAgent:
+    """Streams from its llm; if it has tools, calls spawn_subagent. Used as BOTH
+    the outer agent and the nested child (same instrumented class)."""
+
+    def __init__(self, llm, tools=None):
+        self._llm = llm
+        self._tools = tools
+
+    async def run_stream(self, envelope):
+        async for ev in self._llm.stream([], []):
+            yield ev
+        if self._tools is not None:
+            await self._tools.execute("spawn_subagent", {})
+
+
+class _SpawnTool:
+    """Mimics spawn_subagent: execute runs a nested agent's run_stream in a child
+    task. asyncio.create_task copies the OTel context, so the nested invoke span's
+    parent = whatever was current at create_task time."""
+
+    def __init__(self, child_agent):
+        self._child = child_agent
+
+    async def execute(self, name, args):
+        if name != "spawn_subagent":
+            return "ok"
+
+        async def _drain():
+            async for _ in self._child.run_stream(_IntegEnvelope()):
+                pass
+
+        await asyncio.create_task(_drain())
+        return "child-result"
+
+
+def test_subagent_invoke_span_nests_under_tool_span(tracer_exporter, meter_metricreader):
+    tracer, exp = tracer_exporter
+    meter, _ = meter_metricreader
+    metrics = Metrics(meter)
+    cfg = _Cfg()
+    results = apply_instrumentors(
+        tracer, metrics, cfg,
+        agent_cls=_RecurAgent, llm_cls=_SubLLM, tool_cls=_SpawnTool,
+    )
+    assert results == {"agent": True, "llm": True, "tool": True}
+
+    child_agent = _RecurAgent(_SubLLM(), tools=None)   # nested: streams only
+    tool = _SpawnTool(child_agent)
+    outer = _RecurAgent(_SubLLM(), tools=tool)         # outer: streams + calls tool
+
+    async def run():
+        return [f async for f in outer.run_stream(_IntegEnvelope())]
+
+    asyncio.run(run())
+
+    names = [s.name for s in exp.spans]
+    # outer invoke + outer chat + tool + nested invoke + nested chat
+    assert names.count("twinkle.agent.invoke") == 2
+    assert names.count("gen_ai.chat") == 2
+    assert names.count("gen_ai.tool") == 1
+
+    invokes = [s for s in exp.spans if s.name == "twinkle.agent.invoke"]
+    roots = [s for s in invokes if s.parent is None]
+    nested = [s for s in invokes if s.parent is not None]
+    assert len(roots) == 1 and len(nested) == 1
+    outer_invoke = roots[0]
+    nested_invoke = nested[0]
+
+    tool_span = next(s for s in exp.spans if s.name == "gen_ai.tool")
+    # the tool span's parent is the OUTER invoke (current when the tool ran)
+    assert tool_span.parent.span_id == outer_invoke.context.span_id
+    # the NESTED invoke's parent must be the tool span (the fix) — NOT the outer invoke.
+    # Before the fix this asserted against outer_invoke.context.span_id.
+    assert nested_invoke.parent.span_id == tool_span.context.span_id

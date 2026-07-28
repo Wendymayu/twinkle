@@ -16,33 +16,37 @@ def instrument_tool(tracer, metrics, cfg, *, tool_cls=None) -> bool:
 
     def factory(original):
         async def traced(self, name, args):
-            span = tracer.start_span(A.SPAN_GEN_AI_TOOL)
-            _stamp_ctx(span)
-            span.set_attribute(A.GEN_AI_TOOL_NAME, name or "")
-            try:
-                span.set_attribute(A.GEN_AI_TOOL_ARGUMENTS, _trunc(json.dumps(args, ensure_ascii=False)))
-            except Exception:
-                pass
             start = time.perf_counter()
             error = False
-            try:
-                result = await original(self, name, args)
-                if isinstance(result, str) and result.startswith(A.TOOL_ERROR_PREFIX):
-                    error = True
-                span.set_attribute(A.GEN_AI_TOOL_ERROR, error)
+            # start_as_current_span (not start_span) makes the tool span the
+            # current span during `original`, so spans created inside the tool —
+            # e.g. a subagent's twinkle.agent.invoke from spawn_subagent —
+            # parent to this tool span instead of to the enclosing agent invoke.
+            with tracer.start_as_current_span(A.SPAN_GEN_AI_TOOL) as span:
+                _stamp_ctx(span)
+                span.set_attribute(A.GEN_AI_TOOL_NAME, name or "")
                 try:
-                    span.set_attribute(A.GEN_AI_TOOL_RESULT, _trunc(str(result)))
+                    span.set_attribute(A.GEN_AI_TOOL_ARGUMENTS, _trunc(json.dumps(args, ensure_ascii=False)))
                 except Exception:
                     pass
-                return result
-            except Exception as exc:
-                span.set_attribute(A.GEN_AI_TOOL_ERROR, True)
-                span.set_status(Status(StatusCode.ERROR))
-                span.record_exception(exc)
-                raise
-            finally:
-                metrics.record_tool_call(name, error, time.perf_counter() - start)
-                span.end()
+                try:
+                    result = await original(self, name, args)
+                    if isinstance(result, str) and result.startswith(A.TOOL_ERROR_PREFIX):
+                        error = True
+                    span.set_attribute(A.GEN_AI_TOOL_ERROR, error)
+                    try:
+                        span.set_attribute(A.GEN_AI_TOOL_RESULT, _trunc(str(result)))
+                    except Exception:
+                        pass
+                    return result
+                except Exception as exc:
+                    span.set_attribute(A.GEN_AI_TOOL_ERROR, True)
+                    span.set_status(Status(StatusCode.ERROR))
+                    span.record_exception(exc)
+                    raise
+                finally:
+                    metrics.record_tool_call(name, error, time.perf_counter() - start)
+                    # span.end() is handled by the `with start_as_current_span` context manager.
 
         return traced
 

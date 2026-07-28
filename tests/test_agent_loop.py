@@ -232,3 +232,22 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
     # the todo_update frame is not final and precedes the final complete
     assert not todo_frames[0].is_final
     assert frames[-1].response_kind == "e2a.complete"
+
+
+def test_max_steps_instance_param_emits_error(session_store) -> None:
+    """max_steps passed at construction (not via monkeypatch) caps the loop."""
+    store = session_store
+    reg = _reg_with_echo_tool()
+    tool_finish = Finish("tool_calls", {
+        "role": "assistant", "content": None,
+        "tool_calls": [{"id": "c", "type": "function",
+                        "function": {"name": "echo", "arguments": '{"text": "x"}'}}]})
+    llm = _ScriptedLLM([[tool_finish] for _ in range(20)])
+    loop = AgentLoop(llm, store, reg, max_steps=2)   # instance param, no monkeypatch
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("loop"))]
+
+    frames = asyncio.run(run())
+    assert frames[-1].response_kind == "e2a.error"
+    assert "max_steps=2" in frames[-1].body["error"]

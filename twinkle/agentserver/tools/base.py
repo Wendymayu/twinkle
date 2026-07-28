@@ -10,7 +10,7 @@ foundation/tool/base.py, cut to a minimal subset):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass
@@ -20,8 +20,13 @@ class ToolCard:
     parameters: dict  # OpenAI function-calling `parameters` JSON schema
 
 
+@runtime_checkable
 class Tool(Protocol):
-    """Any tool must expose its metadata card and an invoke entry point."""
+    """Any tool must expose its metadata card and an invoke entry point.
+
+    ``@runtime_checkable`` lets ``isinstance(t, Tool)`` verify structural
+    conformance (presence of ``card`` + ``invoke``) — used by tool tests.
+    """
 
     card: ToolCard
 

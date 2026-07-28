@@ -19,8 +19,18 @@ def test_build_agent_loop_wires_permission(monkeypatch):
     assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_TOOL_CALL)
 
 
-def test_build_agent_loop_without_hooks_has_no_callbacks():
-    """Minimal AgentLoop — no PermissionHook, no callbacks, no permission engine."""
+def test_build_agent_loop_without_hooks_has_no_callbacks(monkeypatch):
+    """Minimal AgentLoop — no PermissionHook, no callbacks, no permission engine.
+
+    Subagent wiring is config-driven (SUBAGENT_ENABLED, default True) and
+    happens inside build_agent_loop; disable it here so this test keeps its
+    original intent: "no *explicitly-passed* hooks → zero callbacks".
+    """
+    import importlib
+    import twinkle.config as cfg
+    importlib.reload(cfg)
+    monkeypatch.setattr(cfg.settings.subagent, "enabled", False)
+    monkeypatch.setattr(cfg, "SUBAGENT_ENABLED", False)
     from twinkle.agentserver.sessions import session_store
     from twinkle.agentserver.server import build_agent_loop
     from twinkle.agentserver.hooks.base import HookEvent

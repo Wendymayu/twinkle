@@ -127,6 +127,27 @@ class PermissionsConfig(_StrictModel):
     audit_file: str = ""  # "" -> <logging.dir>/audit/permission_audit.jsonl
 
 
+class SubagentConfig(_StrictModel):
+    enabled: bool = True
+    max_steps: int = 50                 # child ReAct cap (tighter than agent.max_steps=1000)
+    hard_timeout: float = 300.0         # absolute cap (asyncio.wait_for on the whole child run)
+    soft_timeout: float = 120.0         # no-streaming-activity reset
+    abort_timeout: float = 30.0          # cancel-a-stuck-child window
+    child_permissions: bool = False      # v1 MUST be false (true needs streaming -> startup reject)
+    model: str = ""                      # "" = reuse llm.model; else override child model
+    max_result_chars: int = 8000         # truncate child final to protect parent context
+    list_sessions_filter: bool = True    # hide __sub_ sessions from session.list
+
+    @model_validator(mode="after")
+    def _reject_child_permissions_v1(self) -> "SubagentConfig":
+        if self.child_permissions:
+            raise ValueError(
+                "subagent.child_permissions=true requires streaming-forward (not in v1); "
+                "the child loop must not run PermissionHook or it deadlocks. Leave it false."
+            )
+        return self
+
+
 class TwinkleConfig(_StrictModel):
     agentserver: AgentserverConfig = AgentserverConfig()
     gateway: GatewayConfig = GatewayConfig()
@@ -140,6 +161,7 @@ class TwinkleConfig(_StrictModel):
     skills: SkillsConfig = SkillsConfig()
     memory: MemoryConfig = MemoryConfig()
     permissions: PermissionsConfig = PermissionsConfig()
+    subagent: SubagentConfig = SubagentConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":

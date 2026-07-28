@@ -208,3 +208,19 @@ def test_read_file_missing_raises_filenotfound(session_store):
         assert False, "expected FileNotFoundError"
     except FileNotFoundError:
         pass
+
+
+def test_list_sessions_hides_subagent_sessions(session_store):
+    """Child sessions (<parent>__sub_<id>) are hidden by default; visible with include_subagents."""
+    _run(session_store.create_session("real1"))
+    _run(session_store.append("real1", {"role": "user", "content": "a"}, request_id="r1"))
+    _run(session_store.create_session("p1__sub_abc12345"))
+    _run(session_store.append("p1__sub_abc12345", {"role": "user", "content": "child"},
+                              request_id="r2"))
+    default_rows = session_store.list_sessions()
+    default_ids = {r["session_id"] for r in default_rows}
+    assert "real1" in default_ids
+    assert "p1__sub_abc12345" not in default_ids
+    all_rows = session_store.list_sessions(include_subagents=True)
+    all_ids = {r["session_id"] for r in all_rows}
+    assert "p1__sub_abc12345" in all_ids

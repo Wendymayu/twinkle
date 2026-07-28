@@ -101,14 +101,32 @@ class SessionStore:
             self._cache.pop(session_id, None)
             return True
 
-    def list_sessions(self, limit: int = 100) -> list[dict]:
+    def list_sessions(self, limit: int = 100, include_subagents: bool | None = None) -> list[dict]:
         """List sessions sorted by last_message_at desc. Corrupt/missing
-        metadata falls back to dir mtime (mirrors jiuwenclaw legacy fallback)."""
+        metadata falls back to dir mtime (mirrors jiuwenclaw legacy fallback).
+
+        By default hides child sub-agent sessions whose id contains ``__sub_``
+        (spawned by SubagentExecutor) so the browser's session list stays clean.
+        Pass ``include_subagents=True`` to include them (used by the executor's
+        tests / future admin views); ``include_subagents=False`` explicitly hides
+        them. When ``include_subagents is None`` (the default), falls back to the
+        ``SUBAGENT_LIST_SESSIONS_FILTER`` config flag (default True = hide). The
+        config import is lazy (inside the method, try/except ImportError) so
+        store.py doesn't import config at module load (avoids circular import)."""
+        if include_subagents is None:
+            try:
+                from twinkle.config import SUBAGENT_LIST_SESSIONS_FILTER
+                include_subagents = not SUBAGENT_LIST_SESSIONS_FILTER
+            except ImportError:
+                include_subagents = False
         out: list[dict] = []
         if not self._root.exists():
             return out
         for sdir in self._root.iterdir():
             if not sdir.is_dir():
+                continue
+            sid = sdir.name
+            if not include_subagents and "__sub_" in sid:
                 continue
             mpath = sdir / "metadata.json"
             try:
@@ -116,14 +134,14 @@ class SessionStore:
             except Exception:
                 st = sdir.stat()
                 meta = {
-                    "session_id": sdir.name,
+                    "session_id": sid,
                     "title": "(无标题)",
                     "created_at": st.st_ctime,
                     "last_message_at": st.st_mtime,
                     "message_count": 0,
                     "channel_id": "web",
                 }
-            meta.setdefault("session_id", sdir.name)
+            meta.setdefault("session_id", sid)
             out.append(meta)
         out.sort(key=lambda m: m.get("last_message_at", 0), reverse=True)
         return out[:limit]

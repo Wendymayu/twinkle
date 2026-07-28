@@ -132,11 +132,13 @@ class AgentLoop:
         llm: LLMClient,
         store: SessionStore,
         tools: ToolManager,
+        max_steps: int | None = None,
     ) -> None:
         self._llm = llm
         self._session_store = store
         self._tool_manager = tools
         self._hook_manager = HookManager()
+        self._max_steps = max_steps if max_steps is not None else MAX_STEPS
 
     def register_hook(self, hook_instance: AgentHook) -> None:
         """Register an AgentHook on this loop (sync — safe to call from build_agent_loop)."""
@@ -222,7 +224,7 @@ class AgentLoop:
         )
         seq = 0
         full_text = ""
-        for _step in range(MAX_STEPS):
+        for _step in range(self._max_steps):
             msgs = self._session_store.get_messages(session_id)
 
             # -- Context compression (before hook trigger) -- #
@@ -390,7 +392,7 @@ class AgentLoop:
             is_final=True,
             status="failed",
             response_kind="e2a.error",
-            body={"error": f"agent loop exceeded max_steps={MAX_STEPS}"},
+            body={"error": f"agent loop exceeded max_steps={self._max_steps}"},
         )
 
     async def _sanitize_orphan_tool_calls(self, session_id: str, request_id: str) -> None:
