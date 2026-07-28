@@ -1,146 +1,64 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Guidelines
+
+- Think before coding — state assumptions, ask when uncertain, don't silently pick one interpretation.
+- Simplicity first — only write the minimum code that solves the problem; no unrequested abstractions, flexibility, or error handling.
+- Surgical changes — only touch what you must; match existing style; don't "improve" adjacent code; remove orphans your changes create.
+- Meaningful names — variables/functions must reflect business intent; no single-letter or generic names like `x`, `data`, `result`.
+- One purpose per function — extract responsibly; a function should do one thing, not multitask.
+- Goal-driven — define verifiable success criteria before starting; loop until verified.
 
 ## What this project is
 
 Twinkle is a **learning-focused reimplementation** of the core agent pipeline of `jiuwenswarm` (reference monorepo at `D:\code\opensource\gitcode\jiuwenswarm`, formerly JiuwenClaw; contains `jiuwenswarm/` swarm framework + `jiuwenclaw/` agent app layer + `jiuwenbox/` deploy). It deliberately mirrors jiuwenswarm's two-process + bidirectional-WebSocket architecture so the two can be compared module-by-module. It is **not** a fork, not a SaaS shell, and not feature-complete — see `roadmap.md` for the current phase and scope (Phase 0–4 landed incl. OTel telemetry, context compression, and tool permissions/approval; Phase 5a long-term memory + Phase 7 skills landed; cron (Phase 6) and sub-agent/later phases planned; multi-channel & enterprise features out of scope).
 
-Check `roadmap.md` for the current phase before making architectural changes. The repository README is stale (describes Phase 0 echo); `docs/architecture.md` is the source of truth for the *current* architecture.
+Check `roadmap.md` for the current phase before making architectural changes. `docs/architecture.md` is the source of truth for the current architecture.
 
-## Commands
-
-All `python` commands assume the project venv. From a fresh checkout on Windows:
-
-```bash
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -e ".[dev]"
-```
-
-Run tests (no `pytest-asyncio` dependency — tests use `asyncio.run()` + a `port_factory`/`free_port` fixture in `tests/conftest.py`):
-
-```bash
-python -m pytest tests/ -v
-python -m pytest tests/test_agent_loop.py -v          # single file
-python -m pytest tests/test_tool_manager.py::test_name  # single test
-```
-
-Run the two backend processes (each blocks; use separate terminals or the launcher):
-
-```bash
-python scripts/start_services.py        # launches both
-# or separately:
-python -m twinkle.agentserver          # :18000 — execution core
-python -m twinkle.gateway              # :19000 — connection edge
-```
-
-Run the frontend (Vite proxies `/ws` → `ws://127.0.0.1:19000`):
-
-```bash
-cd web && npm install && npm run dev   # http://localhost:5173
-```
-
-The LLM needs `TWINKLE_LLM_API_KEY` set in `.env` (copy `.env.example`). Without it the agent loop will fail at model call time; the ws/gateway/e2a plumbing still works.
-
-## Architecture (the big picture)
-
-Two Python processes + a Vue frontend, with **two distinct message formats**:
+## Architecture
 
 ```
 Browser ──ws (req/res/event)──> Gateway (:19000) ──ws (E2A envelope)──> AgentServer (:18000)
         <──event broadcast──            <──E2AResponse stream──               AgentLoop (ReAct)
 ```
 
-**Gateway is a pure format-translator + stream fanout** — it converts browser `req` → `E2AEnvelope` inbound and `E2AResponse` frames → browser `chat.delta`/`chat.final` events outbound. **AgentServer never sees the browser**; it only consumes `E2AEnvelope` and yields `E2AResponse`, so it is channel-agnostic by construction.
+- **Gateway = format-translator + stream fanout** — converts browser `req` → `E2AEnvelope`, `E2AResponse` → browser events. Core (`MessageHandler`/`ChannelManager`/`AgentClient`) should not change when adding a new channel.
+- **AgentServer is channel-agnostic** — only consumes `E2AEnvelope`, yields `E2AResponse`, never sees the browser.
+- **`request_id` threads through both wires** — the load-bearing identifier for demux and frame association.
+- **Streaming-only** — all requests implicitly streaming; no `is_stream` field.
+- **Frontend**: `LeftNav` switches Chat (`ChatPanel`+`TodoPanel`) vs Sessions (3-pane file browser). `ChatPanel` has a ➕ new-session button.
 
-### Gateway's four components (assembled with one-way dependencies, no cycles)
-
-`ChannelManager ──holds──> MessageHandler ──holds──> AgentClient`
-
-- **`WebChannel`** (`gateway/web_channel.py`) — ws server to the browser. Inbound: parse `req`, build `Message`, **immediately ACK** with `{type:res, ok:true}` (does not wait for the agent), then invoke `on_message`. Outbound: `send(msg)` broadcasts `{type:event}` to **all** connected ws clients. `channel_id="web"` is the routing key.
-- **`ChannelManager`** (`gateway/channel_manager.py`) — registers channels by `channel_id`; runs a single asyncio `_dispatch_loop` that pulls from `MessageHandler.dequeue_outbound()` and routes each `Message` to the matching channel's `send()`.
-- **`MessageHandler`** (`gateway/message_handler.py`) — inbound: `Message` → `E2AEnvelope` → `AgentClient.send_request_stream`. Outbound: translates each `E2AResponse` to a `Message(chat.delta|chat.final)` and pushes it onto its own `_robot_messages` queue (ChannelManager is the consumer). `_process_stream` is fire-and-forget via `asyncio.create_task`.
-- **`AgentClient`** (`gateway/agent_client.py`) — ws client to AgentServer. On `connect()`, it first `recv()`s the `connection.ack` handshake frame (a plain event, **not** E2A-shaped) before starting the demux loop. **Demux** is the key mechanism: one ws connection multiplexes many concurrent requests, demultiplexed by `request_id` into per-request `asyncio.Queue`s. `_send_lock` serializes ws writes.
-
-### AgentServer internals
-
-- **`server.py`** — ws handler: send `connection.ack`, parse `E2AEnvelope`, dispatch to `AgentLoop.run_stream`, send each yielded frame back via `_safe_send` (silently swallows `ConnectionClosed`). `ws_handler(loop, store)` allows tests to inject a fake loop + share the same `SessionStore` as the RPC path.
-- **`agent_loop.py`** — the ReAct core. `run_stream` is an **async generator** yielding `E2AResponse` with zero ws dependency (so it's unit-testable without sockets). Loop: `store.append(user)` → `llm.stream(msgs, tools)` (yields `TextDelta` | `Finish`) → `TextDelta` yields `e2a.chunk`; a `Finish` with `finish_reason=="tool_calls"` executes tools (result appended as `{role:"tool", tool_call_id, content}` then re-queried) and drains `e2a.todo_update`; `finish_reason=="stop"` yields `e2a.complete`. Guarded by `max_steps` (`TWINKLE_AGENT_MAX_STEPS`, default `1000`) → `e2a.error` if it doesn't converge. **Tool-result re-injection is the linchpin** — the result goes back into `SessionStore` so the next `get_messages` carries it. At entry it also sets the plan-todo ContextVar to the envelope's `session_id` and first-inserts a todo-guidance system message (once per session).
-- **`llm_client.py`** — thin OpenAI SDK wrapper; `base_url` is configurable so any OpenAI-compatible endpoint works. `stream()` yields `TextDelta | Finish` (`Finish` carries `finish_reason` + `assistant_message` with accumulated `tool_calls`; `finish_reason=="tool_calls"` signals tool execution; also captures token `usage`).
-- **`session_store.py`** — disk-backed session memory (in-memory cache + JSON files under `SESSIONS_DIR`, per-session layout `<sid>/{metadata.json,history.json}`). `append`/`create_session`/`delete_session` are async (one `asyncio.Lock` serializes metadata read-modify-write); `get_messages`/`list_sessions`/`get_history`/`list_files`/`read_file` are sync. `read_file` is path-traversal-safe (rejects non-bare filenames, resolved path must stay within session dir). `history.json` preserves full OpenAI-native fields (`role`/`content`/`tool_calls`/`tool_call_id`) so a cold-start `get_messages` can hydrate full ReAct context; bad JSONL lines are skipped, corrupt `metadata.json` falls back to dir mtime. First user message auto-titles the session. See `docs/architecture.md` §4.8.
-- **`session_rpc.py`** — dispatches `session.create`/`session.list`/`session.delete`/`history.get`/`session.files`/`file.read` RPCs (`dispatch_session_rpc(envelope, store)`), called from `server.py`'s `ws_handler(loop, store)` before routing to `AgentLoop`. `session.files` lists a session dir's flat file entries (`[{name,is_dir,size}]`); `file.read` path-safely reads a single file's text content (rejects traversal/escape). Each RPC yields a **single** `E2AResponse(response_kind="e2a.result", is_final=True)` frame (failure → `status="failed"` result frame with an `error` body); `MessageHandler._process_stream` maps `e2a.result` to the browser `result` event. `session_id` is browser-generated and sticky in `localStorage`.
-- **`memory/`** — long-term memory (Phase 5a). `store.MemoryManager`: 6-table SQLite hybrid retrieval (`chunks`/`chunks_fts`/`chunks_vec`/`embedding_cache`/`files`/`meta`; `sqlite-vec` cosine vectors + FTS5 BM25 weighted fusion; degrades to FTS-only without a provider or without sqlite-vec; mtime incremental indexing + embedding cache + model-change rebuild + per-file chunk FIFO cap; CJK per-char spacing for FTS recall). `embeddings.py`: `OpenAICompatibleEmbeddingProvider` (reuses `llm.api_key`/`llm.base_url`) + test-only `MockEmbeddingProvider`. `get_memory_manager()` singleton (lazy, test-swappable via `_set_memory_manager`). The 4 `@tool`s (`memory_search`/`write_memory`/`read_memory`/`edit_memory`) live in `tools/builtin/memory_tools.py` — **model-driven, no auto-inject** (the model decides when to recall/store). `MemoryHook` (priority 80, `before_model_call`) injects a usage-strategy prompt on a non-empty store. `[memory]` extra (sqlite-vec) opt-in.
-- **`tools/`** — the four-layer tool system (Phase 2 rewrite). Split into a framework layer at the top level and concrete tools under `builtin/`; to add a tool, drop a `*_tools.py` in `builtin/` and `register` it inside `tool_manager()` in `__init__.py`:
-  - `base.py`: `ToolCard` (pure metadata) + `Tool` (Protocol: `card` + `invoke`)
-  - `local_function.py`: `LocalFunction`, the local-Python-function implementation of `Tool`
-  - `schema_extractor.py`: hand-written extractor (str/int/float/bool/list/dict/Optional/`X | None` PEP 604 → JSON schema) from a function's signature + docstring
-  - `decorator.py`: `@tool` turns a plain async function into a `LocalFunction` (auto-derives name/description/params; override with `@tool(name=..., input_params=...)`)
-  - `manager.py`: `ToolManager` — `register`/`unregister`/`list`/`get`/`schemas`/`execute`, stores `dict[str, Tool]`, only knows the `Tool` interface
-  - `__init__.py`: re-exports the framework (`Tool`/`ToolCard`/`LocalFunction`/`@tool`/`ToolManager`) + the `tool_manager()` builder that pre-registers the `builtin/` tools. Tool singletons stay module-attribute access (e.g. `builtin.web_fetch.web_fetch`) so tests can monkeypatch internal helpers.
-  - **`builtin/`** — concrete tool implementations, grouped out of the framework layer (mirrors openjiuwen's `core/foundation/tool/` vs the app's per-domain tool files, minus jiuwenswarm's catalog/provider indirection):
-    - `web_fetch.py`, `web_search.py`: concrete read-only tools (URL→markdown; DuckDuckGo Lite search)
-    - `command_exec.py`: shell-command execution tool (slim rewrite of jiuwenclaw's `command_tools.py`). Cross-platform shell detection (PowerShell on Windows, bash/sh on Unix), workspace-confined `workdir`, dangerous-command blocklist, timeout, output clipping, and a non-blocking background mode. **Not read-only** — the only safety rails today are the blocklist + workspace confinement; an approval flow is deferred (roadmap `permissions/`).
-    - `todo_tools.py`: the three `@tool` todo functions (create/complete/list) for agent self-planning; reads `plan_todo_context` for session routing, operates the shared `TodoStore` singleton via `get_todo_store()` (call-time, so tests can swap it), returns markdown strings with the current list appended.
-    - `skill_tools.py`: the two `@tool` skill functions (`list_skill`/`read_skill`) for skill discovery/loading; `list_skill` returns the name+description catalog, `read_skill(name, file="SKILL.md")` reads a SKILL.md body as tool_result (path-traversal-guarded, never raises). Operates the shared `SkillManager` singleton via `get_skill_manager()`.
-  - `agent_loop` calls `self._tools.schemas()` / `self._tools.execute(name, args)` — `ToolManager` is a superset of the old call surface.
-- **`plan_todo_context.py`** — a `ContextVar` (`PLAN_TODO_SESSION_ID`) set by `AgentLoop.run_stream` at request entry to the envelope's `session_id`, plus a `get_plan_todo_session_id()` getter with a `"default"` fallback. Lets the parameter-less todo tools resolve the current session without threading it through every tool call.
-- **`todo_store.py`** — disk-backed `TodoStore` (`<TODOS_DIR>/<session_id>.json`, load→mutate→save per op, per-session `asyncio.Lock` serializing read-modify-write). Methods: `create`/`complete`/`list_tasks`/`delete`. Survives restart; `delete(sid)` called by the `session.delete` RPC. `create` refuses only when an in-progress list exists (replacing an all-completed list is allowed). Shared process singleton via `todo/__init__.py::get_todo_store()`.
-- **`skills/`** — the skill system (Phase 7). `Skill(name, description, directory)` dataclass + `SkillManager` (scans `<SKILLS_DIR>/<name>/SKILL.md`, mtime hot-reload per-skill, `ENABLED_SKILLS` whitelist) + `get_skill_manager()` singleton (mirror `get_todo_store`). SKILL.md frontmatter (`name`/`description`/`trigger`) — `trigger` parsed-and-discarded (model-driven selection, no keyword auto-matching). `SkillHook` (priority 90, `before_model_call`) injects the skill catalog (`all` mode) or a "call list_skill" note (`auto_list` mode) into `ctx.inputs.messages` (assigns a new list, never mutates in place — store's list stays clean); `TWINKLE_SKILL_MODE` switches modes (default `all`). Always-on, no enabled flag; no-op when no skills. Registered in `main()` alongside PermissionHook/LoggingHook. `<WORKSPACE>/skills/<name>/SKILL.md` is the user-facing skill dir; `doc-audit` is the seeded example (see `twinkle/resources/skills/`).
-- **`observability/`** — in-tree OTel telemetry (`Phase: landed`). `setup()` (called from `agentserver/__main__`) monkey-patches `AgentLoop.run_stream` / `LLMClient.stream` / `ToolManager.execute` into `twinkle.agent.invoke` / `gen_ai.chat` / `gen_ai.tool` spans + metrics, exported via OTLP gRPC / console / none. `OTEL_ENABLED` defaults false = zero-cost no-op; opt-in via the `[obs]` extra (`opentelemetry-api`/`-sdk`/`-exporter-otlp-proto-grpc`). Dependency is one-way `observability → agentserver`; agentserver never imports it.
-
-### Frontend nav shell
-
-The frontend uses a jiuwen-style nav shell: `LeftNav` (2 entries: Chat / Sessions) switches `useSessions.activeNav` (`'chat' | 'sessions'`), and `App.vue` renders `ChatView` (ChatPanel + TodoPanel) or `SessionsView` (3-pane file browser: SessionListPane | FileTreePane | FilePreviewPane) via `v-if`. The old always-visible `SessionSidebar.vue` is deleted — sessions live only in the Sessions page. `ChatPanel` has a ➕ new-session button beside the input, replacing the old sidebar's "+ 新对话". SessionsView's `FilePreviewPane` special-cases `history.json` (chat-bubble / raw JSON toggle via `fromHistory` + `historyAsBubbles`) and `metadata.json` (formatted JSON), other files as plain text.
-
-### Message formats (the two wires)
-
-- **Browser ↔ Gateway**: `{type:req|res|event, id, method, event, params|payload, request_id}`. Defined in `web/src/services/webClient.ts` + `twinkle/schema/message.py` (`Message` dataclass + `EventType` of `connection.ack`/`chat.delta`/`chat.final`/`todo.update`/`result` — `todo.update` carries the structured todo snapshot `{tasks, remaining, total}`; `result` carries a single-shot RPC reply).
-- **Gateway ↔ AgentServer (E2A)**: Pydantic models in `twinkle/e2a/models.py` — `E2AEnvelope` (request, ~6 fields) and `E2AResponse` (streaming multi-frame: `e2a.chunk` / `e2a.complete` / `e2a.error` / `e2a.todo_update` / `e2a.result` — `e2a.todo_update` carries a structured todo snapshot `{tasks, remaining, total}` that the gateway maps to a `todo.update` browser event; `e2a.chunk`/`e2a.complete` map to `chat.delta`/`chat.final`; `e2a.result` is a single final frame mapped to the browser `result` event, with `sequence` strictly increasing per `request_id`, `is_final` on the last frame).
-
-The system is **streaming-only** — unary/single-shot mode was removed in Phase 1. There is no `is_stream` field on `E2AEnvelope`; all requests are implicitly streaming.
-
-**`request_id` is the load-bearing identifier** — the browser generates it, it threads through `req.id` → `Message.id` → `E2AEnvelope.request_id` → `E2AResponse.request_id` → outbound `event.request_id`, and the browser uses it to associate interleaved delta/final frames with the originating request.
-
-## Configuration
-
-Most tunable config now lives in `twinkle/resources/config.yaml` (YAML + `${ENV:-default}` interpolation + pydantic validation, mirroring `jiuwenswarm/resources/config.yaml`). Edit that file for tunables (`agent.max_steps`, `context_compression`, `skills.mode`/`enabled`, `permissions` policy). Only secrets + deploy-variable paths/endpoints/ports remain env vars, resolved into the YAML via `${ENV:-default}`. v1 reads only the packaged `resources/config.yaml`; a user-override path is future work.
-
-Loaded by `twinkle.config.loader.load_config()` → `twinkle/config/schema.py` pydantic models (bad tier/mode → startup `ValidationError`) → `twinkle/config/__init__.py` flattens the validated `settings` into the same module-level constants the rest of the codebase imports (`from twinkle.config import X` unchanged). Priority: real env var > `.env` file > YAML literal default.
-
-| Variable | Default | Notes |
-|---|---|---|
-| `TWINKLE_AGENTSERVER_HOST`/`_PORT` | `127.0.0.1` / `18000` | AgentServer listen |
-| `TWINKLE_GATEWAY_HOST`/`_PORT` | `127.0.0.1` / `19000` | Gateway browser-ws listen |
-| `TWINKLE_LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible |
-| `TWINKLE_LLM_API_KEY` | empty | **put in `.env`, never commit**; resolved into YAML `llm.api_key` via `${TWINKLE_LLM_API_KEY:-}` |
-| `TWINKLE_LLM_MODEL` | `gpt-4o-mini` | |
-| `TWINKLE_WORKSPACE_DIR` | `~/.twinkle` | Sandbox root for `command_exec`/`file_tools` — agent file ops confined under this. Defaults to the user home so generated files don't pollute the repo; override to point elsewhere. Empty YAML default → `~/.twinkle` |
-| `TWINKLE_LOG_DIR` | `<WORKSPACE>/logs` | Process log dir (gateway.log / server.log daily-rotated by `logging_config.setup_logging`; JSONL audit under `logs/audit/`) |
-| `TWINKLE_SESSIONS_DIR` | `<WORKSPACE>/.twinkle_data/sessions` | Disk-backed session store root; per-session `<sid>/{metadata.json,history.json}` |
-| `TWINKLE_TODOS_DIR` | `<WORKSPACE>/.twinkle_data/todos` | Todo persistence root; flat `<sid>.json` per session, parallel to `sessions/`; `session.delete` cleans up via `TodoStore.delete` |
-| `TWINKLE_MEMORY_DIR` | `<WORKSPACE>/.twinkle_data/memory` | Long-term memory root; `memory.db` (6-table SQLite hybrid retrieval: sqlite-vec + FTS5) + markdown files (`USER.md`/`MEMORY.md`/`daily_memory/YYYY-MM-DD.md`); `MemoryManager` owns it, `ensure_workspace_dir` creates it + `daily_memory/` |
-| `TWINKLE_SKILLS_DIR` | `<WORKSPACE>/skills` | Skill directory; user drops `<name>/SKILL.md` here; mtime hot-reloaded by `SkillManager` |
-| `TWINKLE_PERMISSION_OVERRIDES_FILE` | `<WORKSPACE>/.twinkle_data/permission_overrides.json` | runtime allow_always store (mtime hot-reload) |
-| `TWINKLE_PERMISSION_AUDIT_FILE` | `<WORKSPACE>/logs/audit/permission_audit.jsonl` | ToolPermissionLog JSONL (no rotation) |
-| `OTEL_ENABLED` | `false` | Observability master switch (needs `[obs]` extra); false = `setup()` no-op, zero-cost. **`OTEL_*` stays in `twinkle/observability/config.py`, not folded into config.yaml (v1).** |
-| `OTEL_TRACES_EXPORTER`/`OTEL_METRICS_EXPORTER` | `none` | `otlp` / `console` / `none` (read in `twinkle/observability/config.py`) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP gRPC collector endpoint (`http://` = insecure, `https://` = TLS) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | only the gRPC exporter is implemented |
-| `OTEL_SERVICE_NAME` | `twinkle-agentserver` | Resource `service.name` |
-
-**Removed env vars (now YAML literals in `config.yaml`)** — setting these via env no longer works; edit the YAML instead:
-- `TWINKLE_AGENT_MAX_STEPS` → `agent.max_steps`
-- `TWINKLE_CONTEXT_TOKEN_THRESHOLD` / `TWINKLE_CONTEXT_KEEP_RECENT_PAIRS` / `TWINKLE_CONTEXT_SUMMARY_PROMPT` → `context_compression.*`
-- `TWINKLE_SKILL_MODE` → `skills.mode`
-- `TWINKLE_ENABLED_SKILLS` → `skills.enabled` (list)
-- `TWINKLE_PERMISSIONS` (JSON env) → `permissions:` block (`enabled` / `enabled_channels` / `global_default` / `tools` / `rules` / `approval_overrides` / `overrides_file` / `audit_file`). `enabled: false` = system off (all ALLOW, no audit/no ASK; command_exec still uses builtin_rules). tier 取值域: `allow | require-approval | deny` (`require-approval` 归一为 ASK).
+Per-file details → `docs/architecture.md`.
 
 ## Conventions
 
-- **Add a new read-only tool**: write an async function in a `*_tools.py` module under `tools/builtin/`, decorate with `@tool` (the docstring + type hints auto-generate the JSON schema), then `tm.register(it)` inside `tool_manager()` in `tools/__init__.py`. `agent_loop` picks it up via `schemas()`/`execute()` with no loop changes.
-- **Add a new skill**: create `<WORKSPACE>/skills/<name>/SKILL.md` (YAML frontmatter `name`/`description`/`trigger` + markdown instruction body; `trigger` is parsed-but-discarded — the model picks skills from `description`). `SkillManager` mtime-hot-reloads on next `before_model_call`, no restart needed. Bundled example skills live in `twinkle/resources/skills/` and are seeded into `<WORKSPACE>/skills/` on first startup (`ensure_workspace_dir`).
-- **Add a new channel** (e.g. Feishu): implement the channel interface (`channel_id`, `on_message`, `send`, `start`) and `register_channel` it in `gateway/__main__.py`. Gateway core (`MessageHandler`/`ChannelManager`/`AgentClient`) should not change.
-- **Tests must not use `pytest-asyncio`** — use `asyncio.run()` and the `free_port`/`port_factory` fixtures. This is a deliberate choice to avoid pulling the plugin in for free-port fixtures.
-- The reference impl `jiuwenclaw` is at `D:\opensource\gitcode\jiuwenclaw` — consult it when a module's behavior is unclear; each module docstring / `docs/architecture.md` §11 maps Twinkle files to jiuwenclaw file ranges.
-- **Add a new Hook**: write a class inheriting `AgentHook` in a `*_hook.py` module under `hooks/builtin/`, override the lifecycle methods you care about, set `priority`, then register it in `build_agent_loop()` or at the call site via `loop.register_hook(hook_instance)`. `agent_loop` picks it up with no core changes.
-- **Add a new permission rule**: append a `(re.Pattern, reason)` to `COMMAND_DENY_PATTERNS` in `twinkle/agentserver/permissions/builtin_rules.py` (single source — command_exec + policy both read it). For non-command_exec tools, set the tier in `TWINKLE_PERMISSIONS.tools` or add a user rule to `TWINKLE_PERMISSIONS.rules`.
+- **Add a new tool**: async function in `tools/builtin/*_tools.py`, decorate with `@tool`, register in `tool_manager()` inside `tools/__init__.py`. `agent_loop` picks it up via `schemas()`/`execute()`.
+- **Add a new skill**: create `<WORKSPACE>/skills/<name>/SKILL.md` (frontmatter `name`/`description`/`trigger` + markdown body; `trigger` parsed-but-discarded). `SkillManager` hot-reloads on next `before_model_call`.
+- **Add a new channel**: implement interface (`channel_id`, `on_message`, `send`, `start`), register in `gateway/__main__.py`. Gateway core unchanged.
+- **Add a new Hook**: class inheriting `AgentHook` in `hooks/builtin/*_hook.py`, set `priority`, register in `build_agent_loop()` or via `loop.register_hook()`.
+- **Add a permission rule**: append `(re.Pattern, reason)` to `COMMAND_DENY_PATTERNS` in `twinkle/agentserver/permissions/builtin_rules.py`. For other tools, set tier in config `permissions.tools` or add a user rule.
+- **Tests**: no `pytest-asyncio` — use `asyncio.run()` + `free_port`/`port_factory` fixtures (`tests/conftest.py`).
+- **Reference impl**: `jiuwenclaw` at `D:\opensource\gitcode\jiuwenclaw` — consult when behavior unclear; `docs/architecture.md` §11 maps Twinkle→jiuwenclaw files.
+
+## Commands & Config
+
+Run tests:
+```bash
+python -m pytest tests/ -v
+python -m pytest tests/test_agent_loop.py -v                    # single file
+python -m pytest tests/test_tool_manager.py::test_name          # single test
+```
+
+Start backend (each blocks; use separate terminals or launcher):
+```bash
+python scripts/start_services.py                                # both
+python -m twinkle.agentserver                                   # :18000
+python -m twinkle.gateway                                       # :19000
+```
+
+Start frontend:
+```bash
+cd web && npm install && npm run dev                            # http://localhost:5173
+```
+
+Set `TWINKLE_LLM_API_KEY` in `.env` (copy `.env.example`) — without it the agent loop fails at model call time. Tunable config → `twinkle/resources/config.yaml` (priority: env var > `.env` file > YAML default).

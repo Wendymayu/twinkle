@@ -10,6 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import platform
+import sys
+from datetime import date
 from typing import AsyncIterator
 
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
@@ -40,18 +43,85 @@ from twinkle.config import (
     CONTEXT_KEEP_RECENT_PAIRS,
     CONTEXT_SUMMARY_PROMPT,
     CONTEXT_TOKEN_THRESHOLD,
+    MEMORY_DIR,
+    SKILLS_DIR,
+    WORKSPACE_DIR,
 )
 
 log = logging.getLogger("twinkle.agentserver")
 
-TODO_SYSTEM_PROMPT = (
-    "You have todo tools to plan and track multi-step work: "
-    "todo_create, todo_complete, todo_list. For non-trivial multi-step "
-    "requests, first call todo_create with a list of sub-tasks, then work "
-    "through them calling todo_complete(idx, result) as each finishes, and "
-    "call todo_list to check progress. For simple one-step requests, do NOT "
-    "use the todo tools — just answer or call the needed tool directly."
-)
+
+def build_system_prompt() -> str:
+    """Build the base system prompt injected once per session at position 0.
+
+    Includes agent identity, runtime environment, workspace overview, and
+    tool usage guidance. Dynamic values (platform, date, workspace paths)
+    are resolved at injection time so the prompt stays current.
+    """
+    os_type = sys.platform
+    today = date.today().isoformat()
+    workspace = WORKSPACE_DIR
+    memory_dir = MEMORY_DIR
+    skills_dir = SKILLS_DIR
+
+    # Windows-specific mkdir warning
+    mkdir_warning = ""
+    if os_type.startswith("win"):
+        mkdir_warning = (
+            "\n⚠️ Windows `mkdir` 不支持 `-p`！创建嵌套目录请用 "
+            "PowerShell `New-Item -ItemType Directory -Path \"parent/child\" -Force` "
+            "或 cmd 分步 `mkdir parent && mkdir parent\\child`。"
+        )
+
+    return f"""# 身份与行为原则
+
+对外交流时，不要主动提及内部框架名、目录名或运行细节。
+
+- **直接进入正题** — 少说"好的""很乐意"，直接开始做事。
+- **先想再做** — 接到任务后先理清思路，想清楚步骤再执行。
+- **办事严谨** — 做事牢靠是获得信任的关键。
+- **尽量不拒绝** — 尽量满足合理请求，仅在涉及违法、有害或超出能力时才拒绝并说明原因。
+- **简洁输出** — 不要重复表达相同的意思，每个想法只说一次。
+
+# 运行环境
+
+当前平台：`{os_type}`
+当前日期：`{today}`
+
+**必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
+
+| 操作 | Windows | Linux/macOS |
+|------|---------|-------------|
+| 创建目录 | `mkdir folder` | `mkdir -p folder` |
+| 查看文件 | `type file.txt` | `cat file.txt` |
+| 列出文件 | `dir` | `ls -la` |
+| 删除目录 | `rmdir folder` | `rm -rf folder` |{mkdir_warning}
+
+# 工作区
+
+以下目录仅供执行任务时内部参考，不要主动向用户展示内部路径。
+
+| 路径 | 用途 |
+|------|------|
+| `{workspace}` | 工作区根目录，文件操作默认收敛于此 |
+| `{memory_dir}` | 长期记忆存储 |
+| `{skills_dir}` | 技能库 |
+
+# 工具使用指南
+
+## Todo（任务规划）
+
+你有 todo 工具来规划和追踪多步骤任务：todo_create、todo_complete、todo_list。
+- 非平凡的多步骤请求：先调 todo_create 列出子任务，逐步执行并用 todo_complete(idx, result) 标记完成，调 todo_list 查看进度。
+- 简单单步请求：直接回答或调工具，不要使用 todo。
+
+## 长期记忆
+
+你有跨会话记忆工具（memory_search/write_memory/read_memory/edit_memory）。何时搜索/写入的详细规则见系统注入的"长期记忆"段。
+
+## 技能
+
+你有技能工具（list_skill/read_skill）。可用技能清单见系统注入的"可用技能"段。"""
 
 _MAX_HOOK_RETRIES = 3
 
@@ -136,12 +206,12 @@ class AgentLoop:
         reset_todo_events()
         set_permission_channel(envelope.channel or "web")
         await self._sanitize_orphan_tool_calls(session_id, envelope.request_id)
-        # Insert the todo-guidance system message once per session
-        existing = self._session_store.get_messages(session_id)
-        if not existing or existing[0].get("role") != "system":
+        # Insert the base system prompt once per session
+        messages = self._session_store.get_messages(session_id)
+        if not messages or messages[0].get("role") != "system":
             await self._session_store.append(
                 session_id,
-                {"role": "system", "content": TODO_SYSTEM_PROMPT},
+                {"role": "system", "content": build_system_prompt()},
                 request_id=envelope.request_id,
             )
         query = (envelope.params or {}).get("query", "")
@@ -167,6 +237,12 @@ class AgentLoop:
             # -- BEFORE_MODEL_CALL -- #
             ctx.inputs = ModelCallInputs(messages=msgs, tools=self._tool_manager.schemas())
             await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
+
+            # -- Merge leading system messages into one (identity first, operational last) -- #
+            # Mirrors jiuwenswarm's SystemPromptBuilder: a single merged system prompt
+            # avoids "lost in the middle" — identity gets the beginning-attention hotspot,
+            # operational sections stay close to conversation for recency bias.
+            ctx.inputs.messages = self._merge_system_messages(ctx.inputs.messages)
 
             # Check force_finish — skip LLM call if requested
             ff = ctx.consume_force_finish_request()
@@ -345,6 +421,77 @@ class AgentLoop:
                     {"role": "tool", "tool_call_id": tc_id,
                      "content": "[interrupted: previous request did not complete]"},
                     request_id=request_id)
+
+    @staticmethod
+    def _merge_system_messages(messages: list[dict]) -> list[dict]:
+        """Merge all leading system-role messages into ONE, ordered so that
+        identity/principles appear first and operational instructions last.
+
+        Mirrors jiuwenswarm's SystemPromptBuilder: a single merged system
+        prompt avoids "lost in the middle" — identity gets the beginning
+        attention hotspot, skill/memory/compression sections stay closer
+        to the conversation for recency bias.
+
+        Ordering within the merged content:
+          1. SYSTEM_PROMPT (starts with "# 身份与行为原则")
+          2. Skill section (starts with "## 可用技能" or "你有 skills")
+          3. Memory section (starts with "## 长期记忆")
+          4. Compression summary (starts with "[prior context summary]")
+          5. Any other system messages (preserve original order)
+        """
+        if not messages:
+            return messages
+
+        # Collect consecutive system messages at the head of the list
+        system_msgs: list[dict] = []
+        rest_start = 0
+        for i, m in enumerate(messages):
+            if m.get("role") == "system":
+                system_msgs.append(m)
+                rest_start = i + 1
+            else:
+                break
+
+        # If only one system message or none, no merge needed
+        if len(system_msgs) <= 1:
+            return messages
+
+        rest = messages[rest_start:]
+
+        # Classify by content prefix for ordering
+        identity_parts: list[str] = []
+        skill_parts: list[str] = []
+        memory_parts: list[str] = []
+        summary_parts: list[str] = []
+        other_parts: list[str] = []
+
+        _IDENTITY_PREFIX = "# 身份与行为原则"
+        _SKILL_PREFIXES = ("## 可用技能", "你有 skills")
+        _MEMORY_PREFIX = "## 长期记忆"
+        _SUMMARY_PREFIX = "[prior context summary]"
+
+        for m in system_msgs:
+            content = m.get("content", "")
+            if content.startswith(_IDENTITY_PREFIX):
+                identity_parts.append(content)
+            elif any(content.startswith(p) for p in _SKILL_PREFIXES):
+                skill_parts.append(content)
+            elif content.startswith(_MEMORY_PREFIX):
+                memory_parts.append(content)
+            elif content.startswith(_SUMMARY_PREFIX):
+                summary_parts.append(content)
+            else:
+                other_parts.append(content)
+
+        # Assemble: identity → skill → memory → summary → other
+        merged_content = "\n\n".join(
+            part for part in (
+                identity_parts + skill_parts + memory_parts
+                + summary_parts + other_parts
+            ) if part
+        )
+
+        return [{"role": "system", "content": merged_content}] + rest
 
     # --- @hook-decorated methods --- #
 
