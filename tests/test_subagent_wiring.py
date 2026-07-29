@@ -1,8 +1,11 @@
 """build_agent_loop always wires the subagent executor + spawn_subagent tool +
-SubagentContextHook (subagent is always on — no enabled switch)."""
+SubagentContextHook (subagent is always on). SubagentContextHook is auto-wired
+by build_agent_loop — it holds the executor, which is built there from the
+loop's llm/store/tools (mirroring jiuwenswarm's adapter binding the executor
+onto its stream rail)."""
 
 
-def test_build_agent_loop_registers_spawn_subagent_and_context_hook():
+def test_build_agent_loop_wires_spawn_subagent_and_context_hook():
     from twinkle.agentserver.sessions import SessionStore
     from twinkle.agentserver.server import build_agent_loop
     from twinkle.agentserver.hooks.base import HookEvent
@@ -12,7 +15,5 @@ def test_build_agent_loop_registers_spawn_subagent_and_context_hook():
     # spawn_subagent registered on the loop's tool manager
     names = {t.card.name for t in loop._tool_manager.list()}
     assert "spawn_subagent" in names
-    # SubagentContextHook registered (BEFORE_INVOKE callback present)
+    # SubagentContextHook auto-wired (BEFORE_INVOKE callback present)
     assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_INVOKE)
-    # executor attached
-    assert getattr(loop, "_subagent_executor", None) is not None

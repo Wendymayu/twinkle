@@ -20,17 +20,15 @@ def test_build_agent_loop_wires_permission(monkeypatch):
 
 
 def test_build_agent_loop_without_hooks_has_only_subagent_callback():
-    """Minimal AgentLoop (no explicit hooks) still wires the always-on
-    SubagentContextHook (BEFORE_INVOKE); no other event has callbacks."""
+    """Minimal AgentLoop (no explicit hooks) still auto-wires SubagentContextHook
+    (BEFORE_INVOKE); no other event has callbacks."""
     from twinkle.agentserver.sessions import session_store
     from twinkle.agentserver.server import build_agent_loop
     from twinkle.agentserver.hooks.base import HookEvent
 
     store = session_store()
     loop = build_agent_loop(store)
-    # subagent is always on -> SubagentContextHook registers a BEFORE_INVOKE callback
     assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_INVOKE)
-    # no explicit hooks -> no other event has callbacks
     for event in HookEvent:
         if event == HookEvent.BEFORE_INVOKE:
             continue

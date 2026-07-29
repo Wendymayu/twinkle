@@ -24,8 +24,8 @@ from twinkle.agentserver.agent_loop import AgentLoop
 from twinkle.agentserver.hooks.builtin.subagent_context_hook import SubagentContextHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.tools import tool_manager
-from twinkle.agentserver.tools.builtin.subagent_tools import spawn_subagent
-from twinkle.agentserver.tools.subagent_executor import SubagentExecutor
+from twinkle.agentserver.tools.builtin.subagent import spawn_subagent
+from twinkle.agentserver.tools.builtin.subagent import SubagentExecutor
 from twinkle.config.schema import SubagentConfig
 from twinkle.e2a.models import E2AEnvelope
 
@@ -55,7 +55,7 @@ def test_parent_delegates_then_summarizes(session_store):
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "c1", "type": "function",
                               "function": {"name": "spawn_subagent",
-                                           "arguments": '{"objective": "find the answer", "role_id": "MainAgent", "prompt": "", "model_name": ""}'}}]})],
+                                           "arguments": '{"objective": "find the answer", "prompt": ""}'}}]})],
         [TextDelta("the child said: "), TextDelta("42"),
          Finish("stop", {"role": "assistant", "content": "the child said: 42", "tool_calls": None})],
     ])
@@ -65,7 +65,6 @@ def test_parent_delegates_then_summarizes(session_store):
     ])
 
     parent_tm = tool_manager()
-    parent_tm.register(spawn_subagent)
     executor = SubagentExecutor(
         llm=child_llm, store=session_store, parent_tools=parent_tm,
         config=SubagentConfig(), child_hooks=[],
@@ -104,10 +103,10 @@ def test_concurrent_spawns_do_not_cross_contaminate(session_store):
               "tool_calls": [
                   {"id": "c1", "type": "function",
                    "function": {"name": "spawn_subagent",
-                                "arguments": '{"objective": "task A", "role_id": "MainAgent", "prompt": "", "model_name": ""}'}},
+                                "arguments": '{"objective": "task A", "prompt": ""}'}},
                   {"id": "c2", "type": "function",
                    "function": {"name": "spawn_subagent",
-                                "arguments": '{"objective": "task B", "role_id": "MainAgent", "prompt": "", "model_name": ""}'}},
+                                "arguments": '{"objective": "task B", "prompt": ""}'}},
               ]})],
         [TextDelta("both done"), Finish("stop", {"role": "assistant", "content": "both done", "tool_calls": None})],
     ])
@@ -117,7 +116,6 @@ def test_concurrent_spawns_do_not_cross_contaminate(session_store):
         [TextDelta("B-result"), Finish("stop", {"role": "assistant", "content": "B-result", "tool_calls": None})],
     ])
     parent_tm = tool_manager()
-    parent_tm.register(spawn_subagent)
     executor = SubagentExecutor(llm=child_llm, store=session_store,
                                 parent_tools=parent_tm, config=SubagentConfig(),
                                 child_hooks=[])

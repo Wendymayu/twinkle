@@ -6,9 +6,7 @@ copies the parent's tools minus this set. spawn_subagent => no recursion
 """
 from __future__ import annotations
 
-import uuid
-
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 
 class SoftTimeoutError(Exception):
@@ -23,18 +21,11 @@ EXCLUDED_TOOLS: set[str] = {
 
 
 class SubagentTaskSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    task_id: str = Field(default_factory=lambda: f"subagent_{uuid.uuid4().hex[:8]}")
-    role_id: str = "MainAgent"      # v1: display label only, no role registry
     objective: str
     prompt: str = ""
-    model_name: str = ""
 
 
 class SubagentResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
     success: bool
-    task_id: str
-    role_id: str
     result: str | None = None
     error: str | None = None

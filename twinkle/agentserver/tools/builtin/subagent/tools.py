@@ -6,13 +6,13 @@ convergence, returns its final answer (+ stop hint) as a tool_result string.
 """
 from __future__ import annotations
 
-from twinkle.agentserver.subagent_context import (
+from .context import (
     get_subagent_executor,
     get_subagent_parent_request_id,
     get_subagent_parent_session_id,
 )
 from twinkle.agentserver.tools.decorator import tool
-from twinkle.agentserver.tools.subagent_executor.models import (
+from twinkle.agentserver.tools.builtin.subagent.models import (
     SubagentResult,
     SubagentTaskSpec,
 )
@@ -31,8 +31,7 @@ def _wrap(result: SubagentResult) -> str:
 
 
 @tool
-async def spawn_subagent(objective: str, role_id: str = "MainAgent",
-                         prompt: str = "", model_name: str = "") -> str:
+async def spawn_subagent(objective: str, prompt: str = "") -> str:
     """Delegate an isolated subtask to a fresh sub-agent that runs its own ReAct
     loop in an isolated session and returns only its final answer.
 
@@ -57,10 +56,8 @@ async def spawn_subagent(objective: str, role_id: str = "MainAgent",
     if executor is None or parent_sid is None:
         return "[subagent unavailable] executor not initialized on this loop"
     parent_rid = get_subagent_parent_request_id() or parent_sid
-    task = SubagentTaskSpec(
-        objective=objective, role_id=role_id, prompt=prompt, model_name=model_name
-    )
-    result = await executor.execute_spawn(
+    task = SubagentTaskSpec(objective=objective, prompt=prompt)
+    result = await executor.execute_subagent(
         task, parent_session_id=parent_sid, parent_request_id=parent_rid
     )
     return _wrap(result)

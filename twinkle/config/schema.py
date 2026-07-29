@@ -133,7 +133,6 @@ class SubagentConfig(_StrictModel):
     soft_timeout: float = 120.0         # no-streaming-activity reset
     abort_timeout: float = 30.0          # cancel-a-stuck-child window
     child_permissions: bool = False      # v1 MUST be false (true needs streaming -> startup reject)
-    model: str = ""                      # "" = reuse llm.model; else override child model
     max_result_chars: int = 8000         # truncate child final to protect parent context
     list_sessions_filter: bool = True    # hide __sub_ sessions from session.list
 

@@ -74,6 +74,5 @@ SUBAGENT_HARD_TIMEOUT = settings.subagent.hard_timeout
 SUBAGENT_SOFT_TIMEOUT = settings.subagent.soft_timeout
 SUBAGENT_ABORT_TIMEOUT = settings.subagent.abort_timeout
 SUBAGENT_CHILD_PERMISSIONS = settings.subagent.child_permissions
-SUBAGENT_MODEL = settings.subagent.model
 SUBAGENT_MAX_RESULT_CHARS = settings.subagent.max_result_chars
 SUBAGENT_LIST_SESSIONS_FILTER = settings.subagent.list_sessions_filter

@@ -8,7 +8,6 @@ def test_subagent_config_defaults():
     assert c.soft_timeout == 120
     assert c.abort_timeout == 30
     assert c.child_permissions is False
-    assert c.model == ""
     assert c.max_result_chars == 8000
     assert c.list_sessions_filter is True
 

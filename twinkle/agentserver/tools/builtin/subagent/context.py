@@ -1,8 +1,8 @@
-"""Subagent ContextVar bridge — lets the parameter-less spawn_subagent tool
-find the current executor + parent session/request id at runtime.
+"""Subagent ContextVar bridge — lets the spawn_subagent tool find the current
+executor + parent session/request id at runtime.
 
-Set by SubagentContextHook.before_invoke on the PARENT loop only (the child
-has no spawn_subagent, so it never reads these). Mirrors plan_todo_context.py.
+Set by SubagentContextHook.before_invoke on the PARENT loop only (the child has
+no spawn_subagent, so it never reads these). Mirrors plan_todo_context.py.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import contextvars
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from twinkle.agentserver.tools.subagent_executor import SubagentExecutor
+    from twinkle.agentserver.tools.builtin.subagent import SubagentExecutor
 
 SUBAGENT_EXECUTOR: contextvars.ContextVar["SubagentExecutor | None"] = contextvars.ContextVar(
     "twinkle_subagent_executor", default=None
