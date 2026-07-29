@@ -50,43 +50,34 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
 
     *store* is injected so the caller controls which SessionStore instance
     the loop (chat/ReAct path) and ``ws_handler`` (RPC path) share.
-    *hooks* is an optional list of AgentHook instances to register.
-    All hooks are explicit — no hidden always-on hooks. Callers that need
-    permission enforcement pass PermissionHook; minimal test setups pass
-    an empty list. *llm* is an optional override (tests inject a scripted
-    client; default = config-driven LLMClient).
+    *hooks* is an optional list of AgentHook instances to register (callers
+    that need permission enforcement pass PermissionHook; minimal test
+    setups pass an empty list). *llm* is an optional override (tests inject
+    a scripted client; default = config-driven LLMClient).
 
-    When subagent is enabled (SUBAGENT_ENABLED), also wires the
-    SubagentExecutor + spawn_subagent tool + SubagentContextHook so the
-    parent agent can delegate isolated subtasks.
+    Subagent is always on: build the SubagentExecutor, register the
+    spawn_subagent tool, and register SubagentContextHook (alongside the
+    caller's hooks) so the parent agent can delegate isolated subtasks.
+    Hook execution order is priority-sorted (HookManager, descending), not
+    registration-sorted, so the subagent hook's position in the list carries
+    no ordering meaning.
     """
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
     tools = tool_manager()
     loop = AgentLoop(llm, store, tools)
-    subagent_hooks: list[AgentHook] = []
-    if _subagent_enabled():
-        from twinkle.agentserver.tools.builtin.subagent_tools import spawn_subagent
-        from twinkle.agentserver.tools.subagent_executor import create_subagent_executor
-        from twinkle.agentserver.hooks.builtin import SubagentContextHook
-        from twinkle.config import settings
-        executor = create_subagent_executor(
-            llm=llm, store=store, parent_tools=tools, config=settings.subagent
-        )
-        tools.register(spawn_subagent)              # parent gains the tool
-        loop._subagent_executor = executor          # keep a ref (abort, introspection)
-        subagent_hooks.append(SubagentContextHook(executor))
-    if hooks:
-        for hook in hooks:
-            loop.register_hook(hook)
-    for hook in subagent_hooks:
+    from twinkle.agentserver.tools.builtin.subagent_tools import spawn_subagent
+    from twinkle.agentserver.tools.subagent_executor import create_subagent_executor
+    from twinkle.agentserver.hooks.builtin import SubagentContextHook
+    from twinkle.config import settings
+    executor = create_subagent_executor(
+        llm=llm, store=store, parent_tools=tools, config=settings.subagent
+    )
+    tools.register(spawn_subagent)              # parent gains the tool
+    loop._subagent_executor = executor          # keep a ref (abort, introspection)
+    for hook in list(hooks or []) + [SubagentContextHook(executor)]:
         loop.register_hook(hook)
     return loop
-
-
-def _subagent_enabled() -> bool:
-    from twinkle.config import SUBAGENT_ENABLED
-    return bool(SUBAGENT_ENABLED)
 
 
 def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnection], Awaitable[None]]:

@@ -128,7 +128,6 @@ class PermissionsConfig(_StrictModel):
 
 
 class SubagentConfig(_StrictModel):
-    enabled: bool = True
     max_steps: int = 50                 # child ReAct cap (tighter than agent.max_steps=1000)
     hard_timeout: float = 300.0         # absolute cap (asyncio.wait_for on the whole child run)
     soft_timeout: float = 120.0         # no-streaming-activity reset

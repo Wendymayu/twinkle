@@ -3,7 +3,6 @@ from twinkle.config.schema import SubagentConfig, TwinkleConfig
 
 def test_subagent_config_defaults():
     c = SubagentConfig()
-    assert c.enabled is True
     assert c.max_steps == 50
     assert c.hard_timeout == 300
     assert c.soft_timeout == 120

@@ -377,8 +377,7 @@ class SubagentContextHook(AgentHook):
 ## 6. 配置（`config.yaml` + `schema.py` + `__init__.py`）
 
 ```yaml
-subagent:
-  enabled: true              # 父 loop 注册 spawn_subagent + SubagentContextHook + 组装 SubagentExecutor
+subagent:                     # subagent 始终启用（无 enabled 开关）；build_agent_loop 总是装配 executor + spawn_subagent + SubagentContextHook
   max_steps: 50              # 子 ReAct 上限（紧于 agent.max_steps=1000）
   hard_timeout: 300         # 硬超时秒
   soft_timeout: 120         # 软超时（无活动）秒
@@ -434,7 +433,7 @@ subagent:
 - **子 agent 工作区与父共享**：子 `file_*`/`command_exec` 受 `TWINKLE_WORKSPACE_DIR` 约束但与父共享同一目录，可能覆盖父正在写的文件（沙箱兜底不能逃逸 workspace，低风险）。独立子目录 `<workspace>/sub_agents/<child_sid>` + 子 `output_files` 回传父，列为后置。
 - **子 session 磁盘累积**：`SessionStore` 磁盘持久，子 session（`__sub_<id>`）跑完不删、随时间堆积（仅从 `list_sessions` 隐藏）。v1 保留以便事后 debug 失败子 agent（看其 `history.json`）；父 `session.delete` 级联删子的清理列为后置。
 - **子 token 不计入父 usage**：黑盒不回传子 usage；子 span 在 OTel/LoggingHook 可单独看，v1 不聚合到父。
-- **disabled 行为**：`subagent.enabled: false` 时 `spawn_subagent` 不注册 → LLM 调用得 "unknown tool"；v1 接受此降级（后续可改为始终注册但返 "[subagent disabled]" 明示）。
+- **始终启用**：subagent 无 `enabled` 开关——`build_agent_loop` 总是装配 executor + 注册 `spawn_subagent` + `SubagentContextHook`（父 loop 工具集恒含 `spawn_subagent`）。hook 执行按 priority 排序、不按注册序，故 SubagentContextHook 与调用方 hook 合并到一个列表注册即可。
 
 **后置（依赖流式或更大改动）**
 - 子 HITL（需流式转发 `e2a.subagent_ask`）、流式转发（model delta 透传 + 并行解复用）、多级嵌套（当前单层）、team/swarm 多 agent 编排、interrupt(supplement/cancel) 显式中断、skill 声明角色（roles/allowed_tools/parallel_max）、model_tier 分档。

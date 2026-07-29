@@ -69,7 +69,6 @@ PERMISSION_OVERRIDES_FILE = settings.permissions.overrides_file
 PERMISSION_AUDIT_FILE = settings.permissions.audit_file
 
 # --- subagent (Phase 8) ---
-SUBAGENT_ENABLED = settings.subagent.enabled
 SUBAGENT_MAX_STEPS = settings.subagent.max_steps
 SUBAGENT_HARD_TIMEOUT = settings.subagent.hard_timeout
 SUBAGENT_SOFT_TIMEOUT = settings.subagent.soft_timeout
