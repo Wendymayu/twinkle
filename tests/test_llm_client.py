@@ -65,7 +65,18 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_text_stream_emits_deltas_then_finish() -> None:
+def _llm_with(scripts, monkeypatch):
+    """LLMClient backed by a scripted fake OpenAI client (no real network).
+
+    LLMClient no longer exposes a client-injection param, so tests swap the
+    AsyncOpenAI factory via monkeypatch instead.
+    """
+    import twinkle.agentserver.llm_client as mod
+    monkeypatch.setattr(mod, "AsyncOpenAI", lambda **kw: _FakeClient(scripts))
+    return LLMClient(base_url="x", api_key="y", model="m")
+
+
+def test_text_stream_emits_deltas_then_finish(monkeypatch) -> None:
     scripts = [
         [
             _Chunk([_Choice(_Delta(content="hel"))]),
@@ -73,7 +84,7 @@ def test_text_stream_emits_deltas_then_finish() -> None:
             _Chunk([_Choice(_Delta(), finish_reason="stop")]),
         ]
     ]
-    client = LLMClient(base_url="x", api_key="y", model="m", client=_FakeClient(scripts))
+    client = _llm_with(scripts, monkeypatch)
 
     async def run():
         events = [e async for e in client.stream(messages=[{"role": "user", "content": "hi"}], tools=[])]
@@ -87,7 +98,7 @@ def test_text_stream_emits_deltas_then_finish() -> None:
     assert events[2].assistant_message == {"role": "assistant", "content": "hello", "tool_calls": None}
 
 
-def test_trailing_empty_choices_chunk_does_not_crash() -> None:
+def test_trailing_empty_choices_chunk_does_not_crash(monkeypatch) -> None:
     # dashscope / openai (with stream_options.include_usage) send a final
     # usage-only chunk with choices=[]; the client must skip it, not index [0].
     scripts = [
@@ -97,7 +108,7 @@ def test_trailing_empty_choices_chunk_does_not_crash() -> None:
             _Chunk([]),  # usage-only trailing chunk
         ]
     ]
-    client = LLMClient(base_url="x", api_key="y", model="m", client=_FakeClient(scripts))
+    client = _llm_with(scripts, monkeypatch)
 
     async def run():
         return [e async for e in client.stream(messages=[{"role": "user", "content": "hi"}], tools=[])]
@@ -109,7 +120,7 @@ def test_trailing_empty_choices_chunk_does_not_crash() -> None:
     assert events[1].assistant_message["content"] == "hi"
 
 
-def test_tool_call_fragments_accumulated() -> None:
+def test_tool_call_fragments_accumulated(monkeypatch) -> None:
     scripts = [
         [
             _Chunk([_Choice(_Delta(tool_calls=[_ToolCall(0, id="call_1", name="web_fetch", arguments="")]))]),
@@ -118,7 +129,7 @@ def test_tool_call_fragments_accumulated() -> None:
             _Chunk([_Choice(_Delta(), finish_reason="tool_calls")]),
         ]
     ]
-    client = LLMClient(base_url="x", api_key="y", model="m", client=_FakeClient(scripts))
+    client = _llm_with(scripts, monkeypatch)
 
     async def run():
         events = [e async for e in client.stream(messages=[{"role": "user", "content": "fetch"}], tools=[])]
@@ -135,7 +146,7 @@ def test_tool_call_fragments_accumulated() -> None:
     assert tcs[0]["function"]["arguments"] == '{"url":"http://x"}'
 
 
-def test_trailing_usage_chunk_is_captured_on_finish() -> None:
+def test_trailing_usage_chunk_is_captured_on_finish(monkeypatch) -> None:
     usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
     scripts = [
         [
@@ -144,7 +155,7 @@ def test_trailing_usage_chunk_is_captured_on_finish() -> None:
             _Chunk([], usage=usage),  # usage-only trailing chunk
         ]
     ]
-    client = LLMClient(base_url="x", api_key="y", model="m", client=_FakeClient(scripts))
+    client = _llm_with(scripts, monkeypatch)
 
     async def run():
         return [e async for e in client.stream(messages=[{"role": "user", "content": "hi"}], tools=[])]
@@ -153,3 +164,23 @@ def test_trailing_usage_chunk_is_captured_on_finish() -> None:
     finish = events[-1]
     assert isinstance(finish, Finish)
     assert finish.usage == usage
+
+
+def test_llm_client_forwards_timeout_to_openai_client(monkeypatch):
+    """LLMClient(timeout=N) passes N to the constructed AsyncOpenAI client, so a
+    hung model (no chunk for N seconds) raises APITimeoutError instead of blocking
+    forever."""
+    import twinkle.agentserver.llm_client as mod
+
+    captured = {}
+
+    class _SpyAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(mod, "AsyncOpenAI", _SpyAsyncOpenAI)
+    LLMClient(base_url="https://u", api_key="k", model="m", timeout=42)
+
+    assert captured["base_url"] == "https://u"
+    assert captured["api_key"] == "k"
+    assert captured["timeout"] == 42

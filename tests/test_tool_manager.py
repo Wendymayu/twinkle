@@ -45,13 +45,21 @@ def test_execute_passes_kwargs() -> None:
     assert asyncio.run(m.execute("_echo", {"text": "hi"})) == "echo:hi"
 
 
-def test_execute_swallows_tool_exception_as_error_string() -> None:
+def test_execute_propagates_tool_exception() -> None:
+    """ToolManager.execute lets tool exceptions propagate — the caller
+    (AgentLoop._hooked_tool_call) turns them into a tool_result string and
+    RetryHook can retry transient ones. Swallowing was moved out of execute so
+    ON_TOOL_EXCEPTION can actually fire (it was dead code when execute caught)."""
     async def _boom(x: str) -> str:
         raise ValueError("boom")
     m = ToolManager()
     m.register(tool(_boom))
-    out = asyncio.run(m.execute("_boom", {"x": "1"}))
-    assert out == "[tool error] ValueError: boom"
+    try:
+        asyncio.run(m.execute("_boom", {"x": "1"}))
+    except ValueError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("expected ValueError to propagate from execute")
 
 
 def test_unregister_returns_true_when_present_false_when_absent() -> None:

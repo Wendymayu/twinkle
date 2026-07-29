@@ -19,6 +19,7 @@ llm:
   base_url: ${TWINKLE_LLM_BASE_URL:-https://api.openai.com/v1}
   model: ${TWINKLE_LLM_MODEL:-gpt-4o-mini}
   api_key: ${TWINKLE_LLM_API_KEY:-}       # 机密:放 .env,别 commit
+  timeout: 120.0                          # 单次读超时秒;模型 hang 住→APITimeoutError(瞬时,会被重试)
 agent:
   max_steps: 1000                         # ReAct 最大步数,超限 yield e2a.error(防不收敛硬上限,非目标)
 context_compression:

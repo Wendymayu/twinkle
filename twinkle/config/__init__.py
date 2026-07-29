@@ -49,6 +49,7 @@ MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE = settings.memory.cleanup.max_chunks_per_file
 LLM_BASE_URL = settings.llm.base_url
 LLM_API_KEY = settings.llm.api_key
 LLM_MODEL = settings.llm.model
+LLM_TIMEOUT = settings.llm.timeout
 
 # --- agent loop ---
 AGENT_MAX_STEPS = settings.agent.max_steps

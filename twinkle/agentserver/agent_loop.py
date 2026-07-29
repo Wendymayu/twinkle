@@ -325,10 +325,20 @@ class AgentLoop:
                                             # allow_always — AgentLoop doesn't hold engine.
                                             ctx.extra["_approval_decision"] = decision
                                             ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
-                                            result = await self._hooked_tool_call(ctx)
+                                            try:
+                                                result = await self._hooked_tool_call(ctx)
+                                            except HookInterrupt:
+                                                raise  # bypass already applied; a second interrupt shouldn't occur
+                                            except Exception as exc:
+                                                result = f"[tool error] {type(exc).__name__}: {exc}"
                                         else:
                                             result = (f"[tool denied by user: {hi.data['tool']}] "
                                                       f"{hi.data.get('reason', '')}")
+                                    except Exception as exc:
+                                        # Non-HookInterrupt tool failure (after @hook retry exhausted
+                                        # or non-transient): turn into a tool_result string so the loop
+                                        # keeps going instead of crashing the agent loop.
+                                        result = f"[tool error] {type(exc).__name__}: {exc}"
                                     for snap in flush_todo_events():
                                         yield E2AResponse(
                                             request_id=envelope.request_id,
@@ -378,6 +388,8 @@ class AgentLoop:
                     await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
                     retry_req = ctx.consume_retry_request()
                     if retry_req is not None and retry_attempt < _MAX_HOOK_RETRIES:
+                        if retry_req.delay > 0:
+                            await asyncio.sleep(retry_req.delay)
                         log.info("hook requested LLM retry, attempt %d/%d",
                                  retry_attempt + 1, _MAX_HOOK_RETRIES)
                         continue  # retry the LLM call

@@ -34,10 +34,15 @@ class LLMClient:
         base_url: str,
         api_key: str,
         model: str,
-        client: Any | None = None,
+        timeout: float | None = None,
     ) -> None:
         self._model = model
-        self._client = client or AsyncOpenAI(base_url=base_url, api_key=api_key)
+        # timeout -> AsyncOpenAI read timeout: a hung model (no chunk for N
+        # seconds) raises APITimeoutError (transient -> retried by RetryHook)
+        # instead of blocking the request forever. None = SDK default.
+        self._client = AsyncOpenAI(
+            base_url=base_url, api_key=api_key, timeout=timeout
+        )
 
     async def stream(
         self,

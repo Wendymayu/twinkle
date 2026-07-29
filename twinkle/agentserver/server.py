@@ -22,7 +22,7 @@ from twinkle.agentserver.sessions import (
     SessionStore, session_store, dispatch_session_rpc, handles_session_rpc,
 )
 from twinkle.agentserver.tools import tool_manager
-from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
 
@@ -66,7 +66,7 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
     are caller-passed.
     """
     if llm is None:
-        llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL)
+        llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
     tools = tool_manager()
     loop = AgentLoop(llm, store, tools)
     from twinkle.agentserver.tools.builtin.subagent import create_subagent_executor
@@ -154,13 +154,13 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
 
 async def main() -> None:
     from twinkle.agentserver.permissions import permission_engine
-    from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, PermissionHook, SkillHook
+    from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, PermissionHook, RetryHook, SkillHook
     from twinkle.workspace import ensure_workspace_dir
 
     ensure_workspace_dir()
     store = session_store()
     engine = permission_engine()
-    loop = build_agent_loop(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook()])
+    loop = build_agent_loop(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook()])
     handler = ws_handler(loop, store)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):

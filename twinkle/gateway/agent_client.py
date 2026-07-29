@@ -69,6 +69,16 @@ class AgentClient:
                     await q.put(data)
         except Exception as exc:
             log.warning("recv loop ended: %s", exc)
+        finally:
+            self._fail_pending("agent server disconnected")
+
+    def _fail_pending(self, reason: str) -> None:
+        """Fail-fast: push a ConnectionError into every pending request queue so
+        a suspended send_request_stream unblocks instead of hanging forever when
+        the recv loop ends (AgentServer disconnected)."""
+        err = ConnectionError(reason)
+        for q in list(self._queues.values()):
+            q.put_nowait(err)
 
     async def _send(self, envelope: E2AEnvelope) -> None:
         async with self._send_lock:
@@ -82,6 +92,8 @@ class AgentClient:
         try:
             while True:
                 data = await q.get()
+                if isinstance(data, BaseException):
+                    raise data  # recv loop ended — fail fast instead of hanging
                 resp = E2AResponse.model_validate(data)
                 yield resp
                 if resp.is_final:

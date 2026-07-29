@@ -56,6 +56,7 @@ class LLMConfig(_StrictModel):
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o-mini"
     api_key: str = ""
+    timeout: float = 120.0  # per-chunk read timeout (s); hung model -> APITimeoutError
 
 
 class AgentConfig(_StrictModel):

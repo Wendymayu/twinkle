@@ -135,7 +135,8 @@ async def main() -> None:
         ],
     ]
 
-    llm = LLMClient(base_url="x", api_key="y", model="smoke-model", client=_FakeClient(scripts))
+    llm = LLMClient(base_url="x", api_key="y", model="smoke-model")
+    llm._client = _FakeClient(scripts)  # scripted fake (no real OpenAI call) — smoke-only injection
     tools = ToolManager()
     tools.register(echo)
     loop = AgentLoop(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools)

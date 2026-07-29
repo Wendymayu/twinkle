@@ -86,3 +86,28 @@ def test_result_frame_becomes_result_event() -> None:
     assert out.event_type == EventType.RESULT
     assert out.payload == body
     assert out.content == ""
+
+
+def test_error_frame_becomes_chat_final_with_error_text() -> None:
+    """e2a.error frames must reach the browser carrying their error text (not an
+    empty chat.final, which is what the generic else-branch produced)."""
+    frames = [
+        E2AResponse(
+            request_id="r1", sequence=0, is_final=True,
+            status="failed", response_kind="e2a.error",
+            body={"error": "agent loop failed: connection reset"},
+        ),
+    ]
+    handler = MessageHandler(_FakeAgentClient(frames))
+
+    async def run():
+        await handler.handle_message(
+            Message(id="r1", type="req", channel_id="web", session_id="s1",
+                    method="chat.send", params={"query": "q"})
+        )
+        return await handler.dequeue_outbound()
+
+    out = asyncio.run(run())
+    assert out.event_type == EventType.CHAT_FINAL
+    assert out.content.startswith("[error]")
+    assert "connection reset" in out.content

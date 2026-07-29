@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
-from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, SkillHook
+from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, RetryHook, SkillHook
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.agentserver.tools.builtin.subagent.models import (
@@ -84,7 +84,7 @@ class SubagentExecutor:
     def _hook_list(self) -> list["AgentHook"]:
         if self._child_hooks is not None:
             return self._child_hooks
-        return [SkillHook(), MemoryHook(), LoggingHook()]
+        return [SkillHook(), MemoryHook(), LoggingHook(), RetryHook()]
 
     # --- build + run ---
 

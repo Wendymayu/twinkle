@@ -45,7 +45,8 @@ class ToolManager:
         t = self._tools.get(name)
         if t is None:
             return f"[error] unknown tool: {name}"
-        try:
-            return await t.invoke(args)
-        except Exception as exc:  # tool failures must not crash the loop
-            return f"[tool error] {type(exc).__name__}: {exc}"
+        # Tool exceptions propagate (not swallowed here) so the @hook-decorated
+        # _hooked_tool_call can fire ON_TOOL_EXCEPTION and RetryHook can retry
+        # transient ones. The agent loop turns non-retried / exhausted failures
+        # into a "[tool error] ..." tool_result string — loop still doesn't crash.
+        return await t.invoke(args)
