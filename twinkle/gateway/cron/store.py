@@ -23,6 +23,11 @@ def default_cron_jobs_path() -> Path:
     return Path(WORKSPACE_DIR) / "cron_jobs.json"
 
 
+def default_sidecar_path() -> Path:
+    """<WORKSPACE_DIR>/cron_trigger_now.json — run_now sidecar (agent→gateway)."""
+    return default_cron_jobs_path().parent / "cron_trigger_now.json"
+
+
 class CronJobStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
@@ -85,9 +90,13 @@ class CronJobStore:
             data = self._read_unlocked()
             for i, j in enumerate(data["jobs"]):
                 if j.get("id") == job_id:
-                    merged = {**j, **patch, "updated_at": time.time()}
+                    # id/created_at 不可变：防止改身份导致堆事件(keyed by old id)
+                    # orphan + _jobs 错乱
+                    safe_patch = {k: v for k, v in patch.items()
+                                  if k not in ("id", "created_at")}
+                    merged = {**j, **safe_patch, "updated_at": time.time()}
                     # 重新 enable 或改 cron_expr → 清 expired
-                    if patch.get("enabled") is True or "cron_expr" in patch:
+                    if safe_patch.get("enabled") is True or "cron_expr" in safe_patch:
                         merged["expired"] = False
                     job = CronJob.from_dict(merged)
                     CronJob.from_dict(job.to_dict())

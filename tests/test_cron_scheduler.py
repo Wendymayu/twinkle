@@ -84,6 +84,28 @@ def test_reload_preserves_push_update_events(tmp_path):
     assert "push_update" in kinds  # push_update 跨 reload 保留
 
 
+def test_reload_seq_no_collision_with_push_update(tmp_path):
+    """Fix 9: reload 后新事件 seq 严格大于保留 push_update 的 seq，
+    避免共用 (at_ts, seq) 触发 _Event 比较 TypeError。"""
+    import heapq
+    s = _make_scheduler(tmp_path, now_fn=lambda: 1000.0)
+    # 手动塞一个 push_update（高 seq），模拟跨 reload 保留事件
+    s._seq = 50
+    s._schedule_event(999.0, "push_update", "j1", "j1:1000")  # seq=51
+    run(s._store.create_job({"name": "a", "cron_expr": "*/5 * * * *", "timezone": "UTC"}))
+    run(s.reload())
+    # 新事件 seq 必须 > 51（Fix 9 把 _seq 推到 max(preserved) 之上再递增）
+    new_seqs = [seq for _, seq, ev in s._events if ev.kind != "push_update"]
+    assert new_seqs, "应排了 wake/push 事件"
+    assert all(seq > 51 for seq in new_seqs), f"seq 撞车风险: {new_seqs}"
+    # 全弹出不应抛 TypeError，且按 (at_ts, seq) 升序
+    heap = list(s._events)
+    heapq.heapify(heap)
+    popped = [heapq.heappop(heap) for _ in range(len(heap))]
+    keys = [(p[0], p[1]) for p in popped]
+    assert keys == sorted(keys)
+
+
 def test_mtime_change_triggers_reload(tmp_path):
     s = _make_scheduler(tmp_path)
     run(s.reload())
@@ -192,6 +214,31 @@ def test_run_agent_approval_sends_deny_and_fails(tmp_path):
     assert "需审批" in (state.error or "")
     # 发了 deny 让 agent loop 解挂
     assert "apv1" in ac._denied
+
+
+def test_run_agent_drains_multiple_asks_then_final_fails(tmp_path):
+    """Fix 1: 多个 e2a.ask 全部 deny 后继续排空流到 is_final；
+    即使 agent 返回 complete，saw_approval=True → 覆盖为 failed（spec §8）。"""
+    ac = FakeAgentClient(); mh = FakeMessageHandler()
+    s = _make_scheduler(tmp_path, ac, mh, now_fn=lambda: 1000.0)
+    job = CronJob(id="j9", name="x", cron_expr="*/5 * * * *", timezone="UTC",
+                  description="多次审批")
+    state = CronRunState(run_id="j9:2000", job_id="j9",
+                         wake_at_iso="...", push_at_iso="...")
+    s._runs["j9:2000"] = state
+    rid = "cron-j9:2000"
+    ac.script(rid, [
+        _e2a_ask(rid, "apv1", "tool1"),
+        _e2a_ask(rid, "apv2", "tool2"),
+        _e2a_complete(rid, "不该被采用的结果"),
+    ])
+    run(s._run_agent(job, state))
+    # 两个 approval 都被 deny（drain 不 break）
+    assert "apv1" in ac._denied and "apv2" in ac._denied
+    # saw_approval=True → failed，complete 内容被覆盖
+    assert state.status == "failed"
+    assert "tool1" in (state.error or "") and "tool2" in (state.error or "")
+    assert "不该被采用的结果" not in (state.result_text or "")
 
 
 def test_delete_after_run_deletes_after_push(tmp_path):

@@ -10,14 +10,35 @@ trigger_run_now, then deletes the sidecar. Errors are returned as strings
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from twinkle.agentserver.tools.decorator import tool
-from twinkle.gateway.cron.store import CronJobStore, default_cron_jobs_path
+from twinkle.gateway.cron.models import CronJob
+from twinkle.gateway.cron.store import (
+    CronJobStore,
+    default_cron_jobs_path,
+    default_sidecar_path,
+)
 
 # 进程级单例（agent 进程）；测试用 monkeypatch 替换
 _store: CronJobStore = CronJobStore(default_cron_jobs_path())
-_sidecar_path: Path = default_cron_jobs_path().parent / "cron_trigger_now.json"
+_sidecar_path: Path = default_sidecar_path()
+
+
+def _next_run_iso(job: CronJob) -> str:
+    """计算 job 下次 push 的 ISO 时间；过期/无效时返回中文标记。"""
+    from zoneinfo import ZoneInfo
+
+    from twinkle.gateway.cron import cron_expr as ce
+    try:
+        tz = ZoneInfo(job.timezone)
+        push_dt = ce._cron_next_push_dt(job.cron_expr, datetime.now(tz=tz))
+        return push_dt.isoformat()
+    except Exception as exc:
+        if ce._is_croniter_no_next_date(exc):
+            return "已过期"
+        return "无效"
 
 
 @tool
@@ -32,7 +53,7 @@ async def cron_list_jobs() -> str:
         if j.expired:
             state = "已过期"
         lines.append(f"- [{j.id}] {j.name} | cron={j.cron_expr} tz={j.timezone} "
-                     f"| {state} | {j.description or '无描述'}")
+                     f"| {state} | next={_next_run_iso(j)} | {j.description or '无描述'}")
     return "\n".join(lines)
 
 

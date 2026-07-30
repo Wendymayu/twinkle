@@ -18,7 +18,11 @@ from zoneinfo import ZoneInfo
 from twinkle.e2a.models import E2AEnvelope
 from twinkle.gateway.cron import cron_expr
 from twinkle.gateway.cron.models import CronJob, CronRunState, _Event
-from twinkle.gateway.cron.store import CronJobStore, default_cron_jobs_path
+from twinkle.gateway.cron.store import (
+    CronJobStore,
+    default_cron_jobs_path,
+    default_sidecar_path,
+)
 from twinkle.schema.message import EventType, Message
 
 log = logging.getLogger("twinkle.gateway.cron")
@@ -43,7 +47,7 @@ class CronSchedulerService:
         self._reload_event = asyncio.Event()
         self._last_mtime: float | None = None
         self._task: asyncio.Task | None = None
-        self._sidecar_path = default_cron_jobs_path().parent / "cron_trigger_now.json"
+        self._sidecar_path = default_sidecar_path()
 
     # --- event scheduling ---
     def _schedule_event(self, at_ts: float, kind: str, job_id: str, run_id: str) -> None:
@@ -75,6 +79,12 @@ class CronSchedulerService:
 
     # --- reload: rebuild heap, preserve push_update ---
     async def reload(self) -> None:
+        # 先捕获 mtime：reload 期间的并发写会在下次 _check_store_changed 被发现
+        # （若放在末尾，reload 内的写会把并发写的 mtime 吸收掉 → 漏检）
+        try:
+            self._last_mtime = self._store._path.stat().st_mtime  # noqa: SLF001
+        except Exception:
+            self._last_mtime = None
         jobs = await self._store.list_jobs()
         self._jobs = {j.id: j for j in jobs if j.enabled and not j.expired}
         # 保留跨 reload 的 push_update（state 内存丢失但事件保留以尽力补发）
@@ -83,7 +93,9 @@ class CronSchedulerService:
             if ev.kind == "push_update"
         ]
         self._events.clear()
-        self._seq = 0
+        # _seq 推到保留事件的最大 seq 之上，新事件 seq 必然更大 →
+        # (at_ts, seq) 不会撞车 → _Event 永不被 heapq 比较（避免 TypeError）
+        self._seq = max((seq for _, seq, _ in pending_push_updates), default=0)
         for item in pending_push_updates:
             heapq.heappush(self._events, item)
         now_ts = self._now()
@@ -96,10 +108,6 @@ class CronSchedulerService:
                 continue
             self._schedule_event(wake_dt.timestamp(), "wake", job.id, run_id)
             self._schedule_event(push_dt.timestamp(), "push", job.id, run_id)
-        try:
-            self._last_mtime = self._store._path.stat().st_mtime  # noqa: SLF001
-        except Exception:
-            self._last_mtime = None
         self._reload_event.set()
 
     # --- run state helpers ---
@@ -107,11 +115,15 @@ class CronSchedulerService:
         state = self._runs.get(ev.run_id)
         if state is not None:
             return state
+        # 用 job 自身的 wake_offset 反推（查不到 job 才回退默认值）
+        job = self._jobs.get(ev.job_id)
+        offset = (int(job.wake_offset_seconds)
+                  if job is not None else _DEFAULT_WAKE_OFFSET)
         # 反推 wake/push iso（从 run_id 末尾 push_ts）
         try:
             push_ts = int(ev.run_id.rsplit(":", 1)[1])
             push_dt = datetime.fromtimestamp(push_ts, tz=ZoneInfo("UTC"))
-            wake_dt = push_dt - timedelta(seconds=_DEFAULT_WAKE_OFFSET)
+            wake_dt = push_dt - timedelta(seconds=offset)
             push_iso, wake_iso = push_dt.isoformat(), wake_dt.isoformat()
         except Exception:
             push_iso = wake_iso = ""
@@ -186,37 +198,56 @@ class CronSchedulerService:
         envelope = E2AEnvelope(
             request_id=request_id, channel="__cron__",
             session_id=f"cron_{int(self._now())}_{job.id}",
-            method="chat.send", params={"content": job.description,
-                                        "query": job.description},
+            method="chat.send", params={"query": job.description},
         )
         state.status = "running"
         state.started_at = self._now()
+        saw_approval = False
+        denied_tools: list[str] = []
         try:
             async for resp in self._agent_client.send_request_stream(envelope):
                 if resp.response_kind == "e2a.ask":
                     approval_id = resp.body.get("approval_id")
-                    # 发 deny 让 agent loop 解挂（避免挂起泄漏），然后判 failed
+                    # 发 deny 让 agent loop 解挂（避免挂起泄漏）；drain 不 break，
+                    # 否则 agent 若再起需审批的工具会注册新 approval_id 且无人 deny
+                    # → await future 永挂 → 任务泄漏在 active[sid]/APPROVAL_REGISTRY
                     if approval_id:
                         await self._agent_client._send(E2AEnvelope(  # noqa: SLF001
                             request_id=f"cron-deny-{run_id}", channel="__cron__",
                             method="approval.respond",
                             params={"approval_id": approval_id, "decision": "deny"},
                         ))
-                    state.status = "failed"
-                    tool = resp.body.get("tool", "unknown")
-                    state.error = f"cron 任务触发了需审批的工具 {tool}，已中止"
-                    state.result_text = f"[cron] {state.error}"
-                    break
+                    saw_approval = True
+                    denied_tools.append(resp.body.get("tool", "unknown"))
+                    continue  # 继续排空流，不 break
                 if resp.is_final:
-                    if resp.response_kind == "e2a.error":
+                    if saw_approval:
+                        # approval 被拒 = failed 语义（spec §8），覆盖 agent 的 complete
                         state.status = "failed"
-                        state.result_text = f"[cron] 任务失败：{resp.body.get('error', '未知错误')}"
+                        state.error = (f"cron 任务触发了需审批的工具 "
+                                       f"{','.join(denied_tools)}，已中止")
+                        state.result_text = f"[cron] {state.error}"
+                    elif resp.response_kind == "e2a.error":
+                        state.status = "failed"
+                        state.result_text = (f"[cron] 任务失败："
+                                             f"{resp.body.get('error', '未知错误')}")
                         state.error = state.result_text
                     else:  # e2a.complete
                         content = (resp.body.get("result") or {}).get("content", "")
                         state.status = "succeeded"
                         state.result_text = content or "[cron] 任务完成，但未返回可展示文本"
                     break
+            else:
+                # 流结束但无 is_final
+                if saw_approval:
+                    state.status = "failed"
+                    state.error = (f"cron 任务触发了需审批的工具 "
+                                   f"{','.join(denied_tools)}，已中止")
+                    state.result_text = f"[cron] {state.error}"
+                else:
+                    state.status = "failed"
+                    state.error = "[cron] agent 未返回最终结果"
+                    state.result_text = state.error
         except Exception as exc:
             state.status = "failed"
             state.error = f"[cron] agent 执行异常：{exc}"
@@ -234,6 +265,7 @@ class CronSchedulerService:
                                text: str, is_placeholder: bool) -> None:
         msg = Message(
             id=f"cron-push-{state.run_id}-{job.targets}",
+            type="event",  # 出站推送，非 inbound req
             channel_id=job.targets or "web",
             event_type=EventType.CHAT_FINAL,
             content=text,

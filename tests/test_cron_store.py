@@ -39,6 +39,23 @@ def test_update_reenable_clears_expired(tmp_path):
     assert j2.expired is False
 
 
+def test_update_cannot_change_id(tmp_path):
+    """Fix 4: update_job 不得让调用方改 id/created_at（会 orphan 堆事件、错乱 _jobs）。"""
+    store = CronJobStore(tmp_path / "c.json")
+    j = run(store.create_job({"name": "x", "cron_expr": "0 9 * * *", "timezone": "UTC"}))
+    original_id = j.id
+    original_created = j.created_at
+    j2 = run(store.update_job(j.id, {
+        "id": "hacked", "created_at": 999.0, "description": "改了",
+    }))
+    assert j2.id == original_id          # id 不变
+    assert j2.created_at == original_created  # created_at 不变
+    assert j2.description == "改了"       # 其他字段可改
+    # 持久层也不应被改
+    got = run(store.get_job(j.id))
+    assert got.id == original_id and got.created_at == original_created
+
+
 def test_delete(tmp_path):
     store = CronJobStore(tmp_path / "c.json")
     j = run(store.create_job({"name": "x", "cron_expr": "0 9 * * *", "timezone": "UTC"}))
@@ -67,3 +84,11 @@ def test_default_cron_jobs_path_under_workspace():
     from twinkle.gateway.cron.store import default_cron_jobs_path
     p = default_cron_jobs_path()
     assert p.name == "cron_jobs.json"
+
+
+def test_default_sidecar_path_under_workspace():
+    """Fix 8: default_sidecar_path 与 cron_jobs 同目录。"""
+    from twinkle.gateway.cron.store import default_cron_jobs_path, default_sidecar_path
+    sp = default_sidecar_path()
+    assert sp.name == "cron_trigger_now.json"
+    assert sp.parent == default_cron_jobs_path().parent
