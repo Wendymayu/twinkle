@@ -420,16 +420,18 @@ AgentServer 逐帧 yield `E2AResponse`：
 | `file.transfer.chunk` | 传输文件分片 | ❌ roadmap 不做 |
 | `file.transfer.complete` | 完成上传 | ❌ roadmap 不做 |
 
-#### Skill 系统（roadmap 全砍）
+#### Skill 系统
+
+Twinkle v1 落地了 skill 一键下载/安装:搜索走 SkillNet 公开 API(api-skillnet.openkg.cn)、下载走 GitHub Contents/raw API,自实现不依赖 skillnet-ai,对齐 jiuwenclaw `skills.skillnet.*` 的极简版;方法名 `skills.list_local` / `skills.search` / `skills.install`。完整设计见 spec `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`。marketplace / clawhub / evolution 仍 deferred。
 
 | method | 说明 |
 |---|---|
 | `skills.list` / `skills.installed` / `skills.get` | Skill 查询 |
 | `skills.install` / `skills.uninstall` / `skills.import_local` | Skill 安装卸载 |
-| `skills.marketplace.*` | Skill 市场操作 |
-| `skills.skillnet.*` | SkillNet 搜索安装 |
-| `skills.clawhub.*` | ClawHub 下载 |
-| `skills.evolution.*` | Skill 自进化 |
+| `skills.marketplace.*` | Skill 市场操作(❌ 企业级,deferred) |
+| `skills.skillnet.*` | SkillNet 搜索安装(✅ Twinkle v1 自实现) |
+| `skills.clawhub.*` | ClawHub 下载(❌ deferred) |
+| `skills.evolution.*` | Skill 自进化(❌ Phase 9,deferred) |
 
 #### 权限系统（roadmap 推迟）
 

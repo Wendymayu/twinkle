@@ -1,5 +1,6 @@
 """skills 包入口 — re-exports + 进程级单例访问器(照 todo/__init__.py 形态)。"""
 from twinkle.agentserver.skills.store import Skill, SkillManager, parse_skill_md
+from twinkle.agentserver.skills.remote import SkillNetClient, SkillNetError, RemoteSkill
 
 _SKILL_MANAGER: SkillManager | None = None
 
@@ -20,7 +21,34 @@ def _set_skill_manager(mgr: SkillManager | None) -> None:
     _SKILL_MANAGER = mgr
 
 
+_SKILLNET_CLIENT: SkillNetClient | None = None
+
+
+def get_skillnet_client() -> SkillNetClient:
+    """进程级单例(惰性,从 config 构造)。测试用 _set_skillnet_client 替换。
+    lazy import config 避免 import-time 副作用。"""
+    global _SKILLNET_CLIENT
+    if _SKILLNET_CLIENT is None:
+        from twinkle.config import (
+            SKILLS_SKILLNET_API_URL, SKILLS_GITHUB_TOKEN,
+            SKILLS_REMOTE_TIMEOUT, SKILLS_REMOTE_MAX_RETRIES,
+        )
+        _SKILLNET_CLIENT = SkillNetClient(
+            skillnet_api_url=SKILLS_SKILLNET_API_URL, github_token=SKILLS_GITHUB_TOKEN,
+            timeout=SKILLS_REMOTE_TIMEOUT, max_retries=SKILLS_REMOTE_MAX_RETRIES,
+        )
+    return _SKILLNET_CLIENT
+
+
+def _set_skillnet_client(c: SkillNetClient | None) -> None:
+    """测试钩子:替换/重置单例。生产代码不调。"""
+    global _SKILLNET_CLIENT
+    _SKILLNET_CLIENT = c
+
+
 __all__ = [
     "Skill", "SkillManager", "parse_skill_md",
     "get_skill_manager", "_set_skill_manager",
+    "SkillNetClient", "SkillNetError", "RemoteSkill",
+    "get_skillnet_client", "_set_skillnet_client",
 ]

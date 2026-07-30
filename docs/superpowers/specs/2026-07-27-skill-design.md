@@ -27,7 +27,8 @@ Agent 从"调原子工具"升级到"调用打包的指令束(skill)"——每个
 | `all` / `auto_list` / `agentic` 三模式 | `all` / `auto_list` 两模式 | `agentic`(树索引)企业级,不做 |
 | `all` 用 `PromptAttachmentManager` + window-mutator 注入 | hook prepend 到 `ctx.inputs.messages` | 粗版等价,不引入新抽象 |
 | `skill_turbo/` planner→executor→fallback 子 agent | 不做 | Phase 8 subagent 后置 |
-| marketplace / SkillNet / symphony 树检索 | 不做 | 企业级,roadmap §明确超出范围 |
+| marketplace / symphony 树检索 | 不做 | 企业级,roadmap §明确超出范围 |
+| SkillNet 一键下载/安装 | 做(v1) | 搜索走 SkillNet 公开 API、下载走 GitHub API,自实现,见 spec `2026-07-30-skillnet-download-design.md` |
 | `trigger` frontmatter 解析后丢弃 | 同 | 模型靠 description 自己选,不做关键词自动匹配 |
 
 ---
@@ -321,7 +322,7 @@ ENABLED_SKILLS = [s.strip() for s in _enabled_raw.split(",") if s.strip()]  # []
 | 工具注册 | 两 tier(`resource_mgr` 全局 + `ability_manager` per-agent) | 单 `ToolManager`(全局),第一切片够用 |
 | `trigger` | 解析后丢弃 | 同 |
 | 编排 | `skill_turbo/` planner→executor→fallback DeepAgent | 不做(Phase 8 subagent 后置) |
-| 生态 | marketplace / SkillNet / symphony 树检索 | 不做(企业级,roadmap §明确超出范围) |
+| 生态 | marketplace / symphony 树检索 | 不做(企业级,roadmap §明确超出范围);SkillNet 一键下载/安装做(v1,见 spec `2026-07-30-skillnet-download-design.md`) |
 | Rail 优先级 | `SkillUseRail` priority 100 | `SkillHook` priority 90(功能层;PermissionHook 100 在不同事件不冲突) |
 
 ---
@@ -366,6 +367,8 @@ Twinkle 已有 `before_model_call` + `ctx.inputs.messages` 注入点(context_com
 - skill 自进化(失败/纠正信号 → 经验固化回 SKILL.md) → Phase 9,且依赖 Phase 5 长期记忆。
 
 **永远不做(roadmap §明确超出范围)**:
-- marketplace / SkillNet / symphony 树检索 / `agentic` 模式——企业级,依赖 openjiuwen 生态。
+- marketplace / symphony 树检索 / `agentic` 模式——企业级,依赖 openjiuwen 生态。
 - per-skill 绑定工具的 scoped 注册——jiuwenswarm 也用共享 toolkit,不需要 per-skill scoping。
 - `trigger` 关键词自动匹配——模型驱动,见上。
+
+> **2026-07-30 决策反转**:上方「SkillNet 一键下载/安装」已从「永远不做」移出并落地(v1)。搜索走 SkillNet 公开 API(api-skillnet.openkg.cn)、下载走 GitHub Contents/raw API,自实现不依赖 skillnet-ai,方法 `skills.list_local`/`skills.search`/`skills.install`,前端「🧩 技能」页搜索+安装。见 spec `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`。marketplace / symphony / `agentic` 仍不做。

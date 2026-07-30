@@ -30,6 +30,10 @@ skills:
   dir: ${TWINKLE_SKILLS_DIR:-}            # 空 → <workspace>/skills
   mode: all                               # all = 每步注入 skill 清单;auto_list = 模型按需调 list_skill 拉
   enabled: []                             # 列表;空 = 全开
+  skillnet_api_url: http://api-skillnet.openkg.cn  # SkillNet 公开搜索服务(关键词搜索,503+ skill)
+  github_token: ${TWINKLE_GITHUB_TOKEN:-}  # 可选;空=匿名(~60/小时),配 token 提 GitHub 下载额度
+  remote_timeout: 60.0                    # 搜索/下载单次请求超时秒
+  remote_max_retries: 3                   # 瞬时错误(5xx/网络)重试次数
 memory:
   dir: ${TWINKLE_MEMORY_DIR:-}           # 空 → <workspace>/.twinkle_data/memory
   embed_model: text-embedding-3-small     # 复用 llm.api_key + llm.base_url,不另开 embed.* env

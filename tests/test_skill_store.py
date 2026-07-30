@@ -18,6 +18,37 @@ def test_parse_frontmatter_value_with_colon():
     assert parse_frontmatter(text)["description"] == "文档 1:1 对齐。"
 
 
+def test_parse_frontmatter_strips_yaml_quotes():
+    # SkillNet 真实 SKILL.md 的 name 含中文时常被引号包裹(name: "创作古风爱情诗词")。
+    # 朴素解析器若不剥引号,value 含 " → Windows 文件名 WinError 123。
+    text = '---\nname: "创作古风爱情诗词"\ndescription: \'一个写古诗的 skill\'\n---\nbody\n'
+    fm = parse_frontmatter(text)
+    assert fm["name"] == "创作古风爱情诗词"
+    assert fm["description"] == "一个写古诗的 skill"
+
+
+def test_parse_frontmatter_block_scalar_description():
+    # SkillNet 真实 SKILL.md 用 YAML 块标量(|)写多行 description——
+    # 朴素解析器会把 value 当 "|"。本例验证块标量折叠成一行 + 后续 key 仍能解析。
+    text = (
+        "---\n"
+        "name: skillnet\n"
+        "description: |\n"
+        "  Search, download, create, evaluate, and analyze skills.\n"
+        "  Second line of the block.\n"
+        "trigger: some trigger.\n"
+        "---\n"
+        "## body\n"
+    )
+    fm = parse_frontmatter(text)
+    assert fm is not None
+    assert fm["name"] == "skillnet"
+    assert fm["description"] == (
+        "Search, download, create, evaluate, and analyze skills. Second line of the block."
+    )
+    assert fm["trigger"] == "some trigger."
+
+
 def test_parse_frontmatter_no_fence_returns_none():
     assert parse_frontmatter("no frontmatter here") is None
 
