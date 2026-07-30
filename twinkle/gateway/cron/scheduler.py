@@ -99,3 +99,156 @@ class CronSchedulerService:
         except Exception:
             self._last_mtime = None
         self._reload_event.set()
+
+    # --- run state helpers ---
+    def _get_or_create_state(self, ev: _Event) -> CronRunState | None:
+        state = self._runs.get(ev.run_id)
+        if state is not None:
+            return state
+        # 反推 wake/push iso（从 run_id 末尾 push_ts）
+        try:
+            push_ts = int(ev.run_id.rsplit(":", 1)[1])
+            push_dt = datetime.fromtimestamp(push_ts, tz=ZoneInfo("UTC"))
+            wake_dt = push_dt - timedelta(seconds=_DEFAULT_WAKE_OFFSET)
+            push_iso, wake_iso = push_dt.isoformat(), wake_dt.isoformat()
+        except Exception:
+            push_iso = wake_iso = ""
+        state = CronRunState(run_id=ev.run_id, job_id=ev.job_id,
+                             wake_at_iso=wake_iso, push_at_iso=push_iso)
+        self._runs[ev.run_id] = state
+        return state
+
+    # --- wake: kick off agent run ---
+    async def _on_wake(self, ev: _Event) -> None:
+        job = self._jobs.get(ev.job_id)
+        if job is None or not job.enabled:
+            return
+        state = self._get_or_create_state(ev)
+        existing = self._run_tasks.get(ev.run_id)
+        if existing is not None and not existing.done():
+            return  # 已在跑，不重复
+        task = asyncio.create_task(self._run_agent(job, state))
+        self._run_tasks[ev.run_id] = task
+
+    # --- push: deliver result or placeholder ---
+    async def _on_push(self, ev: _Event) -> None:
+        job = self._jobs.get(ev.job_id)
+        if job is None:
+            return
+        state = self._runs.get(ev.run_id)
+        if state is None:
+            return
+        if state.pushed_final:
+            return
+        if state.result_text is not None:
+            await self._push_to_targets(job, state, state.result_text, is_placeholder=False)
+            state.pushed_final = True
+        else:
+            text = f"[cron] {job.name} 正在执行中，结果稍后补发"
+            await self._push_to_targets(job, state, text, is_placeholder=True)
+            state.placeholder_sent = True
+        await self._after_push(job, state)
+
+    # --- push_update: deliver real result after placeholder ---
+    async def _on_push_update(self, ev: _Event) -> None:
+        state = self._runs.get(ev.run_id)
+        if state is None or state.pushed_final or not state.result_text:
+            return
+        job = self._jobs.get(ev.job_id)
+        if job is None:
+            # job 可能已删；退回 web 通道补发
+            job = CronJob(id=ev.job_id, name="(deleted)", cron_expr="* * * * *",
+                          timezone="UTC", targets="web")
+        await self._push_to_targets(job, state, state.result_text, is_placeholder=False)
+        state.pushed_final = True
+
+    async def _after_push(self, job: CronJob, state: CronRunState) -> None:
+        if job.delete_after_run:
+            await self._store.delete_job(job.id)
+            self._jobs.pop(job.id, None)
+            return
+        # 算下一次；CroniterBadDateError → expired
+        try:
+            push_dt, wake_dt, run_id = self._compute_next_run(job, self._now())
+        except Exception as exc:
+            if cron_expr._is_croniter_no_next_date(exc):
+                await self._store.update_job(job.id, {"enabled": False, "expired": True})
+            return
+        self._schedule_event(wake_dt.timestamp(), "wake", job.id, run_id)
+        self._schedule_event(push_dt.timestamp(), "push", job.id, run_id)
+
+    # --- run agent + extract result / handle approval ---
+    async def _run_agent(self, job: CronJob, state: CronRunState) -> None:
+        run_id = state.run_id
+        request_id = f"cron-{run_id}"
+        envelope = E2AEnvelope(
+            request_id=request_id, channel="__cron__",
+            session_id=f"cron_{int(self._now())}_{job.id}",
+            method="chat.send", params={"content": job.description,
+                                        "query": job.description},
+        )
+        state.status = "running"
+        state.started_at = self._now()
+        try:
+            async for resp in self._agent_client.send_request_stream(envelope):
+                if resp.response_kind == "e2a.ask":
+                    approval_id = resp.body.get("approval_id")
+                    # 发 deny 让 agent loop 解挂（避免挂起泄漏），然后判 failed
+                    if approval_id:
+                        await self._agent_client._send(E2AEnvelope(  # noqa: SLF001
+                            request_id=f"cron-deny-{run_id}", channel="__cron__",
+                            method="approval.respond",
+                            params={"approval_id": approval_id, "decision": "deny"},
+                        ))
+                    state.status = "failed"
+                    tool = resp.body.get("tool", "unknown")
+                    state.error = f"cron 任务触发了需审批的工具 {tool}，已中止"
+                    state.result_text = f"[cron] {state.error}"
+                    break
+                if resp.is_final:
+                    if resp.response_kind == "e2a.error":
+                        state.status = "failed"
+                        state.result_text = f"[cron] 任务失败：{resp.body.get('error', '未知错误')}"
+                        state.error = state.result_text
+                    else:  # e2a.complete
+                        content = (resp.body.get("result") or {}).get("content", "")
+                        state.status = "succeeded"
+                        state.result_text = content or "[cron] 任务完成，但未返回可展示文本"
+                    break
+        except Exception as exc:
+            state.status = "failed"
+            state.error = f"[cron] agent 执行异常：{exc}"
+            state.result_text = state.error
+        finally:
+            state.finished_at = self._now()
+            self._run_tasks.pop(run_id, None)
+            # 已发占位且未推最终 → 安排 push_update 补发
+            if state.placeholder_sent and not state.pushed_final and state.result_text:
+                self._schedule_event(self._now(), "push_update", job.id, run_id)
+                self._reload_event.set()
+
+    # --- push to targets (web channel via enqueue_outbound) ---
+    async def _push_to_targets(self, job: CronJob, state: CronRunState,
+                               text: str, is_placeholder: bool) -> None:
+        msg = Message(
+            id=f"cron-push-{state.run_id}-{job.targets}",
+            channel_id=job.targets or "web",
+            event_type=EventType.CHAT_FINAL,
+            content=text,
+        )
+        await self._message_handler.enqueue_outbound(msg)
+
+    # --- event dispatch (used by _loop) ---
+    async def _handle_event(self, ev: _Event) -> None:
+        job = self._jobs.get(ev.job_id)
+        # push_update 即使 job disabled/expired 也放行
+        if job is None and ev.kind != "push_update":
+            return
+        if job is not None and not job.enabled and ev.kind != "push_update":
+            return
+        if ev.kind == "wake":
+            await self._on_wake(ev)
+        elif ev.kind == "push":
+            await self._on_push(ev)
+        elif ev.kind == "push_update":
+            await self._on_push_update(ev)
