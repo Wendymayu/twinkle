@@ -207,3 +207,48 @@ def test_delete_after_run_deletes_after_push(tmp_path):
     ev = _Event(at_ts=2000.0, seq=1, kind="push", job_id="j6", run_id="j6:2000")
     run(s._on_push(ev))
     assert run(s._store.get_job("j6")) is None  # 已删
+
+
+# ---- Task 6: loop + trigger_run_now + start/stop ----
+
+def test_trigger_run_now_schedules_immediate_wake_push(tmp_path):
+    ac = FakeAgentClient(); mh = FakeMessageHandler()
+    s = _make_scheduler(tmp_path, ac, mh, now_fn=lambda: 1000.0)
+    job = CronJob(id="j7", name="now", cron_expr="0 9 * * *", timezone="UTC",
+                  description="立即做")
+    created = run(s._store.create_job(job.to_dict()))
+    run(s.reload())
+    run(s.trigger_run_now(created.id))
+    # 安排了 wake + push，at_ts ≈ now(1000)
+    wakes = [e for e in s._events if e[2].kind == "wake"]
+    pushes = [e for e in s._events if e[2].kind == "push"]
+    assert len(wakes) >= 1 and len(pushes) >= 1
+
+
+def test_loop_drives_events_to_completion(tmp_path):
+    """用 trigger_run_now + 短超时跑真实 _loop，验证 wake→push 端到端。"""
+    ac = FakeAgentClient(); mh = FakeMessageHandler()
+    clock = [1000.0]
+    s = _make_scheduler(tmp_path, ac, mh, now_fn=lambda: clock[0])
+    job = CronJob(id="j8", name="e2e", cron_expr="0 9 * * *", timezone="UTC",
+                  description="端到端", wake_offset_seconds=0)
+    created = run(s._store.create_job(job.to_dict()))
+    jid = created.id
+    run(s.reload())
+    run(s.trigger_run_now(jid))
+    wake_ev = next(e[2] for e in s._events if e[2].kind == "wake" and e[2].job_id == jid)
+    ac.script(f"cron-{wake_ev.run_id}", [_e2a_complete(f"cron-{wake_ev.run_id}", "E2E结果")])
+
+    async def drive():
+        s._task = asyncio.create_task(s._loop())
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            clock[0] += 0.05  # 推进时间让 push 到点
+        s._task.cancel()
+        try:
+            await s._task
+        except asyncio.CancelledError:
+            pass
+    run(drive())
+    contents = [m.content for m in mh.outbound]
+    assert "E2E结果" in contents

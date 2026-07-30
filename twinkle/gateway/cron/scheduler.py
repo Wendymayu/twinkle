@@ -252,3 +252,56 @@ class CronSchedulerService:
             await self._on_push(ev)
         elif ev.kind == "push_update":
             await self._on_push_update(ev)
+
+    # --- trigger immediate run ---
+    async def trigger_run_now(self, job_id: str) -> None:
+        job = await self._store.get_job(job_id)
+        if job is None:
+            return
+        self._jobs[job.id] = job
+        now_ts = self._now()
+        # wake_dt = push_dt = now → 立即 wake + 立即 push
+        run_id = f"{job.id}:now{int(now_ts * 1000) % 1000000}"
+        self._schedule_event(now_ts, "wake", job.id, run_id)
+        self._schedule_event(now_ts, "push", job.id, run_id)
+        self._reload_event.set()
+
+    # --- main loop (asyncio-driven, no thread) ---
+    async def _loop(self) -> None:
+        while True:
+            now_ts = self._now()
+            delay = 1.0
+            if self._events:
+                top_at = self._events[0][0]
+                delay = max(0.0, top_at - now_ts)
+            timeout = min(delay, _STORE_POLL_INTERVAL) if self._events else _STORE_POLL_INTERVAL
+            try:
+                await asyncio.wait_for(self._reload_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
+            self._reload_event.clear()
+            # mtime 兜底
+            if self._check_store_changed():
+                await self.reload()
+            # 处理到期事件
+            now_ts = self._now()
+            while self._events and self._events[0][0] <= now_ts:
+                _, _, ev = heapq.heappop(self._events)
+                try:
+                    await self._handle_event(ev)
+                except Exception:
+                    log.exception("cron event handling failed: %s", ev.kind)
+
+    async def start(self) -> None:
+        await self.reload()
+        self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+        for t in list(self._run_tasks.values()):
+            t.cancel()
