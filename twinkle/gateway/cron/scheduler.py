@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import heapq
+import json
 import logging
 import time
 from datetime import datetime, timedelta
@@ -17,7 +18,7 @@ from zoneinfo import ZoneInfo
 from twinkle.e2a.models import E2AEnvelope
 from twinkle.gateway.cron import cron_expr
 from twinkle.gateway.cron.models import CronJob, CronRunState, _Event
-from twinkle.gateway.cron.store import CronJobStore
+from twinkle.gateway.cron.store import CronJobStore, default_cron_jobs_path
 from twinkle.schema.message import EventType, Message
 
 log = logging.getLogger("twinkle.gateway.cron")
@@ -42,6 +43,7 @@ class CronSchedulerService:
         self._reload_event = asyncio.Event()
         self._last_mtime: float | None = None
         self._task: asyncio.Task | None = None
+        self._sidecar_path = default_cron_jobs_path().parent / "cron_trigger_now.json"
 
     # --- event scheduling ---
     def _schedule_event(self, at_ts: float, kind: str, job_id: str, run_id: str) -> None:
@@ -283,6 +285,16 @@ class CronSchedulerService:
             # mtime 兜底
             if self._check_store_changed():
                 await self.reload()
+            # run_now sidecar 检测
+            try:
+                if self._sidecar_path.exists():
+                    data = json.loads(self._sidecar_path.read_text(encoding="utf-8"))
+                    jid = data.get("job_id")
+                    if jid:
+                        await self.trigger_run_now(jid)
+                    self._sidecar_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             # 处理到期事件
             now_ts = self._now()
             while self._events and self._events[0][0] <= now_ts:
