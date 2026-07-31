@@ -210,6 +210,52 @@ def test_read_file_missing_raises_filenotfound(session_store):
         pass
 
 
+def test_message_count_excludes_system_role(session_store, sessions_dir):
+    """Reproduces issue #5: the base system prompt inflates message_count.
+
+    A plain user->assistant turn (no tools) writes 3 history records
+    (system + user + assistant), but only the user/assistant pair is a
+    user-visible conversation message — the frontend filters `system` out
+    in fromHistory. message_count must match that visible count, so the
+    system-role prompt must NOT be counted.
+    """
+    _run(session_store.append("s1", {"role": "system", "content": "sys"}))
+    _run(session_store.append("s1", {"role": "user", "content": "你好"},
+                              request_id="r1"))
+    _run(session_store.append("s1", {"role": "assistant", "content": "你好!有什么我可以帮你的吗?"},
+                              request_id="r1"))
+    meta = json.loads((Path(sessions_dir) / "s1" / "metadata.json").read_text())
+    assert meta["message_count"] == 2  # not 3 — system prompt excluded
+
+
+def test_list_sessions_recomputes_count_excluding_system(session_store, sessions_dir):
+    """Legacy sessions on disk carry an inflated message_count (the system
+    prompt used to be counted). list_sessions must derive the visible count
+    from history.json so existing sessions display correctly instead of the
+    stale stored value."""
+    _run(session_store.append("s1", {"role": "system", "content": "sys"}))
+    _run(session_store.append("s1", {"role": "user", "content": "q"}, request_id="r1"))
+    _run(session_store.append("s1", {"role": "assistant", "content": "a"}, request_id="r1"))
+    # corrupt the stored count to a clearly-wrong legacy value
+    mpath = Path(sessions_dir) / "s1" / "metadata.json"
+    meta = json.loads(mpath.read_text(encoding="utf-8"))
+    meta["message_count"] = 99
+    mpath.write_text(json.dumps(meta), encoding="utf-8")
+    rows = session_store.list_sessions()
+    row = next(r for r in rows if r["session_id"] == "s1")
+    assert row["message_count"] == 2  # recomputed from history, system excluded
+
+
+def test_list_sessions_count_falls_back_when_history_missing(session_store, sessions_dir):
+    """A session with metadata but no history.json (e.g. just created, no
+    messages yet) must not error — list_sessions falls back to the stored
+    count."""
+    _run(session_store.create_session("s1"))
+    rows = session_store.list_sessions()
+    row = next(r for r in rows if r["session_id"] == "s1")
+    assert row["message_count"] == 0
+
+
 def test_list_sessions_hides_subagent_sessions(session_store):
     """Child sessions (<parent>__sub_<id>) are hidden by default; visible with include_subagents."""
     _run(session_store.create_session("real1"))
