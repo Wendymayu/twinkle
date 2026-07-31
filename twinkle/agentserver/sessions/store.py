@@ -142,6 +142,15 @@ class SessionStore:
                     "channel_id": "web",
                 }
             meta.setdefault("session_id", sid)
+            # Derive the visible count from history.json (non-system records)
+            # so legacy sessions whose stored count was inflated by the system
+            # prompt display correctly; falls back to the stored value when
+            # history is missing/unreadable. See issue #5.
+            history = self.get_history(sid)
+            if history:
+                meta["message_count"] = sum(
+                    1 for r in history if r.get("role") != "system"
+                )
             out.append(meta)
         out.sort(key=lambda m: m.get("last_message_at", 0), reverse=True)
         return out[:limit]
@@ -253,7 +262,12 @@ class SessionStore:
                 "created_at": now, "last_message_at": now,
                 "message_count": 0, "channel_id": "web",
             }
-        meta["message_count"] = int(meta.get("message_count", 0)) + 1
+        # system-role messages are the injected base prompt — not a
+        # user-visible conversation turn — so they don't count toward
+        # message_count (the frontend filters `system` out in fromHistory;
+        # counting it inflated the displayed count by one per session, #5).
+        if role != "system":
+            meta["message_count"] = int(meta.get("message_count", 0)) + 1
         meta["last_message_at"] = time.time()
         if not meta.get("title") and role == "user":
             meta["title"] = _auto_title(content if isinstance(content, str) else "")
