@@ -35,6 +35,17 @@ class _RecordingLoop:
         )
 
 
+class _FakeSkillNetClient:
+    """Returns a canned catalog; lets ws-level tests exercise the search branch without GitHub."""
+    def __init__(self, catalog=None):
+        self._catalog = catalog or []
+
+    async def search_remote_skills(self, q, force_refresh=False):
+        # 模拟服务端关键词匹配(真实 API 在 openkg 服务端搜,这里按 q 过滤 catalog)
+        ql = (q or "").lower()
+        return [s for s in self._catalog if not ql or ql in s.name.lower() or ql in s.description.lower()]
+
+
 def test_malformed_envelope_returns_error(tmp_path) -> None:
     port = _free_port()
     loop_obj = _RecordingLoop()
@@ -83,3 +94,73 @@ def test_valid_envelope_dispatches_to_loop(tmp_path) -> None:
             await server.wait_closed()
 
     asyncio.run(run())
+
+
+def test_skill_list_local_routes_inline(tmp_path) -> None:
+    """skills.list_local is routed inline by ws_handler (never reaches the ReAct loop)."""
+    from twinkle.agentserver.skills import _set_skill_manager, SkillManager
+    port = _free_port()
+    loop_obj = _RecordingLoop()
+    store = SessionStore(str(tmp_path / "sessions"))
+    sk_dir = tmp_path / "skills" / "foo"
+    sk_dir.mkdir(parents=True)
+    (sk_dir / "SKILL.md").write_text("---\nname: foo\ndescription: d\n---\nbody", encoding="utf-8")
+    _set_skill_manager(SkillManager(str(tmp_path / "skills")))
+    try:
+        async def run() -> None:
+            server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
+            try:
+                async with connect(f"ws://127.0.0.1:{port}") as ws:
+                    await ws.recv()  # connection.ack
+                    env = E2AEnvelope(
+                        request_id="r1", session_id="s1", method="skills.list_local",
+                        params={},
+                    )
+                    await ws.send(env.model_dump_json())
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                    data = json.loads(raw)
+                    assert data["response_kind"] == "e2a.result"
+                    assert [s["name"] for s in data["body"]["skills"]] == ["foo"]
+                assert loop_obj.seen is None  # list_local short-circuits the ReAct loop
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+    finally:
+        _set_skill_manager(None)
+
+
+def test_skill_search_runs_as_background_task(tmp_path) -> None:
+    """skills.search runs as a non-inline background task and sends a delayed e2a.result."""
+    from twinkle.agentserver.skills import _set_skillnet_client
+    from twinkle.agentserver.skills.remote import RemoteSkill
+    _set_skillnet_client(_FakeSkillNetClient(catalog=[
+        RemoteSkill("foo", "a foo skill", "url_foo", "skills/foo/SKILL.md"),
+        RemoteSkill("bar", "a bar skill", "url_bar", "skills/bar/SKILL.md"),
+    ]))
+    try:
+        port = _free_port()
+        loop_obj = _RecordingLoop()
+        store = SessionStore(str(tmp_path / "sessions"))
+        async def run() -> None:
+            server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
+            try:
+                async with connect(f"ws://127.0.0.1:{port}") as ws:
+                    await ws.recv()  # connection.ack
+                    env = E2AEnvelope(
+                        request_id="r2", session_id="s2", method="skills.search",
+                        params={"q": "foo"},
+                    )
+                    await ws.send(env.model_dump_json())
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                    data = json.loads(raw)
+                    assert data["response_kind"] == "e2a.result"
+                    assert data["body"]["type"] == "skills.search"
+                    assert [s["name"] for s in data["body"]["skills"]] == ["foo"]
+                assert loop_obj.seen is None  # search never reaches the ReAct loop
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+    finally:
+        _set_skillnet_client(None)

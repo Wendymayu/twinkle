@@ -17,19 +17,51 @@ class Skill:
     directory: Path           # skill 目录绝对路径(读 SKILL.md / 附带文件用)
 
 
+def _strip_yaml_quotes(v: str) -> str:
+    """剥掉 YAML 标量值的包围引号("foo"→foo,'foo'→foo)。块标量内容不含引号,不调此。"""
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        return v[1:-1].strip()
+    return v
+
+
 def parse_frontmatter(text: str) -> dict[str, str] | None:
-    """解析 --- 包围的 frontmatter 为 {key: value}。单行值;无闭合 --- 返 None。"""
+    """解析 --- 包围的 frontmatter 为 {key: value}。单行值(剥包围引号);支持用 YAML 块标量
+    (``|`` 字面 / ``>`` 折叠)的多行值——缩进行折叠成一行(适合作一句话 description)。
+    无闭合 --- 返 None。无 PyYAML 依赖。"""
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return None
     out: dict[str, str] = {}
-    for line in lines[1:]:
+    i = 1
+    n = len(lines)
+    while i < n:
+        line = lines[i]
         if line.strip() == "---":
             return out
         if ":" not in line:
+            i += 1
             continue
         key, _, value = line.partition(":")
-        out[key.strip()] = value.strip()
+        key = key.strip()
+        indicator = value.strip()
+        if indicator in ("|", "|-", "|+", ">", ">-", ">+"):
+            # 块标量:收集后续缩进/空行(比 key 行深)为内容,折叠成一行。
+            block: list[str] = []
+            i += 1
+            while i < n:
+                bline = lines[i]
+                if bline.strip() == "---":
+                    break
+                if bline.startswith((" ", "\t")) or bline.strip() == "":
+                    if bline.strip():
+                        block.append(bline.strip())
+                    i += 1
+                else:
+                    break  # 回到 key 层缩进 → 块结束
+            out[key] = " ".join(block).strip()
+            continue
+        out[key] = _strip_yaml_quotes(indicator)
+        i += 1
     return None  # 没遇到闭合 ---
 
 

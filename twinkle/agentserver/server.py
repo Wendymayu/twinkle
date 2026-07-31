@@ -21,6 +21,8 @@ from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.sessions import (
     SessionStore, session_store, dispatch_session_rpc, handles_session_rpc,
 )
+from twinkle.agentserver.skills import get_skillnet_client
+from twinkle.agentserver.skills.rpc import dispatch_skill_rpc, handles_skill_rpc, run_skill_rpc
 from twinkle.agentserver.tools import tool_manager
 from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
@@ -98,6 +100,7 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
             return
         send_lock = asyncio.Lock()
         active: dict[str, asyncio.Task] = {}
+        skill_tasks: set[asyncio.Task] = set()
 
         async def send(resp: E2AResponse) -> None:
             async with send_lock:
@@ -131,6 +134,17 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
                     async for frame in dispatch_session_rpc(envelope, store):
                         await send(frame)
                     continue
+                if handles_skill_rpc(envelope.method):
+                    if envelope.method == "skills.list_local":
+                        async for frame in dispatch_skill_rpc(envelope):
+                            await send(frame)
+                    else:
+                        # search/install: 非内联,后台任务;完成后 send() 延迟发一个 e2a.result。
+                        # 不阻塞读循环(慢 GitHub 网络)。成功信号 = 该延迟帧。
+                        task = asyncio.create_task(run_skill_rpc(envelope, send, get_skillnet_client()))
+                        skill_tasks.add(task)
+                        task.add_done_callback(skill_tasks.discard)
+                    continue
                 sid = envelope.session_id or envelope.request_id
                 cur = active.get(sid)
                 if cur is not None and not cur.done():
@@ -147,6 +161,10 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
                 t.cancel()
             await asyncio.gather(*active.values(), return_exceptions=True)
             active.clear()
+            for t in list(skill_tasks):
+                t.cancel()
+            await asyncio.gather(*skill_tasks, return_exceptions=True)
+            skill_tasks.clear()
             APPROVAL_REGISTRY.cancel_all()
 
     return handler

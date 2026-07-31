@@ -76,6 +76,10 @@ class SkillsConfig(_StrictModel):
     dir: str = ""  # "" -> <workspace>/skills
     mode: SkillMode = "all"
     enabled: list[str] = []  # [] = all skills open
+    skillnet_api_url: str = "http://api-skillnet.openkg.cn"  # SkillNet 公开搜索服务(关键词搜索)
+    github_token: str = ""  # "" = anonymous (60/hour) — GitHub 下载用
+    remote_timeout: float = 60.0
+    remote_max_retries: int = 3
 
 
 class MemoryQueryConfig(_StrictModel):

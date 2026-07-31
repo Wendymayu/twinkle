@@ -113,13 +113,13 @@ export class WebClient {
   }
 
   /** Fire an RPC (session.* / history.get) and resolve with the `result` payload. */
-  request(method: string, params: Record<string, any> = {}): Promise<any> {
+  request(method: string, params: Record<string, any> = {}, timeoutMs: number = 15000): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = this.send(method, params)
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`timeout waiting for result: ${method}`))
-      }, 15000)
+      }, timeoutMs)
       this.pending.set(id, (payload: any) => {
         clearTimeout(timer)
         if (payload?.error) reject(new Error(payload.error))

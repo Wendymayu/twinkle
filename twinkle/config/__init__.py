@@ -33,6 +33,10 @@ TODOS_DIR = settings.todos.dir
 SKILLS_DIR = settings.skills.dir
 SKILL_MODE = settings.skills.mode
 ENABLED_SKILLS = list(settings.skills.enabled)
+SKILLS_SKILLNET_API_URL = settings.skills.skillnet_api_url
+SKILLS_GITHUB_TOKEN = settings.skills.github_token
+SKILLS_REMOTE_TIMEOUT = settings.skills.remote_timeout
+SKILLS_REMOTE_MAX_RETRIES = settings.skills.remote_max_retries
 
 # --- memory (Phase 5a) ---
 MEMORY_DIR = settings.memory.dir

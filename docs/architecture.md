@@ -562,7 +562,7 @@ Skill 是比 tool 高一层的抽象——一个 skill 是 `<SKILLS_DIR>/<name>/
 
 **配置**（`config.py`）：`TWINKLE_SKILLS_DIR`（默认 `<WORKSPACE>/skills`，用户可见）+ `TWINKLE_SKILL_MODE`（`all`/`auto_list`，默认 all，单值不并存）+ `TWINKLE_ENABLED_SKILLS`（逗号白名单，空=全开）。`ensure_workspace_dir()`（server 启动调）mkdir WORKSPACE+skills + `_seed_example_skills` 把 `twinkle/resources/skills/*`（含示例 `doc-audit`）拷到 `<WORKSPACE>/skills`（已存在不覆盖，mtime 热重载自动扫到）。
 
-**完整设计** 见 spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`。**仍 deferred**：`skill_turbo` planner/executor（Phase 8 subagent）、skill 进化（Phase 9 + 长期记忆）、marketplace/SkillNet/symphony 树检索（企业级）、`agentic` 树索引模式、per-skill 绑定工具（共享 SkillTool 即可）。
+**完整设计** 见 spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`。**已落地**：SkillNet 一键下载/安装(`skills.list_local`/`skills.search`/`skills.install`,搜索走 SkillNet 公开 API(api-skillnet.openkg.cn)、下载走 GitHub Contents/raw API,自实现不依赖 skillnet-ai,见 spec `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`)。**仍 deferred**：`skill_turbo` planner/executor（Phase 8 subagent）、skill 进化（Phase 9 + 长期记忆）、marketplace/symphony 树检索（企业级）、`agentic` 树索引模式、per-skill 绑定工具（共享 SkillTool 即可）。
 
 ---
 

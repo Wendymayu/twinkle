@@ -20,6 +20,8 @@ export interface ChatMsg {
   decided?: ApprovalDecision | null
 }
 interface TodoState { tasks: TodoTask[]; remaining: number; total: number }
+export interface InstalledSkill { name: string; description: string }
+export interface RemoteSkillItem { name: string; description: string; skill_url: string }
 
 const client = new WebClient()
 const sessions = ref<SessionItem[]>([])
@@ -32,7 +34,7 @@ const todo = ref<TodoState | null>(null)
 // true while an approval.ask is awaiting a user decision — disables the chat input
 const inputDisabled = ref(false)
 
-type NavKey = 'chat' | 'sessions'
+type NavKey = 'chat' | 'sessions' | 'skills'
 const activeNav = ref<NavKey>('chat')
 const selectedSessionId = ref<string>('')
 const sessionFiles = ref<{ name: string; is_dir: boolean; size: number }[]>([])
@@ -40,6 +42,10 @@ const previewFile = ref<string | null>(null)
 const previewContent = ref<string>('')
 const previewLoading = ref(false)
 const historyAsBubbles = ref(true)
+const searchResults = ref<RemoteSkillItem[]>([])
+const installedSkills = ref<InstalledSkill[]>([])
+const skillsLoading = ref(false)
+const skillsError = ref<string | null>(null)
 
 function setNav(key: NavKey) {
   activeNav.value = key
@@ -135,6 +141,43 @@ async function restoreSession(sid: string) {
   setNav('chat')
 }
 
+async function loadInstalled() {
+  try {
+    const payload = await client.request('skills.list_local', {})
+    installedSkills.value = payload?.skills ?? []
+  } catch {
+    installedSkills.value = []
+  }
+}
+
+async function searchSkills(q: string, force = false) {
+  skillsLoading.value = true
+  skillsError.value = null
+  try {
+    const payload = await client.request('skills.search', { q, force_refresh: force }, 60000)
+    searchResults.value = payload?.skills ?? []
+  } catch (e: any) {
+    searchResults.value = []
+    skillsError.value = e?.message || '搜索失败'
+  } finally {
+    skillsLoading.value = false
+  }
+}
+
+async function installSkill(url: string): Promise<{ ok: boolean; skillName?: string; error?: string }> {
+  // 后台任务 + 延迟结果;真实 GitHub 下载(并发拉文件),慢网络放宽到 180s。失败帧 → request reject。
+  try {
+    const payload = await client.request('skills.install', { url }, 180000)
+    if (payload?.ok) {
+      await loadInstalled() // 刷新已安装列表
+      return { ok: true, skillName: payload.skill_name }
+    }
+    return { ok: false, error: payload?.error || '安装失败' }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || '安装失败' }
+  }
+}
+
 function sendQuery(q: string) {
   if (!q.trim() || !connected.value) return
   messages.value.push({ role: 'user', content: q })
@@ -208,6 +251,8 @@ export function useSessions() {
     activeNav, setNav,
     selectedSessionId, sessionFiles, previewFile, previewContent,
     previewLoading, historyAsBubbles,
+    searchResults, installedSkills, skillsLoading, skillsError,
+    searchSkills, loadInstalled, installSkill,
     init, loadSessions, createSession, selectSession, deleteSession, sendQuery,
     loadSessionFiles, readSessionFile, restoreSession,
     webClient: client,

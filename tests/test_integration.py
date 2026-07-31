@@ -7,6 +7,7 @@ the roadmap Phase 1 / M2 acceptance, headlessly.
 """
 import asyncio
 import json
+from pathlib import Path
 
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
@@ -32,6 +33,28 @@ class _ScriptedLLM:
         self.calls += 1
         for ev in events:
             yield ev
+
+
+class _FakeSkillNetClient:
+    """Network-free stand-in for SkillNetClient: a canned catalog + a canned
+    downloaded skill dir. Lets the gateway-seam e2e run without hitting GitHub.
+    Real-GitHub coverage is the throwaway ``_e2e_skillnet.py``."""
+    def __init__(self, catalog):
+        self._catalog = catalog
+
+    async def search_remote_skills(self, q, force_refresh=False):
+        # 模拟服务端关键词匹配
+        ql = (q or "").lower()
+        return [s for s in self._catalog if not ql or ql in s.name.lower() or ql in s.description.lower()]
+
+    async def download_skill(self, url):
+        import tempfile
+        temp_root = Path(tempfile.mkdtemp(prefix="twinkle_e2e_"))
+        skill_dir = temp_root / "skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: foo\ndescription: a foo skill\n---\nbody\n", encoding="utf-8")
+        return "foo", skill_dir, temp_root
 
 
 def _reg_with_echo():
@@ -279,3 +302,94 @@ def test_session_files_ws_round_trip(tmp_path, port_factory) -> None:
             await server.wait_closed()
 
     asyncio.run(run())
+
+
+def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
+    """Full browser -> gateway -> AgentServer round trip for skills.search /
+    skills.install / skills.list_local. Verifies the gateway forwards skill RPCs
+    and the install background-task's delayed e2a.result resolves through to a
+    browser `result` event + lands on disk + list_local reflects it. RPCs don't
+    run the ReAct loop, so a trivial scripted LLM (no scripts) is fine.
+    Network-free (FakeSkillNetClient); real-GitHub coverage is _e2e_skillnet.py."""
+    from twinkle.agentserver.skills import (
+        _set_skill_manager, _set_skillnet_client, SkillManager,
+    )
+    from twinkle.agentserver.skills.remote import RemoteSkill
+
+    agentserver_port = port_factory()
+    gateway_port = port_factory()
+    store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo())
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    # install path reads `twinkle.config.SKILLS_DIR` at call time; list_local reads
+    # the SkillManager singleton. Point both at the same temp dir so install lands
+    # and list_local reflects it.
+    monkeypatch.setattr("twinkle.config.SKILLS_DIR", str(skills_dir))
+    _set_skill_manager(SkillManager(str(skills_dir)))
+    _set_skillnet_client(_FakeSkillNetClient(catalog=[
+        RemoteSkill("foo", "a foo skill", "url_foo", "skills/foo/SKILL.md"),
+    ]))
+    try:
+        async def run() -> None:
+            server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+            try:
+                agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
+                await agent_client.connect()
+                message_handler = MessageHandler(agent_client)
+                channel_manager = ChannelManager(message_handler)
+                web_channel = WebChannel("127.0.0.1", gateway_port)
+                channel_manager.register_channel(web_channel)
+                await channel_manager.start()
+                web_server = await serve(web_channel.handler, "127.0.0.1", gateway_port)
+                try:
+                    async with connect(f"ws://127.0.0.1:{gateway_port}") as browser:
+                        await browser.recv()  # connection.ack
+
+                        # skills.search (background task → delayed result)
+                        await browser.send(json.dumps({
+                            "type": "req", "id": "r-search",
+                            "method": "skills.search",
+                            "params": {"q": "foo", "session_id": "s1"},
+                        }))
+                        await _read_ack(browser)
+                        payload = await _collect_result(browser)
+                        assert payload["type"] == "skills.search"
+                        assert [s["name"] for s in payload["skills"]] == ["foo"]
+
+                        # skills.install (background task → delayed result + lands on disk)
+                        await browser.send(json.dumps({
+                            "type": "req", "id": "r-install",
+                            "method": "skills.install",
+                            "params": {"url": "url_foo", "session_id": "s1"},
+                        }))
+                        await _read_ack(browser)
+                        payload = await _collect_result(browser)
+                        assert payload["ok"] is True
+                        assert payload["skill_name"] == "foo"
+
+                        # skills.list_local (inline → reflects the just-installed skill)
+                        await browser.send(json.dumps({
+                            "type": "req", "id": "r-list",
+                            "method": "skills.list_local",
+                            "params": {"session_id": "s1"},
+                        }))
+                        await _read_ack(browser)
+                        payload = await _collect_result(browser)
+                        assert payload["type"] == "skills.list_local"
+                        assert [s["name"] for s in payload["skills"]] == ["foo"]
+
+                    assert (skills_dir / "foo" / "SKILL.md").is_file()
+                finally:
+                    web_server.close()
+                    await web_server.wait_closed()
+                    await channel_manager.stop()
+                    await agent_client.close()
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+    finally:
+        _set_skillnet_client(None)
+        _set_skill_manager(None)
