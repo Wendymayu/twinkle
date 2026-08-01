@@ -96,9 +96,9 @@ class SkillManager:
         return self._skills
 
     def get_skill(self, name: str) -> Skill | None:
-        for s in self.list_skills():
-            if s.name == name:
-                return s
+        for skill in self.list_skills():
+            if skill.name == name:
+                return skill
         return None
 
     def _refresh_if_changed(self) -> None:

@@ -40,7 +40,7 @@ function send() {
     </ul>
     <footer>
       <input v-model="input" @keyup.enter="send" :disabled="!connected || inputDisabled" placeholder="说点什么…" />
-      <button class="new-btn" @click="createSession" :disabled="!connected" title="新对话">➕ 新对话</button>
+      <button class="new-btn" @click="createSession" :disabled="!connected" title="新会话">➕</button>
       <button @click="send" :disabled="!connected || inputDisabled">发送</button>
     </footer>
   </div>

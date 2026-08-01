@@ -251,3 +251,139 @@ def test_max_steps_instance_param_emits_error(session_store) -> None:
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.error"
     assert "max_steps=2" in frames[-1].body["error"]
+
+
+# --- Parallel tool call tests --- #
+
+
+def _reg_with_echo_and_slow():
+    """Register echo + slow_echo tools for parallel testing."""
+    from twinkle.agentserver.tools.manager import ToolManager
+
+    @tool
+    async def echo(text: str) -> str:
+        """echo"""
+        return f"tool-saw:{text}"
+
+    @tool
+    async def slow_echo(text: str) -> str:
+        """slow_echo — simulates a tool with latency"""
+        await asyncio.sleep(0.05)
+        return f"slow-saw:{text}"
+
+    m = ToolManager()
+    m.register(echo)
+    m.register(slow_echo)
+    return m
+
+
+def test_parallel_tool_calls_two_echoes(session_store) -> None:
+    """Two echo tool calls in one batch run concurrently and both results appear."""
+    store = session_store
+    reg = _reg_with_echo_and_slow()
+    llm = _ScriptedLLM([
+        # turn 1: model calls echo twice
+        [Finish("tool_calls", {"role": "assistant", "content": None,
+              "tool_calls": [
+                  {"id": "c1", "type": "function",
+                   "function": {"name": "echo", "arguments": '{"text": "alpha"}'}},
+                  {"id": "c2", "type": "function",
+                   "function": {"name": "echo", "arguments": '{"text": "beta"}'}},
+              ]})],
+        # turn 2: model summarizes
+        [TextDelta("both "), TextDelta("done"),
+         Finish("stop", {"role": "assistant", "content": "both done", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, store, reg)
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("two echoes", session_id="s-par"))]
+
+    frames = asyncio.run(run())
+    final = frames[-1]
+    assert final.response_kind == "e2a.complete"
+    assert "both done" in final.body["result"]["content"]
+
+    # Both tool results appended to session in order
+    msgs = store.get_messages("s-par")
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    assert tool_msgs[0]["tool_call_id"] == "c1"
+    assert tool_msgs[0]["content"] == "tool-saw:alpha"
+    assert tool_msgs[1]["tool_call_id"] == "c2"
+    assert tool_msgs[1]["content"] == "tool-saw:beta"
+
+
+def test_parallel_tool_calls_one_error_one_ok(session_store) -> None:
+    """In a parallel batch, one tool error does not affect the other."""
+    from twinkle.agentserver.tools.manager import ToolManager
+
+    store = session_store
+
+    @tool
+    async def good_tool() -> str:
+        """good_tool"""
+        return "good-result"
+
+    @tool
+    async def bad_tool() -> str:
+        """bad_tool"""
+        raise ValueError("something went wrong")
+
+    reg = ToolManager()
+    reg.register(good_tool)
+    reg.register(bad_tool)
+
+    llm = _ScriptedLLM([
+        [Finish("tool_calls", {"role": "assistant", "content": None,
+              "tool_calls": [
+                  {"id": "c1", "type": "function",
+                   "function": {"name": "good_tool", "arguments": '{}'}},
+                  {"id": "c2", "type": "function",
+                   "function": {"name": "bad_tool", "arguments": '{}'}},
+              ]})],
+        [TextDelta("done"), Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, store, reg)
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("mixed", session_id="s-mix"))]
+
+    frames = asyncio.run(run())
+    assert frames[-1].response_kind == "e2a.complete"
+
+    msgs = store.get_messages("s-mix")
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    # good_tool succeeded
+    assert tool_msgs[0]["tool_call_id"] == "c1"
+    assert tool_msgs[0]["content"] == "good-result"
+    # bad_tool error captured as string
+    assert tool_msgs[1]["tool_call_id"] == "c2"
+    assert "ValueError" in tool_msgs[1]["content"]
+
+
+def test_parallel_tool_calls_disabled(session_store) -> None:
+    """Single tool call in a batch goes through sequential path (no gather overhead)."""
+    store = session_store
+    reg = _reg_with_echo_and_slow()
+    llm = _ScriptedLLM([
+        [Finish("tool_calls", {"role": "assistant", "content": None,
+              "tool_calls": [
+                  {"id": "c1", "type": "function",
+                   "function": {"name": "echo", "arguments": '{"text": "solo"}'}},
+              ]})],
+        [TextDelta("done"), Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, store, reg)
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("single", session_id="s-solo"))]
+
+    frames = asyncio.run(run())
+    assert frames[-1].response_kind == "e2a.complete"
+
+    msgs = store.get_messages("s-solo")
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["content"] == "tool-saw:solo"
