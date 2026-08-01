@@ -39,6 +39,7 @@
 - **Phase 3（长会话上下文压缩）**：初版已在 nightly worktree `nightly/phase-3-6-4` 实现（滑窗+LLM 摘要，独立模块 `context_compression.py`，不写回 SessionStore），待 review/merge 进主线；后续优化方向见 §Phase 3。
 - **Phase 4（工具权限 / 审批 + 命令安全）**：已落地（spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md` + plan `docs/superpowers/plans/2026-07-24-phase4-permissions.md`）。`permissions/` 包 + `PermissionHook` + ASK 挂起/恢复 + JSONL 审计 + `TWINKLE_PERMISSIONS` opt-in；3-axis / shell-AST 仍 deferred（见 §Phase 4 精简范围）。
 - **Phase 7（Skill 系统）**：已落地（spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`）。`skills/` 包 + `list_skill`/`read_skill` 工具 + `SkillHook`（`all`/`auto_list` 两模式，默认 all，`TWINKLE_SKILL_MODE` 切换）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录 + 示例 `doc-audit`；`skill_turbo`/进化/marketplace 仍 deferred。**SkillNet 一键下载/安装已落地(v1)**：前端「🧩 技能」页搜索 SkillNet 公开目录(api-skillnet.openkg.cn)并安装到 `<WORKSPACE>/skills`；搜索走 SkillNet 公开 API、下载走 GitHub Contents/raw API，自实现不依赖 skillnet-ai（见 spec `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`）。对应里程碑 M8 ✅。
+- **Phase 8（Todo 增强）**：已落地（spec `docs/superpowers/specs/2026-08-01-todo-enhancement-design.md`）。TodoTask 数据模型增强（id、subject、description、blocked_by、owner、metadata）；4 个工具重写（todo_create/update/list/get）；`sequential=True` 一步创建线性依赖；轻量守卫（跳步检测 + 提醒）；前端按状态分组 + 依赖/归属展示。对应里程碑 M9 ✅。
 - **Phase 5 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
 
 ---
