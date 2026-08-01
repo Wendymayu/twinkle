@@ -19,6 +19,7 @@ from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.todo import (
     PLAN_TODO_SESSION_ID,
+    TODO_EVENTS,
     flush_todo_events,
     reset_todo_events,
 )
@@ -289,78 +290,111 @@ class AgentLoop:
                             )
                             tcs = ev.assistant_message.get("tool_calls")
                             if ev.finish_reason == "tool_calls" and tcs:
-                                for tc in tcs:
-                                    name = tc["function"]["name"]
+                                if len(tcs) > 1:
+                                    # --- Parallel path: concurrent execution via asyncio.gather ---
                                     try:
-                                        args = json.loads(tc["function"]["arguments"] or "{}")
-                                    except Exception:
-                                        args = {}
-                                    # Tool call via @hook-decorated method
-                                    ctx.inputs = ToolCallInputs(
-                                        name=name, args=args, tool_call_id=tc["id"]
-                                    )
-                                    try:
-                                        result = await self._hooked_tool_call(ctx)
-                                    except HookInterrupt as hi:
-                                        if "approval_id" not in hi.data:
-                                            yield E2AResponse(
-                                                request_id=envelope.request_id, sequence=seq, is_final=True,
-                                                status="failed", response_kind="e2a.error",
-                                                body={"error": "tool execution interrupted"})
-                                            return
-                                        # ASK: register Future + yield e2a.ask + suspend await
-                                        approval_id = hi.data["approval_id"]
-                                        future = APPROVAL_REGISTRY.register(approval_id)
-                                        yield E2AResponse(
-                                            request_id=envelope.request_id, sequence=seq, is_final=False,
-                                            status="in_progress", response_kind="e2a.ask",
-                                            body={"approval_id": approval_id, "tool": hi.data["tool"],
-                                                  "args": hi.data["args"], "tool_call_id": tc["id"],
-                                                  "reason": hi.data["reason"]})
-                                        seq += 1
-                                        decision = await future  # SUSPEND — ws_handler concurrency resumes it
-                                        if decision in ("allow", "allow_always"):
-                                            # Record approval decision in ctx.extra so
-                                            # PermissionHook's bypass branch can persist
-                                            # allow_always — AgentLoop doesn't hold engine.
-                                            ctx.extra["_approval_decision"] = decision
-                                            ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
-                                            try:
-                                                result = await self._hooked_tool_call(ctx)
-                                            except HookInterrupt:
-                                                raise  # bypass already applied; a second interrupt shouldn't occur
-                                            except Exception as exc:
-                                                result = f"[tool error] {type(exc).__name__}: {exc}"
-                                        else:
-                                            result = (f"[tool denied by user: {hi.data['tool']}] "
-                                                      f"{hi.data.get('reason', '')}")
-                                    except Exception as exc:
-                                        # Non-HookInterrupt tool failure (after @hook retry exhausted
-                                        # or non-transient): turn into a tool_result string so the loop
-                                        # keeps going instead of crashing the agent loop.
-                                        result = f"[tool error] {type(exc).__name__}: {exc}"
-                                    for snap in flush_todo_events():
-                                        yield E2AResponse(
-                                            request_id=envelope.request_id,
-                                            sequence=seq,
-                                            is_final=False,
-                                            status="in_progress",
-                                            response_kind="e2a.todo_update",
-                                            body=snap,
+                                        par_results, par_todos = await self._try_parallel_tool_calls(
+                                            tcs, session_id, envelope.request_id,
                                         )
-                                        seq += 1
-                                    await self._session_store.append(
-                                        session_id,
-                                        {
-                                            "role": "tool",
-                                            "tool_call_id": tc["id"],
-                                            "content": result,
-                                        },
-                                        request_id=envelope.request_id,
-                                        event_type="chat.tool_result",
-                                    )
-                                # AFTER_MODEL_CALL for tool_calls turn
-                                await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
+                                        # Emit todo frames + append tool results in order
+                                        for snap in par_todos:
+                                            yield E2AResponse(
+                                                request_id=envelope.request_id,
+                                                sequence=seq, is_final=False,
+                                                status="in_progress",
+                                                response_kind="e2a.todo_update",
+                                                body=snap,
+                                            )
+                                            seq += 1
+                                        for tc_id, result in par_results:
+                                            await self._session_store.append(
+                                                session_id,
+                                                {"role": "tool", "tool_call_id": tc_id, "content": result},
+                                                request_id=envelope.request_id,
+                                                event_type="chat.tool_result",
+                                            )
+                                        # AFTER_MODEL_CALL for tool_calls turn
+                                        await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
+                                        _reask = True
+                                        break  # exit async-for loop
+                                    except HookInterrupt:
+                                        # ASK needs yield — fall through to sequential path
+                                        log.info("parallel tool calls fell back to sequential (HookInterrupt)")
+                                        # Fall through to sequential path below
+                                if len(tcs) <= 1 or _reask is False:
+                                    # --- Sequential path (single tc, or fallback from parallel) ---
+                                    for tc in tcs:
+                                        name = tc["function"]["name"]
+                                        try:
+                                            args = json.loads(tc["function"]["arguments"] or "{}")
+                                        except Exception:
+                                            args = {}
+                                        # Tool call via @hook-decorated method
+                                        ctx.inputs = ToolCallInputs(
+                                            name=name, args=args, tool_call_id=tc["id"]
+                                        )
+                                        try:
+                                            result = await self._hooked_tool_call(ctx)
+                                        except HookInterrupt as hi:
+                                            if "approval_id" not in hi.data:
+                                                yield E2AResponse(
+                                                    request_id=envelope.request_id, sequence=seq, is_final=True,
+                                                    status="failed", response_kind="e2a.error",
+                                                    body={"error": "tool execution interrupted"})
+                                                return
+                                            # ASK: register Future + yield e2a.ask + suspend await
+                                            approval_id = hi.data["approval_id"]
+                                            future = APPROVAL_REGISTRY.register(approval_id)
+                                            yield E2AResponse(
+                                                request_id=envelope.request_id, sequence=seq, is_final=False,
+                                                status="in_progress", response_kind="e2a.ask",
+                                                body={"approval_id": approval_id, "tool": hi.data["tool"],
+                                                      "args": hi.data["args"], "tool_call_id": tc["id"],
+                                                      "reason": hi.data["reason"]})
+                                            seq += 1
+                                            decision = await future  # SUSPEND — ws_handler concurrency resumes it
+                                            if decision in ("allow", "allow_always"):
+                                                # Record approval decision in ctx.extra so
+                                                # PermissionHook's bypass branch can persist
+                                                # allow_always — AgentLoop doesn't hold engine.
+                                                ctx.extra["_approval_decision"] = decision
+                                                ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
+                                                try:
+                                                    result = await self._hooked_tool_call(ctx)
+                                                except HookInterrupt:
+                                                    raise  # bypass already applied; a second interrupt shouldn't occur
+                                                except Exception as exc:
+                                                    result = f"[tool error] {type(exc).__name__}: {exc}"
+                                            else:
+                                                result = (f"[tool denied by user: {hi.data['tool']}] "
+                                                          f"{hi.data.get('reason', '')}")
+                                        except Exception as exc:
+                                            # Non-HookInterrupt tool failure (after @hook retry exhausted
+                                            # or non-transient): turn into a tool_result string so the loop
+                                            # keeps going instead of crashing the agent loop.
+                                            result = f"[tool error] {type(exc).__name__}: {exc}"
+                                        for snap in flush_todo_events():
+                                            yield E2AResponse(
+                                                request_id=envelope.request_id,
+                                                sequence=seq,
+                                                is_final=False,
+                                                status="in_progress",
+                                                response_kind="e2a.todo_update",
+                                                body=snap,
+                                            )
+                                            seq += 1
+                                        await self._session_store.append(
+                                            session_id,
+                                            {
+                                                "role": "tool",
+                                                "tool_call_id": tc["id"],
+                                                "content": result,
+                                            },
+                                            request_id=envelope.request_id,
+                                            event_type="chat.tool_result",
+                                        )
+                                    # AFTER_MODEL_CALL for tool_calls turn (sequential path)
+                                    await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                                 _reask = True
                                 break  # exit async-for loop; retry loop will also break
                             # AFTER_MODEL_CALL for final answer turn
@@ -406,6 +440,77 @@ class AgentLoop:
             response_kind="e2a.error",
             body={"error": f"agent loop exceeded max_steps={self._max_steps}"},
         )
+
+    async def _try_parallel_tool_calls(
+        self,
+        tcs: list[dict],
+        session_id: str,
+        request_id: str,
+    ) -> tuple[list[tuple[str, str]], list[dict]]:
+        """Execute multiple tool calls concurrently via asyncio.gather.
+
+        Each tool call gets its own HookContext (isolated inputs + extra) and
+        its own TODO_EVENTS buffer so concurrent calls don't race on shared
+        state.  Results are returned in the same order as *tcs*.
+
+        Returns:
+            (results, todo_snaps) where results is [(tool_call_id, result_str)]
+            and todo_snaps is the merged list of todo events from all calls.
+
+        Raises:
+            HookInterrupt: if any tool call triggers a permission ASK — the
+            caller must fall back to sequential execution to yield the
+            e2a.ask frame.
+        """
+        per_tc_results: list[tuple[str, str] | None] = [None] * len(tcs)
+        per_tc_todos: list[list[dict]] = [[] for _ in range(len(tcs))]
+
+        async def _run_one(idx: int, tc: dict) -> None:
+            name = tc["function"]["name"]
+            try:
+                args = json.loads(tc["function"]["arguments"] or "{}")
+            except Exception:
+                args = {}
+
+            # Isolated TODO buffer for this tool call
+            tc_todo_buffer: list[dict] = []
+            TODO_EVENTS.set(tc_todo_buffer)
+
+            tc_ctx = HookContext(
+                agent=self,
+                event=HookEvent.BEFORE_TOOL_CALL,
+                inputs=ToolCallInputs(name=name, args=args, tool_call_id=tc["id"]),
+                session_id=session_id,
+                request_id=request_id,
+                extra={},  # isolated — no shared approval state
+            )
+            try:
+                result = await self._hooked_tool_call(tc_ctx)
+            except HookInterrupt:
+                raise  # signal caller to fall back to sequential
+            except Exception as exc:
+                result = f"[tool error] {type(exc).__name__}: {exc}"
+
+            per_tc_results[idx] = (tc["id"], result)
+            per_tc_todos[idx] = list(tc_todo_buffer)
+
+        raw_results = await asyncio.gather(
+            *[asyncio.create_task(_run_one(i, tc)) for i, tc in enumerate(tcs)],
+            return_exceptions=True,
+        )
+
+        # Check for HookInterrupt — any means we must fall back to sequential
+        for r in raw_results:
+            if isinstance(r, HookInterrupt):
+                raise r
+
+        # Collect results in order — all should be None (successful _run_one returns None)
+        results: list[tuple[str, str]] = []
+        for r in per_tc_results:
+            if r is not None:
+                results.append(r)
+        all_todos = [snap for tc_todos in per_tc_todos for snap in tc_todos]
+        return results, all_todos
 
     async def _sanitize_orphan_tool_calls(self, session_id: str, request_id: str) -> None:
         """If the session's most recent assistant-with-tool_calls message lacks
