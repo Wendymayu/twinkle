@@ -101,7 +101,7 @@ def test_tool_manager_schemas_have_required_url_or_query() -> None:
     assert by_name["web_fetch"]["function"]["parameters"]["required"] == ["url"]
     assert by_name["web_search"]["function"]["parameters"]["required"] == ["query"]
     assert by_name["web_fetch"]["function"]["parameters"]["properties"]["max_chars"] == {
-        "type": "integer", "default": 8000
+        "type": "integer", "default": 50000
     }
     assert by_name["web_search"]["function"]["parameters"]["properties"]["max_results"] == {
         "type": "integer", "default": 5
