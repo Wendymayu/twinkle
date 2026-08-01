@@ -20,9 +20,9 @@ export interface ApprovalAskPayload {
 export type ApprovalAskHandler = (payload: ApprovalAskPayload, requestId: string) => void
 
 export interface TodoTask {
-  idx: number
-  title: string
-  status: 'waiting' | 'running' | 'completed'
+  id: string
+  subject: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
   result: string
 }
 

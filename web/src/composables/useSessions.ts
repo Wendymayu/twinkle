@@ -57,7 +57,7 @@ const completedCount = computed(() =>
 
 function box(status: TodoTask['status']): string {
   if (status === 'completed') return '✓'
-  if (status === 'running') return '◐'
+  if (status === 'in_progress') return '◐'
   return '○'
 }
 

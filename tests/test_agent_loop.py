@@ -199,8 +199,8 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
     # load-bearing rather than silently skippable.
     # ContextVar was set to the envelope's session_id; the loop's todo_create
     # wrote to the shared singleton (= isolated_todo_store).
-    assert len(asyncio.run(isolated_todo_store.list_tasks("s-todo"))) == 2
-    assert asyncio.run(isolated_todo_store.list_tasks("default")) == []
+    assert len(asyncio.run(isolated_todo_store.list("s-todo"))) == 2
+    assert asyncio.run(isolated_todo_store.list("default")) == []
 
 
 def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store) -> None:
@@ -225,10 +225,10 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
     todo_frames = [f for f in frames if f.response_kind == "e2a.todo_update"]
     assert len(todo_frames) == 1
     body = todo_frames[0].body
-    assert [t["idx"] for t in body["tasks"]] == [1, 2]
+    assert [t["subject"] for t in body["tasks"]] == ["one", "two"]
     assert body["remaining"] == 2
     assert body["total"] == 2
-    assert body["tasks"][0]["title"] == "one"
+    assert body["tasks"][0]["subject"] == "one"
     # the todo_update frame is not final and precedes the final complete
     assert not todo_frames[0].is_final
     assert frames[-1].response_kind == "e2a.complete"

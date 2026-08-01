@@ -35,7 +35,7 @@ def test_create_returns_markdown_with_tasks() -> None:
     out = asyncio.run(run())
     assert "Created 2 todo tasks." in out
     assert "alpha" in out and "beta" in out
-    assert "[ ]" in out  # waiting checkbox
+    assert "[ ]" in out  # pending checkbox
 
 
 def test_complete_marks_and_lists() -> None:
@@ -52,7 +52,7 @@ def test_create_twice_returns_error_with_current_list() -> None:
     asyncio.run(todo_create.invoke({"tasks": ["first"]}))
     out = asyncio.run(todo_create.invoke({"tasks": ["second"]}))
     assert "Error:" in out
-    assert "in progress" in out
+    assert "already exists" in out
     assert "first" in out  # current list appended
     assert "second" not in out
 
@@ -110,9 +110,8 @@ def test_create_publishes_snapshot() -> None:
     snap = snapshots[0]
     assert snap["total"] == 2
     assert snap["remaining"] == 2
-    assert [t["idx"] for t in snap["tasks"]] == [1, 2]
-    assert all(t["status"] == "waiting" for t in snap["tasks"])
-    assert snap["tasks"][0]["title"] == "a"
+    assert all(t["status"] == "pending" for t in snap["tasks"])
+    assert snap["tasks"][0]["subject"] == "a"
 
 
 def test_complete_publishes_snapshot() -> None:

@@ -11,10 +11,10 @@ const { todo, completedCount, box } = useSessions()
       <span class="todo-count" v-if="todo">{{ completedCount }}/{{ todo.total }}</span>
     </div>
     <ul v-if="todo && todo.tasks.length" class="todo-list">
-      <li v-for="t in todo.tasks" :key="t.idx" :class="['todo-item', t.status]">
+      <li v-for="(t, idx) in todo.tasks" :key="t.id" :class="['todo-item', t.status]">
         <span class="todo-box">{{ box(t.status) }}</span>
-        <span class="todo-idx">{{ t.idx }}.</span>
-        <span class="todo-title">{{ t.title }}</span>
+        <span class="todo-idx">{{ idx + 1 }}.</span>
+        <span class="todo-title">{{ t.subject }}</span>
         <span class="todo-result" v-if="t.result">{{ t.result }}</span>
       </li>
     </ul>
