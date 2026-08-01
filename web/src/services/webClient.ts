@@ -22,8 +22,14 @@ export type ApprovalAskHandler = (payload: ApprovalAskPayload, requestId: string
 export interface TodoTask {
   id: string
   subject: string
+  description: string
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
   result: string
+  blocked_by: string[]
+  owner: string
+  metadata: Record<string, unknown>
+  created_at: number
+  updated_at: number
 }
 
 const SESSION_KEY = 'twinkle.sessionId'

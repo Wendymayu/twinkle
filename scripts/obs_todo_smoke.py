@@ -14,7 +14,7 @@ async def main():
     query = (
         "请帮我完成一个多步任务,并先用 todo_create 拆成子任务再逐步执行:"
         "1) 用 web_search 搜索 \"大语言模型\"; 2) 用 web_fetch 抓第一个结果页面;"
-        "3) 给出一句总结。每完成一步用 todo_complete 标记。"
+        "3) 给出一句总结。每完成一步用 todo_update(task_id, status=\"completed\") 标记。"
     )
     req = {
         "type": "req",
@@ -51,7 +51,7 @@ async def main():
                 saw_todo = True
                 p = frame.get("payload", {})
                 print(f"[todo ] remaining={p.get('remaining')}/{p.get('total')} "
-                      f"tasks={[ (t.get('idx'), t.get('title'), t.get('status')) for t in p.get('tasks', []) ]}")
+                      f"tasks={[ (t.get('id', '')[:8], t.get('subject'), t.get('status')) for t in p.get('tasks', []) ]}")
             else:
                 print(f"[? ] {frame}")
         print(f"\n=== summary: deltas={n_delta} saw_todo_update={saw_todo} "
