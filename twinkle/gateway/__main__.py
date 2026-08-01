@@ -28,6 +28,17 @@ async def main() -> None:
     web_channel = WebChannel(GATEWAY_HOST, GATEWAY_PORT)
     channel_manager.register_channel(web_channel)
 
+    from twinkle.gateway.cron.scheduler import CronSchedulerService
+    from twinkle.gateway.cron.store import CronJobStore, default_cron_jobs_path
+    from twinkle.workspace import ensure_workspace_dir
+    ensure_workspace_dir()
+    cron_store = CronJobStore(default_cron_jobs_path())
+    cron_scheduler = CronSchedulerService(
+        store=cron_store, agent_client=agent_client,
+        message_handler=message_handler,
+    )
+    await cron_scheduler.start()
+
     await channel_manager.start()
     # runs forever (WebChannel.start blocks on asyncio.Future)
     await web_channel.start()
