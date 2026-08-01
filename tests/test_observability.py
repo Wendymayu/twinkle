@@ -459,6 +459,30 @@ def test_instrument_tool_captures_args_result(tracer_exporter, meter_metricreade
     assert "gen_ai.tool.result" in attrs
 
 
+from twinkle.observability.instrumentors.llm import _trunc
+
+
+def test_trunc_default_is_full_no_truncation(monkeypatch):
+    """Default (TWINKLE_OBS_ATTR_LIMIT unset) captures full content — trace
+    input/output are fully visible without configuration (was capped at 4096)."""
+    monkeypatch.delenv("TWINKLE_OBS_ATTR_LIMIT", raising=False)
+    big = "x" * 50000
+    assert _trunc(big) == big
+
+
+def test_trunc_explicit_zero_is_full(monkeypatch):
+    monkeypatch.setenv("TWINKLE_OBS_ATTR_LIMIT", "0")
+    big = "y" * 50000
+    assert _trunc(big) == big
+
+
+def test_trunc_custom_limit_caps(monkeypatch):
+    monkeypatch.setenv("TWINKLE_OBS_ATTR_LIMIT", "4096")
+    out = _trunc("z" * 5000)
+    assert out.endswith("...")
+    assert len(out) == 4096 + 3  # cap + ellipsis suffix
+
+
 from twinkle.observability.instrumentors.agent import instrument_agent
 
 

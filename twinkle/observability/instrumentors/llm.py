@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 
 from opentelemetry.trace import Status, StatusCode
@@ -11,11 +12,30 @@ from twinkle.observability import attributes as A
 from twinkle.observability.context import current_request_context, increment_llm_counter
 from twinkle.observability.usage import read_usage_token
 
-_TRUNC_LIMIT = 4096
+_DEFAULT_ATTR_LIMIT = 0  # 0 = no truncation (full capture) by default
+
+
+def _attr_limit() -> int:
+    """Span-attribute truncation limit, from TWINKLE_OBS_ATTR_LIMIT (default 0 = full).
+
+    Default is no truncation so trace input/output are fully visible during
+    debugging; set a positive int (e.g. 4096) to cap each of gen_ai.input.messages
+    / tool.definitions / output.messages / tool.arguments / tool.result. Read
+    lazily so env changes (and tests) take effect without re-import.
+    """
+    raw = os.getenv("TWINKLE_OBS_ATTR_LIMIT", str(_DEFAULT_ATTR_LIMIT))
+    try:
+        n = int((raw or "").strip())
+    except (TypeError, ValueError):
+        n = _DEFAULT_ATTR_LIMIT
+    return max(0, n)
 
 
 def _trunc(s: str) -> str:
-    return s if len(s) <= _TRUNC_LIMIT else s[:_TRUNC_LIMIT] + "..."
+    limit = _attr_limit()
+    if limit <= 0 or len(s) <= limit:
+        return s
+    return s[:limit] + "..."
 
 
 def _stamp_ctx(span) -> None:
