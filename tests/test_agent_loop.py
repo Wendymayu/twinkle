@@ -171,7 +171,7 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "tc1", "type": "function",
                               "function": {"name": "todo_create",
-                                           "arguments": '{"tasks": ["step one", "step two"]}'}}]})],
+                                           "arguments": '{"subjects": ["step one", "step two"]}'}}]})],
         # turn 2: model answers
         [TextDelta("planned "), TextDelta("it"),
          Finish("stop", {"role": "assistant", "content": "planned it", "tool_calls": None})],
@@ -213,7 +213,7 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "tc1", "type": "function",
                               "function": {"name": "todo_create",
-                                           "arguments": '{"tasks": ["one", "two"]}'}}]})],
+                                           "arguments": '{"subjects": ["one", "two"]}'}}]})],
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
     loop = AgentLoop(llm, store, tool_manager())

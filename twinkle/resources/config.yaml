@@ -57,8 +57,9 @@ permissions:
     web_fetch: allow
     web_search: allow
     todo_create: allow
-    todo_complete: allow
+    todo_update: allow
     todo_list: allow
+    todo_get: allow
     memory_search: allow
     write_memory: allow
     read_memory: allow

@@ -1,15 +1,9 @@
 # twinkle/agentserver/tools/builtin/todo_tools.py
 """Todo 工具 — agent 内部任务规划的对外接口。
 
-3 个 @tool:create / complete / list。读 plan_todo_context 拿当前 session_id,
-经 get_todo_store() 取共享 TodoStore 单例操作,返回 markdown 串(附当前列表,
-省一次 todo_list round-trip)。TodoStore 的 create 返回 list[TodoTask],
-update 返回 (task, warning)。工具层在 mutation 后调用 list() 取全量
-再拼 markdown + snapshot。业务错误 catch 成 "Error: ..." 字符串返回。
-
-对齐 jiuwenclaw tools/todo_toolkits.py,砍 start/insert/remove/batch
-与 op-result 总线。store 单例经 todo.get_todo_store() 进程级共享(工具 + session.delete
-清理同一实例,同一套锁)。
+4 个 @tool: create / update / list / get。读 plan_todo_context 拿当前 session_id,
+经 get_todo_store() 取共享 TodoStore 单例操作, 返回 markdown 串(附当前列表,
+省一次 todo_list round-trip)。mutation 后调用 append_todo_event() 发布 snapshot。
 """
 from __future__ import annotations
 
@@ -28,10 +22,12 @@ def _format_tasks(tasks: list[TodoTask]) -> str:
     if not tasks:
         return "No todo tasks."
     lines = []
-    for i, t in enumerate(tasks, 1):
+    for t in tasks:
         icon = _ICON.get(t.status, "[ ]")
         suffix = f" | {t.result}" if t.result else ""
-        lines.append(f"- {icon} {i}. {t.subject}{suffix}")
+        deps = f" (blocked by: {', '.join(t.blocked_by[:6])}{'...' if len(t.blocked_by) > 6 else ''})" if t.blocked_by else ""
+        owner = f" [@{t.owner}]" if t.owner else ""
+        lines.append(f"- {icon} {t.subject}{deps}{owner}{suffix}")
     return "\n".join(lines)
 
 
@@ -41,51 +37,63 @@ def _append_list(message: str, tasks: list[TodoTask]) -> str:
 
 def _snapshot(tasks: list[TodoTask]) -> dict:
     """Structured todo snapshot for the UI (publish side-channel)."""
-    not_completed = sum(1 for t in tasks if t.status in ("pending", "in_progress"))
+    pending_running = sum(1 for t in tasks if t.status in ("pending", "in_progress"))
     completed = sum(1 for t in tasks if t.status == "completed")
     return {
         "tasks": [
-            {"id": t.id, "subject": t.subject, "status": t.status, "result": t.result}
+            {
+                "id": t.id, "subject": t.subject, "description": t.description,
+                "status": t.status, "result": t.result,
+                "blocked_by": t.blocked_by, "owner": t.owner,
+                "metadata": t.metadata,
+                "created_at": t.created_at, "updated_at": t.updated_at,
+            }
             for t in tasks
         ],
-        "remaining": not_completed,
-        "total": not_completed + completed,
+        "remaining": pending_running,
+        "total": pending_running + completed,
     }
 
 
 @tool
-async def todo_create(tasks: list[str]) -> str:
-    """Create a list of todo tasks to plan and track multi-step work. Do not use for single-step simple requests. Pass a list of task descriptions; fails if a todo list already exists for this session.
+async def todo_create(subjects: list[str], sequential: bool = False) -> str:
+    """Create a list of todo tasks to plan and track multi-step work. Do not use for single-step simple requests. Pass a list of task subjects; fails if a todo list already exists for this session. Use sequential=True when tasks must be executed in order.
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()
     try:
-        await store.create(session_id, tasks)
+        tasks = await store.create(session_id, subjects, sequential=sequential)
         current = await store.list(session_id)
         append_todo_event(_snapshot(current))
-        return _append_list(f"Created {len(current)} todo tasks.", current)
+        seq_note = " (sequential)" if sequential else ""
+        return _append_list(f"Created {len(tasks)} todo tasks{seq_note}.", current)
     except TodoError as exc:
         current = await store.list(session_id)
         return _append_list(f"Error: {exc}", current)
 
 
 @tool
-async def todo_complete(idx: int, result: str = "") -> str:
-    """Mark a todo task as completed and save a brief result. Pass the 1-based idx and an optional short result string.
+async def todo_update(task_id: str, status: str = "", result: str = "", owner: str = "", metadata: dict | None = None) -> str:
+    """Update a todo task's status, result, owner, or metadata. Use status="completed" to mark done, status="in_progress" to start working, status="cancelled" to cancel. Metadata is merged: set key to null to delete.
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()
     try:
-        current = await store.list(session_id)
-        if idx < 1 or idx > len(current):
-            raise TodoError(f"Task {idx} not found.")
-        task_id = current[idx - 1].id
-        task, warning = await store.update(session_id, task_id, status="completed", result=result)
+        kwargs = {}
+        if status:
+            kwargs["status"] = status
+        if result:
+            kwargs["result"] = result
+        if owner:
+            kwargs["owner"] = owner
+        if metadata is not None:
+            kwargs["metadata"] = metadata
+        task, warning = await store.update(session_id, task_id, **kwargs)
         current = await store.list(session_id)
         append_todo_event(_snapshot(current))
-        msg = f"Task {idx} marked as completed."
+        msg = f"Updated task {task_id}."
         if warning:
-            msg += f" {warning}"
+            msg += f"\n{warning}"
         return _append_list(msg, current)
     except TodoError as exc:
         current = await store.list(session_id)
@@ -93,10 +101,38 @@ async def todo_complete(idx: int, result: str = "") -> str:
 
 
 @tool
-async def todo_list() -> str:
-    """List all current todo tasks with their status. Returns 'No todo tasks.' when empty.
+async def todo_list(status: str = "") -> str:
+    """List all current todo tasks with their status. Optionally filter by status (pending/in_progress/completed/cancelled). Returns 'No todo tasks.' when empty.
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()
-    tasks = await store.list(session_id)
+    status_filter = status if status else None
+    tasks = await store.list(session_id, status=status_filter)
     return _format_tasks(tasks)
+
+
+@tool
+async def todo_get(task_id: str) -> str:
+    """Get details of a single todo task by its ID. Returns task info or error if not found.
+    """
+    session_id = get_plan_todo_session_id()
+    store = get_todo_store()
+    task = await store.get(session_id, task_id)
+    if task is None:
+        return f"Task {task_id} not found."
+    lines = [
+        f"ID: {task.id}",
+        f"Subject: {task.subject}",
+        f"Status: {task.status}",
+    ]
+    if task.description:
+        lines.append(f"Description: {task.description}")
+    if task.result:
+        lines.append(f"Result: {task.result}")
+    if task.blocked_by:
+        lines.append(f"Blocked by: {', '.join(task.blocked_by)}")
+    if task.owner:
+        lines.append(f"Owner: {task.owner}")
+    if task.metadata:
+        lines.append(f"Metadata: {task.metadata}")
+    return "\n".join(lines)

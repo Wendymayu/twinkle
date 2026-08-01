@@ -90,8 +90,9 @@ def test_tool_manager_registers_web_fetch_and_web_search() -> None:
     assert {"web_fetch", "web_search", "command_exec"} <= names
     assert {
         "todo_create",
-        "todo_complete",
+        "todo_update",
         "todo_list",
+        "todo_get",
     } <= names
 
 

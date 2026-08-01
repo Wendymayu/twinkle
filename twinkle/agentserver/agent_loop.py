@@ -108,8 +108,8 @@ def build_system_prompt() -> str:
 
 ## Todo（任务规划）
 
-你有 todo 工具来规划和追踪多步骤任务：todo_create、todo_complete、todo_list。
-- 非平凡的多步骤请求：先调 todo_create 列出子任务，逐步执行并用 todo_complete(idx, result) 标记完成，调 todo_list 查看进度。
+你有 todo 工具来规划和追踪多步骤任务：todo_create、todo_update、todo_list、todo_get。
+- 非平凡的多步骤请求：先调 todo_create 列出子任务，逐步执行并用 todo_update(task_id, status="completed", result=...) 标记完成，调 todo_list 查看进度，调 todo_get 查看单任务详情。
 - 简单单步请求：直接回答或调工具，不要使用 todo。
 
 ## 长期记忆
