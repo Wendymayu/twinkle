@@ -84,5 +84,6 @@ def test_run_stream_no_compress_under_threshold():
 
     asyncio.run(collect())
     assert real_llm.seen is not None
+    # Under threshold: no summary message inserted
     assert not any("[prior context summary]" in m.get("content", "") for m in real_llm.seen)
     assert frames and frames[-1].response_kind == "e2a.complete"

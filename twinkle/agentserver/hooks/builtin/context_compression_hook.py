@@ -9,8 +9,13 @@ LLM 摘要成一条 system 消息，保留 head(system)+tail(最近 N 对,tool �
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from twinkle.agentserver.context_compression import compress_messages
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
+
+if TYPE_CHECKING:
+    from twinkle.agentserver.llm_client import LLMClient
 
 
 class ContextCompressionHook(AgentHook):
