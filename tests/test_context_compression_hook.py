@@ -1,6 +1,6 @@
 import asyncio
 
-from twinkle.agentserver.context_compression import estimate_tokens
+from twinkle.agentserver.compression import estimate_tokens
 from twinkle.agentserver.hooks.base import ModelCallInputs
 from twinkle.agentserver.hooks.builtin import ContextCompressionHook
 from twinkle.agentserver.llm_client import TextDelta

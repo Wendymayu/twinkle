@@ -1,7 +1,7 @@
 import asyncio
 
 from twinkle.agentserver import agent_loop
-from twinkle.agentserver.context_compression import estimate_tokens
+from twinkle.agentserver.compression import estimate_tokens
 from twinkle.agentserver.hooks.builtin import ContextCompressionHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.e2a.models import E2AEnvelope

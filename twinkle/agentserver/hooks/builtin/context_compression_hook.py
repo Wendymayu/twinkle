@@ -3,7 +3,7 @@
 每步主动压缩（与原内联调用等价）：估算 token 超 threshold 时，把 middle
 LLM 摘要成一条 system 消息，保留 head(system)+tail(最近 N 对,tool 配对闭合)。
 压缩结果不写回 SessionStore,只改 ctx.inputs.messages(赋新 list,不 in-place)。
-复用 context_compression.compress_messages,算法逻辑不变,只换调用方。
+复用 compression.compress_messages,算法逻辑不变,只换调用方。
 
 阈值传 None 时从 config 读(生产),测试可直传(仿 SkillHook.mode)。
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from twinkle.agentserver.context_compression import compress_messages
+from twinkle.agentserver.compression import compress_messages
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
 
 if TYPE_CHECKING:
