@@ -16,7 +16,7 @@ from twinkle.agentserver.hooks.base import AgentHook, HookContext
 class ContextCompressionHook(AgentHook):
     priority = 95  # 功能层;高于 SkillHook(90)/MemoryHook(80),确保先跑、看原始 session 消息
 
-    def __init__(self, llm, *, token_threshold=None, keep_recent_pairs=None, summary_prompt=None):
+    def __init__(self, llm: "LLMClient", *, token_threshold: int | None = None, keep_recent_pairs: int | None = None, summary_prompt: str | None = None) -> None:
         self._llm = llm
         self._token_threshold = token_threshold
         self._keep_recent_pairs = keep_recent_pairs
