@@ -193,11 +193,10 @@ class AgentLoop:
         ctx: HookContext,
         envelope: E2AEnvelope,
     ) -> AsyncIterator[E2AResponse]:
-        """The ReAct loop with hook trigger points + context compression inserted.
+        """The ReAct loop with hook trigger points.
 
         Model calls use manual self._hook_manager.execute() (async generator incompatible with @hook).
         Tool calls use @hook-decorated _hooked_tool_call.
-        Context compression runs before each LLM call.
         """
         session_id = envelope.session_id
         PLAN_TODO_SESSION_ID.set(session_id or "default")

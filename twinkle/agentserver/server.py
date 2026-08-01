@@ -66,6 +66,10 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
     mirroring jiuwenswarm's adapter, which binds the executor onto its stream
     rail. The caller's hooks (PermissionHook etc.) have external/no deps and
     are caller-passed.
+
+    ContextCompressionHook is likewise auto-wired (not caller-passed): its sole
+    dependency (llm) is available here, same dep-availability principle as
+    SubagentContextHook/executor — so it needs no caller involvement.
     """
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
