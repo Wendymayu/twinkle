@@ -66,18 +66,23 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
     mirroring jiuwenswarm's adapter, which binds the executor onto its stream
     rail. The caller's hooks (PermissionHook etc.) have external/no deps and
     are caller-passed.
+
+    ContextCompressionHook is likewise auto-wired (not caller-passed): its sole
+    dependency (llm) is available here, same dep-availability principle as
+    SubagentContextHook/executor — so it needs no caller involvement.
     """
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
     tools = tool_manager()
     loop = AgentLoop(llm, store, tools)
     from twinkle.agentserver.tools.builtin.subagent import create_subagent_executor
-    from twinkle.agentserver.hooks.builtin import SubagentContextHook
+    from twinkle.agentserver.hooks.builtin import SubagentContextHook, ContextCompressionHook
     from twinkle.config import settings
     executor = create_subagent_executor(
         llm=llm, store=store, parent_tools=tools, config=settings.subagent
     )
-    for hook in list(hooks or []) + [SubagentContextHook(executor)]:
+    # ContextCompressionHook auto-wire:dep 是 llm,在此构造(同 SubagentContextHook/executor)。
+    for hook in list(hooks or []) + [SubagentContextHook(executor), ContextCompressionHook(llm=llm)]:
         loop.register_hook(hook)
     return loop
 

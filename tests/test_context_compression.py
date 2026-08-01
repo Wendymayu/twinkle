@@ -1,6 +1,6 @@
 import asyncio
 
-from twinkle.agentserver.context_compression import (
+from twinkle.agentserver.compression import (
     _render_messages_text,
     _split_keep_tool_pairs,
     _summarize,

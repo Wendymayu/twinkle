@@ -38,12 +38,8 @@ from twinkle.agentserver.hooks.base import (
 from twinkle.agentserver.hooks.decorator import hook
 from twinkle.agentserver.hooks.manager import HookManager
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
-from twinkle.agentserver.context_compression import compress_messages
 from twinkle.config import (
     AGENT_MAX_STEPS as MAX_STEPS,
-    CONTEXT_KEEP_RECENT_PAIRS,
-    CONTEXT_SUMMARY_PROMPT,
-    CONTEXT_TOKEN_THRESHOLD,
     MEMORY_DIR,
     SKILLS_DIR,
     WORKSPACE_DIR,
@@ -198,11 +194,10 @@ class AgentLoop:
         ctx: HookContext,
         envelope: E2AEnvelope,
     ) -> AsyncIterator[E2AResponse]:
-        """The ReAct loop with hook trigger points + context compression inserted.
+        """The ReAct loop with hook trigger points.
 
         Model calls use manual self._hook_manager.execute() (async generator incompatible with @hook).
         Tool calls use @hook-decorated _hooked_tool_call.
-        Context compression runs before each LLM call.
         """
         session_id = envelope.session_id
         PLAN_TODO_SESSION_ID.set(session_id or "default")
@@ -227,15 +222,6 @@ class AgentLoop:
         full_text = ""
         for _step in range(self._max_steps):
             msgs = self._session_store.get_messages(session_id)
-
-            # -- Context compression (before hook trigger) -- #
-            msgs = await compress_messages(
-                msgs,
-                self._llm,
-                token_threshold=CONTEXT_TOKEN_THRESHOLD,
-                keep_recent_pairs=CONTEXT_KEEP_RECENT_PAIRS,
-                summary_system_prompt=CONTEXT_SUMMARY_PROMPT,
-            )
 
             # -- BEFORE_MODEL_CALL -- #
             ctx.inputs = ModelCallInputs(messages=msgs, tools=self._tool_manager.schemas())
