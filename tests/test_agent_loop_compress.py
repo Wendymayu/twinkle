@@ -2,6 +2,7 @@ import asyncio
 
 from twinkle.agentserver import agent_loop
 from twinkle.agentserver.context_compression import estimate_tokens
+from twinkle.agentserver.hooks.builtin import ContextCompressionHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.e2a.models import E2AEnvelope
 
@@ -40,17 +41,14 @@ class _LLM:
         )
 
 
-def test_run_stream_compresses_before_llm(monkeypatch):
-    # Force compression threshold very low so compression triggers.
-    monkeypatch.setattr(agent_loop, "CONTEXT_TOKEN_THRESHOLD", 1)
-    monkeypatch.setattr(agent_loop, "CONTEXT_KEEP_RECENT_PAIRS", 2)
-    monkeypatch.setattr(agent_loop, "CONTEXT_SUMMARY_PROMPT", "p")
-
+def test_run_stream_compresses_before_llm():
     big = [{"role": "system", "content": "s"}]
     big += [{"role": "user", "content": f"turn{i} " + "x" * 200} for i in range(20)]
     store = _Store(big)
     real_llm = _LLM()
     loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools())
+    loop.register_hook(ContextCompressionHook(
+        llm=real_llm, token_threshold=1, keep_recent_pairs=2, summary_prompt="p"))
 
     env = E2AEnvelope(
         request_id="r1", session_id="s1", method="chat.send", params={"query": "hi"}
@@ -62,22 +60,18 @@ def test_run_stream_compresses_before_llm(monkeypatch):
             frames.append(f)
 
     asyncio.run(collect())
-    # The messages sent to the real LLM turn were compressed (smaller than input)
     assert real_llm.seen is not None
     assert estimate_tokens(real_llm.seen) < estimate_tokens(big)
-    assert real_llm.seen[0]["role"] == "system"  # head preserved
+    assert real_llm.seen[0]["role"] == "system"  # head 保留
 
 
-def test_run_stream_no_compress_under_threshold(monkeypatch):
-    # Default-sized threshold + tiny history => no compression, behavior unchanged.
-    monkeypatch.setattr(agent_loop, "CONTEXT_TOKEN_THRESHOLD", 60_000)
-    monkeypatch.setattr(agent_loop, "CONTEXT_KEEP_RECENT_PAIRS", 6)
-    monkeypatch.setattr(agent_loop, "CONTEXT_SUMMARY_PROMPT", "p")
-
+def test_run_stream_no_compress_under_threshold():
     small = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
     store = _Store(small)
     real_llm = _LLM()
     loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools())
+    loop.register_hook(ContextCompressionHook(
+        llm=real_llm, token_threshold=60_000, keep_recent_pairs=6, summary_prompt="p"))
 
     env = E2AEnvelope(
         request_id="r2", session_id="s2", method="chat.send", params={"query": "yo"}
@@ -89,7 +83,6 @@ def test_run_stream_no_compress_under_threshold(monkeypatch):
             frames.append(f)
 
     asyncio.run(collect())
-    # Under threshold: no summary message inserted
     assert real_llm.seen is not None
     assert not any("[prior context summary]" in m.get("content", "") for m in real_llm.seen)
     assert frames and frames[-1].response_kind == "e2a.complete"
