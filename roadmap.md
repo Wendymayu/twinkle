@@ -12,8 +12,11 @@
 ### 明确保留（核心，已落地）
 - gateway↔agentserver 两进程 + 双向 ws
 - agent loop 核心闭环（ReAct：think → 选工具 → 执行 → 结果回灌 → 再决策）
-- 工具系统（四层 ToolManager + `@tool` + builtin：web/shell/file/todo）
+- 工具系统（四层 ToolManager + `@tool` + 24 个 builtin 工具：web_fetch/web_search/command_exec/file_ops(5)/todo(4)/skill(2)/memory(4)/cron(5)/subagent(1)）
+- Hook 系统（7 个 builtin hook：Permission/Skill/Memory/Compression/Retry/Logging/SubagentContext）
 - 短期记忆（SessionStore 多轮对话记录）
+- 长期记忆（MemoryManager SQLite 混合检索 + 4 个 memory 工具）
+- 长会话上下文压缩（ContextCompressionHook 自动压缩）
 - 单 web channel（+ channel 扩展点）
 - **OTel 遥测切面**（`observability/` 包：`setup()` 在 `agentserver/__main__` 启动时接入，monkey-patch `AgentLoop.run_stream` / `LLMClient.stream` / `ToolManager.execute` 三个 choke point 造 span，OTLP gRPC / console / none 导出 + 指标；`OTEL_ENABLED` 默认 false 为零成本 no-op）
 
@@ -35,12 +38,14 @@
 ## 现状速览
 
 - **Phase 0–2 已落地**：两进程骨架、agent loop 闭环、四层工具系统（含 todo/command_exec/file_ops）。
+- **Phase 3（长会话上下文压缩）已落地**：`ContextCompressionHook`（`before_model_call` 自动压缩）+ `compression/` 算法包（滑窗+LLM 摘要），已合并进主线。对应里程碑 M4 ✅。
+- **Phase 4（工具权限 / 审批 + 命令安全）已落地**：`permissions/` 包 + `PermissionHook` + ASK 挂起/恢复 + JSONL 审计 + `TWINKLE_PERMISSIONS` opt-in。对应里程碑 M5 ✅。
+- **Phase 5a（长期记忆）已落地**：`memory/` 包 + `MemoryHook` + 4 个 memory 工具 + SQLite 混合检索。对应里程碑 M6 ✅。
+- **Phase 6（定时任务 cron）已落地**：`CronSchedulerService`（min-heap + croniter + 两阶段 wake→push）+ `CronJobStore` + 5 个 cron 工具 + gateway 集成。对应里程碑 M7 ✅。
+- **Phase 7（Skill 系统）已落地**：`skills/` 包 + `SkillHook` + SkillNet 一键下载/安装。对应里程碑 M8 ✅。
+- **Phase 8（子 Agent）已落地**：`spawn_subagent` + `SubagentExecutor` + `SubagentContextHook` + ContextVar 隔离 + 软硬超时 + 递归保护。对应里程碑 M9 ✅。
+- **Phase 8a（Todo 增强）已落地**：TodoTask 数据模型增强（id、blocked_by、owner、metadata）+ 4 个工具重写 + `sequential=True` + 前端状态分组。对应里程碑 M9a ✅。
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
-- **Phase 3（长会话上下文压缩）**：初版已在 nightly worktree `nightly/phase-3-6-4` 实现（滑窗+LLM 摘要，独立模块 `context_compression.py`，不写回 SessionStore），待 review/merge 进主线；后续优化方向见 §Phase 3。
-- **Phase 4（工具权限 / 审批 + 命令安全）**：已落地（spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md` + plan `docs/superpowers/plans/2026-07-24-phase4-permissions.md`）。`permissions/` 包 + `PermissionHook` + ASK 挂起/恢复 + JSONL 审计 + `TWINKLE_PERMISSIONS` opt-in；3-axis / shell-AST 仍 deferred（见 §Phase 4 精简范围）。
-- **Phase 7（Skill 系统）**：已落地（spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`）。`skills/` 包 + `list_skill`/`read_skill` 工具 + `SkillHook`（`all`/`auto_list` 两模式，默认 all，`TWINKLE_SKILL_MODE` 切换）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录 + 示例 `doc-audit`；`skill_turbo`/进化/marketplace 仍 deferred。**SkillNet 一键下载/安装已落地(v1)**：前端「🧩 技能」页搜索 SkillNet 公开目录(api-skillnet.openkg.cn)并安装到 `<WORKSPACE>/skills`；搜索走 SkillNet 公开 API、下载走 GitHub Contents/raw API，自实现不依赖 skillnet-ai（见 spec `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`）。对应里程碑 M8 ✅。
-- **Phase 8（Todo 增强）**：已落地（spec `docs/superpowers/specs/2026-08-01-todo-enhancement-design.md`）。TodoTask 数据模型增强（id、subject、description、blocked_by、owner、metadata）；4 个工具重写（todo_create/update/list/get）；`sequential=True` 一步创建线性依赖；轻量守卫（跳步检测 + 提醒）；前端按状态分组 + 依赖/归属展示。对应里程碑 M9 ✅。
-- **Phase 5 起为"后续必做"的进阶能力**（原属 deferred，现提升为规划项）。
 
 ---
 
@@ -84,19 +89,14 @@
 
 ---
 
-### Phase 3 — 长会话上下文压缩  `[待启动]`
+### Phase 3 — 长会话上下文压缩  `[已完成]`
 **目标**：长对话不爆 token、不丢关键上下文。
 
-内容：
-- 实现 `docs/en/ContextCompression.md` 对应能力：上下文压缩与卸载。
-- 这是"短期记忆"里唯一需要后置的非平凡部分（对话记录本身已在 Phase 1）。
+**已落地**：`twinkle/agentserver/compression/` 算法包（滑窗 + LLM 摘要，**不写回 SessionStore**——history 无损，只塑形 LLM 输入）+ `hooks/builtin/context_compression_hook.py`（`ContextCompressionHook` priority 95，`before_model_call` 自动触发：token 估算超阈值时压缩 middle，保 head + 最近 tail，tool 配对不破；summary 失败降级为 head+tail）。`build_agent_loop` 自动织入（与 SubagentContextHook 同款，无需 caller 传参）。spec `docs/superpowers/specs/2026-08-01-context-compression-hook-design.md`。
 
-**初版**（nightly worktree `nightly/phase-3-6-4`，待 review/merge）：独立模块 `context_compression.py`（115 行），滑窗 + LLM 摘要，**不写回 SessionStore**（history 无损，只塑形 LLM 输入）；token 估算超阈值触发，保 head + 最近 tail（tool 配对不破），summary 失败降级为 head+tail。单模、仅主动、middle 丢弃不可召回。
-
-**验收**：单会话 100 轮对话不爆 token、关键事实不丢。
+**验收**：单会话 100 轮对话不爆 token、关键事实不丢。 ✅
 
 **后续优化方向（对齐 jiuwenswarm）**——参考 `docs/en/ContextCompression.md` + `jiuwenclaw/agentserver/deep_agent/rails/context_overflow_recovery_rail.py`（`enterprise_dev` 分支，`git show enterprise_dev:<path>` 读取）：
-- **rail 钩子织入**：压缩从 `run_stream` 内联提到框架切面（`before_model_call` / `on_model_exception` / `after_model_call`），与循环解耦，并为 Phase 5 记忆注入复用同一钩子点铺路。
 - **413 反应救火重试**：LLM 抛 413 / `context_length_exceeded` 时解析 token 数（Anthropic / OpenAI / 华为三种格式），强压 + `request_retry()` 重试 + 连续失败熔断。初版只赌主动压缩能防住，赌错则请求直接挂。
 - **触发条件多维度**：现仅 `estimate_tokens` 单阈值；加 message 计数维度、`large_message_threshold`（优先压大消息）、`offload_message_type`（可只压 tool 输出保对话）等旋钮。
 - **窗口预算**：现固定阈值 60000；改为按模型窗口动态算（jiuwenswarm `threshold_override = 窗口 × 0.85`，预留 15% 给输出），随模型切换自适应。
@@ -107,87 +107,60 @@
 ### Phase 4 — 工具权限 / 审批 + 命令安全  `[已完成]`
 **目标**：从"裸跑工具"升级到"工具可被策略管控，危险操作需审批"。
 
-内容：
-- **在 `agent_loop` 引入最小钩子点**（`before_tool_call` / `after_tool_call`）——后续权限、记忆注入（Phase 5）都挂在这上面。**不上完整 rail/plugin 系统**，只埋切面。
-- **每工具档位策略**：`allow` / `deny` / `require-approval`。
-- **危险工具交互审批流**（command_exec / write_file / edit_file）：`ASK` → 用户 `allow_once` / `allow_always` / `deny`，通过 channel 回调；决策结果与拒绝消息回灌 agent。
-- **command_exec 安全增强**：在现有 blocklist + workspace 收敛基础上，借鉴 `bash_tool_safety.py` 补路径安全 / 预算控制。
-- **审计日志** `ToolPermissionLog`：tool / decision(ALLOW/DENY/ASK) / source / rule / channel / session / timestamp，每决策都记。
-- **精简范围（不做）**：shell AST 解析、三轴文件路径判定——复杂度高、对学习项目偏重，留作后续可选增强。`PERMISSION_ENABLED_CHANNELS` 按通道门控（其余通道全量放行）。
+**已落地**：`twinkle/agentserver/permissions/` 包（models / builtin_rules / policy / audit / approval_registry / engine）+ `permission_context.py` ContextVar + `PermissionHook`（before_tool_call：ALLOW no-op / DENY force_finish / ASK raise HookInterrupt）。ASK 挂起/恢复用进程内 `ApprovalRegistry`（approval_id → asyncio.Future 单例）：`agent_loop` 的 `except HookInterrupt` 注册 Future + yield `e2a.ask`（is_final=false）后 `await future` 挂起；`ws_handler` 内联路由 `approval.respond`（在 active-run guard 之前）→ resolve Future + 回 e2a.result ack（R2）；挂起的 run_stream 在**原 request_id**（R）上恢复 → 执行工具（allow）或注入 deny 消息回灌 → 再查模型。command_exec 的 blocklist 上提为 `builtin_rules.py` 单一真源（8 + 9 = 17 条），command_exec 与 PermissionPolicy 共读，disabled 模式下 command_exec 仍走它做 defense-in-depth。`TWINKLE_PERMISSIONS` 单 JSON env（对齐 OTEL opt-in），`enabled=false` 默认 = 系统关（全 ALLOW、无审计、无 ASK）。**精简范围仍 deferred**：shell AST 解析、三轴文件路径判定。spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md`。
 
-**初版**（已落地，见 spec / plan）：`twinkle/agentserver/permissions/` 包（models / builtin_rules / policy / audit / approval_registry / engine）+ `permission_context.py` ContextVar + `PermissionHook`（before_tool_call：ALLOW no-op / DENY force_finish / ASK raise HookInterrupt）。ASK 挂起/恢复用进程内 `ApprovalRegistry`（approval_id → asyncio.Future 单例）：`agent_loop` 的 `except HookInterrupt` 注册 Future + yield `e2a.ask`（is_final=false）后 `await future` 挂起；`ws_handler` 内联路由 `approval.respond`（在 active-run guard 之前）→ resolve Future + 回 e2a.result ack（R2）；挂起的 run_stream 在**原 request_id**（R）上恢复 → 执行工具（allow）或注入 deny 消息回灌 → 再查模型。command_exec 的 blocklist 上提为 `builtin_rules.py` 单一真源（8 + 9 = 17 条），command_exec 与 PermissionPolicy 共读，disabled 模式下 command_exec 仍走它做 defense-in-depth。`TWINKLE_PERMISSIONS` 单 JSON env（对齐 OTEL opt-in），`enabled=false` 默认 = 系统关（全 ALLOW、无审计、无 ASK）。**精简范围仍 deferred**：shell AST 解析、三轴文件路径判定。
-
-**验收**：危险工具调用前必须过策略；`require-approval` 工具触发用户审批卡；拒绝带 `[PERMISSION_DENIED]` 消息回灌；审计日志可查。
+**验收**：危险工具调用前必须过策略；`require-approval` 工具触发用户审批卡；拒绝带 `[PERMISSION_DENIED]` 消息回灌；审计日志可查。 ✅
 
 ---
 
-### Phase 5 — 长期记忆  [Phase 5a 已完成]
+### Phase 5 — 长期记忆  `[已完成]`
 **目标**：换掉 `memory.py` stub，agent 具备跨会话事实召回能力（RAG）。
 
-内容：
-- **embedding provider**：OpenAI-compatible（复用 `TWINKLE_LLM_BASE_URL` 体系）+ Mock fallback（无 key 时降级）。
-- **召回存储**：单文件 SQLite 混合检索（`sqlite-vec` 向量余弦 + FTS5 BM25，`strictest` 合并），无 embedding 配置时自动降级 FTS-only。DB 落在 `~/.twinkle/memory/memory.db`。
-- **`recall()` / `store()` 真实现**：在 agent loop 每轮 `llm.stream` 前注入召回的相关记忆（借 Phase 4 的钩子点）。
-- **接口形状不变**（Phase 1 已钉死），不回炉。
-- **不做**：外部记忆 provider 分发（mem0/openviking）、wiki LLM 子 agent 索引——留作后续可选。
+**已落地**：`twinkle/agentserver/memory/` 包（`store.MemoryManager` 6 表 SQLite 混合检索：`chunks`/`chunks_fts`/`chunks_vec`/`embedding_cache`/`files`/`meta`；`sqlite-vec` 余弦向量 + FTS5 BM25 加权融合，无 provider / 无 sqlite-vec 自动降级 FTS-only；mtime 增量索引 + embedding cache + 模型变更重建 + 单文件 chunk FIFO 上限 + CJK 逐字分词救 FTS 召回）+ `embeddings.py`（`OpenAICompatibleEmbeddingProvider` 复用 `llm.api_key`/`llm.base_url`；`MockEmbeddingProvider` 仅测试）+ `get_memory_manager` 单例 + `tools/builtin/memory_tools.py`（`memory_search`/`write_memory`/`read_memory`/`edit_memory` @tool，**模型驱动，不自动注入**——MemoryHook 注入的是使用策略 prompt，不是召回结果）+ `hooks/builtin/memory_hook.py`（`MemoryHook` priority 80，`before_model_call` 注入策略 prompt，空 store no-op）+ `config.yaml` `memory:` 块 + `permissions.tools` 默认 4 个 memory tool=allow + `pyproject` `[memory]` extra（sqlite-vec）。DB 落 `<WORKSPACE>/.twinkle_data/memory/memory.db`。spec `docs/superpowers/specs/2026-07-27-long-term-memory-design.md`。
 
-**验收**：跨会话记住事实（如"用户偏好/项目约定"），新会话里 `recall` 注入相关记忆进上下文；无 embedding 配置时降级到 FTS 仍可用。
+**验收**：跨会话记住事实（如"用户偏好/项目约定"），新会话里 `recall` 注入相关记忆进上下文；无 embedding 配置时降级到 FTS 仍可用。 ✅
 
-**已落地（Phase 5a）**：`twinkle/agentserver/memory/` 包（`store.MemoryManager` 6 表 SQLite 混合检索：`chunks`/`chunks_fts`/`chunks_vec`/`embedding_cache`/`files`/`meta`；`sqlite-vec` 余弦向量 + FTS5 BM25 加权融合，无 provider / 无 sqlite-vec 自动降级 FTS-only；mtime 增量索引 + embedding cache + 模型变更重建 + 单文件 chunk FIFO 上限 + CJK 逐字分词救 FTS 召回）+ `embeddings.py`（`OpenAICompatibleEmbeddingProvider` 复用 `llm.api_key`/`llm.base_url`；`MockEmbeddingProvider` 仅测试）+ `get_memory_manager` 单例 + `tools/builtin/memory_tools.py`（`memory_search`/`write_memory`/`read_memory`/`edit_memory` @tool，**模型驱动，不自动注入**——MemoryHook 注入的是使用策略 prompt，不是召回结果）+ `hooks/builtin/memory_hook.py`（`MemoryHook` priority 80 < `SkillHook` 90，`before_model_call` 注入策略 prompt，空 store no-op，赋新 list 不原地 mutate）+ `config.yaml` `memory:` 块 + `MEMORY_*` 常量 + `permissions.tools` 默认 4 个 memory tool=allow + `pyproject` `[memory]` extra（sqlite-vec）+ `ensure_workspace_dir` 建 `MEMORY_DIR`/`daily_memory/`。DB 落 `<WORKSPACE>/.twinkle_data/memory/memory.db`。spec `docs/superpowers/specs/2026-07-27-long-term-memory-design.md` + plan `docs/superpowers/plans/2026-07-27-long-term-memory.md`。**仍 deferred**：5b 自动抽取（对话自动写记忆）、5c Dreaming（离线记忆整理，取代 FIFO 上限）。
+**仍 deferred**：5b 自动抽取（对话自动写记忆）、5c Dreaming（离线记忆整理，取代 FIFO 上限）。
 
 ---
 
-### Phase 6 — 定时任务（cron）
+### Phase 6 — 定时任务（cron）  `[已完成]`
 **目标**：agent 能被定时唤醒执行任务，结果推送到通道。
 
-内容：
-- **`CronSchedulerService`**：min-heap + `croniter` 算下一次执行时间，轮询 `cron_jobs.json` 的 mtime 做热加载。
-- **两阶段 wake→push**：`wake_offset`（默认 300s）在 push 前先唤醒——构造 `E2AEnvelope`（`channel_id="__cron__"`、`session_id="cron_<ts>_<jobid>"`、`method=chat.send`、`params.content=job.description`）发给 AgentServer；结果存 `CronRunState`，到 push 时间推到 `targets` 通道。
-- **`CronController`**：给 WebChannel 的单例 CRUD API（create/update/delete/toggle/list/preview）；支持单次任务（`delete_after_run`）、过期标记、`trigger_run_now` 立即触发。
-- **无前置依赖**：不依赖权限/记忆/skill，可独立落地（故提前到 Phase 6，让 agent 尽早具备定时自主能力）。
+**已落地**：`twinkle/gateway/cron/` 包（`CronSchedulerService` min-heap + croniter 算下一次执行时间，轮询 `cron_jobs.json` mtime 热加载；两阶段 wake→push：`wake_offset` 在 push 前先唤醒 agent，结果存 `CronRunState`，到 push 时间推到 targets 通道）+ `CronJobStore`（`<workspace>/cron_jobs.json` CRUD）+ `cron_models.py`（`CronJob`/`CronRunState`/`_Event`）+ `cron_expr.py`（croniter 解析）+ `twinkle/agentserver/tools/builtin/cron_tools.py`（5 个 @tool：`cron_list_jobs`/`cron_create_job`/`cron_update_job`/`cron_delete_job`/`cron_run_now`；`run_now` 写 sidecar 文件，gateway 检测后触发）+ `gateway/__main__.py` 启动时集成 `CronSchedulerService`。spec `docs/superpowers/specs/2026-07-29-cron-design.md`。
 
-**验收**：注册一个 cron 任务，到点唤醒 agent 执行，结果推送到指定通道；支持单次任务与立即触发。
+**验收**：注册一个 cron 任务，到点唤醒 agent 执行，结果推送到指定通道；支持单次任务与立即触发。 ✅
 
 ---
 
 ### Phase 7 — Skill 系统  `[已完成]`
 **目标**：从"调原子工具"升级到"调用打包的知识+指令束（skill）"，支撑一类多步任务。
 
-内容：
-- **skill 定义**：`SKILL.md`（`name` / `description` frontmatter + 指令 + 示例），比 tool 高一层的抽象（一个 skill 包多个 tool + 流程）。
-- **skill 注册 / 发现 / 检索**：`SkillManager` 扫描 skills 目录，`ENABLED_SKILLS` 冷启动白名单；agent 决定何时把哪个 `SKILL.md` 读进上下文。
-- **参考实现**：`jiuwenclaw/agentserver/skill_manager.py` + `skill_turbo/`（planner→executor→fallback DeepAgent）。
-- **范围控制**：先做 skill 加载 + 选择注入；planner/executor 子 agent 编排可后置。
+**已落地**：`twinkle/agentserver/skills/` 包（`Skill` + `SkillManager` 扫描/mtime 热重载/白名单 + `get_skill_manager` 单例）+ `tools/builtin/skill_tools.py`（`list_skill`/`read_skill` @tool）+ `hooks/builtin/skill_hook.py`（`SkillHook` priority 90，`before_model_call` 按 `TWINKLE_SKILL_MODE` 注入：`all`=每步注入清单 / `auto_list`=注入一句提示，默认 all）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录约定 + 示例 skill `doc-audit`（首次启动 seed）。`trigger` frontmatter 解析后丢弃（模型靠 description 自选，不做关键词自动匹配）。**SkillNet 一键下载/安装已落地**：前端「🧩 技能」页搜索 SkillNet 公开目录(api-skillnet.openkg.cn)并安装到 `<WORKSPACE>/skills`；搜索走 SkillNet 公开 API、下载走 GitHub Contents/raw API，自实现不依赖 skillnet-ai。spec `docs/superpowers/specs/2026-07-27-skill-design.md` + `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`。
 
-**验收**：一个打包 skill 能被 agent 选中并读入上下文指导多步任务执行；skill 与 builtin tool 协同。
+**验收**：一个打包 skill 能被 agent 选中并读入上下文指导多步任务执行；skill 与 builtin tool 协同。 ✅
 
-**已落地**：`twinkle/agentserver/skills/` 包（`Skill` + `SkillManager` 扫描/mtime 热重载/白名单 + `get_skill_manager` 单例）+ `tools/builtin/skill_tools.py`（`list_skill`/`read_skill` @tool）+ `hooks/builtin/skill_hook.py`（`SkillHook` priority 90，`before_model_call` 按 `TWINKLE_SKILL_MODE` 注入：`all`=每步注入清单 / `auto_list`=注入一句提示，默认 all）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录约定 + 示例 skill `doc-audit`（首次启动 seed）。`trigger` frontmatter 解析后丢弃（模型靠 description 自选，不做关键词自动匹配）。spec `docs/superpowers/specs/2026-07-27-skill-design.md` + plan `docs/superpowers/plans/2026-07-27-skill.md`。**仍 deferred**：`skill_turbo` planner/executor（Phase 8）、skill 进化（Phase 9 + 长期记忆）、marketplace/symphony（企业级）。**已落地**：SkillNet 一键下载/安装（`skills.list_local`/`skills.search`/`skills.install`，搜索走 SkillNet 公开 API、下载走 GitHub API，自实现不依赖 skillnet-ai，见 spec `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`）。
+**仍 deferred**：`skill_turbo` planner/executor、skill 进化（Phase 9）、marketplace/symphony（企业级）。
 
 ---
 
-### Phase 8 — 子 Agent（subagent）
+### Phase 8 — 子 Agent（subagent）  `[已完成]`
 **目标**：从"单 agent 串行 ReAct"升级到"主 agent 可委派子 agent 并行/隔离执行子任务"，结果回灌由主 agent 整合。
 
-内容：
-- **工具化委派**：把 subagent 暴露成 builtin tool（`tools/builtin/subagent_tools.py` + `@tool`），主 `AgentLoop` 像调普通工具一样调用，工具阻塞到子 agent 收敛，结果作为 `{role:"tool"}` 消息回灌、主 agent 再总结——**复用 Phase 2 ToolManager 的 `schemas()`/`execute()` 面，agent_loop 零结构改动**。
-- **两种原语**（对照 jiuwenswarm）：
-  - `spawn_subagent`：**隔离上下文**（子 agent 用独立 SessionStore session `<parent_sid>__sub_<id>`，不继承父历史）。默认选择，天然适合并发处理不同子任务。
-  - `fork_agent`：**共享上下文**（继承父 agent 消息前缀，KVCache 复用 / 一致文档理解）。仅用于需共享理解的并行任务；fork 不可再 fork（无递归），spawn→fork 嵌套允许。
-- **子 AgentLoop 复用**：子 agent 即另开一个 `AgentLoop` 实例（复用 `LLMClient`/`SessionStore`/`ToolManager`），跑同一 `run_stream` 闭环，收敛后取 `e2a.complete` body 作 tool result。子 `ToolManager` 裁剪掉 subagent 自身 + 主 agent 级工具（防越权）。
-- **ContextVar 隔离**：新增 `subagent_context.py`（`SUBAGENT_PARENT_*` ContextVar，**与 `plan_todo_context.py` 同款**），`run_stream` 入口设父 session/request_id，子 agent 据此解析父上下文，并发请求 / 子 agent 间不串扰。
-- **超时与防失控**：硬超时（`TWINKLE_SUBAGENT_TIMEOUT`，默认 300s）+ 软超时（无流式响应 N 秒）兜底；结果包 `[SYSTEM]` 停止提示防主 agent 重复委派；子 agent `max_steps` 用更紧上限。
+**已落地**：`twinkle/agentserver/tools/builtin/subagent/` 包（`tools.py` 的 `spawn_subagent` @tool + `executor.py` 的 `SubagentExecutor` + `models.py` 的 `SubagentTaskSpec`/`SubagentResult`/`EXCLUDED_TOOLS` + `context.py` 的 ContextVar 隔离）+ `hooks/builtin/subagent_context_hook.py`（`SubagentContextHook` priority 50，`before_invoke` 设 executor + parent session/request id 到 ContextVar）。子 agent 即另开一个 `AgentLoop` 实例（复用 `LLMClient`/`SessionStore`，子 `ToolManager` 裁剪掉 `spawn_subagent`/`write_memory`/`edit_memory`），跑同一 `run_stream` 闭环，收敛后取 `e2a.complete` body 作 tool result。硬超时（300s）+ 软超时（120s 无流式响应）兜底；结果包 `[SYSTEM]` 停止提示防主 agent 重复委派；子 agent `max_steps=50`（更紧上限）。`build_agent_loop` 自动构建 `SubagentExecutor` + 织入 `SubagentContextHook`。spec `docs/superpowers/specs/2026-07-28-subagent-design.md`。
 
-**参考实现**：`jiuwenclaw/agentserver/tools/subagent_executor/`（`executor.py` 的 `ForkAgentExecutor`/软硬超时、`session_proxy.py` 的 `SubagentSessionProxy` 事件转发、`context_vars.py` 的 ContextVar 隔离）+ `subagent_tools.py`（`fork_agent`/`spawn_subagent` 工具入口）+ `subagent_models.py`（`SubagentTaskSpec`/`ForkAgentTaskSpec`/Result）。`enterprise_dev` 分支，`git show enterprise_dev:<path>` 读取。
+**验收**：主 agent 调 `spawn_subagent` 委派子任务 → 子 agent 独立跑完 ReAct 收敛 → 结果回灌 → 主 agent 总结给用户；超时/异常有兜底不挂死主循环。 ✅
 
-**范围控制（不做/推迟）**：
-- **流式转发**初版可不做——subagent 当黑盒，只回最终结果字符串；事件转发到父流（带来源标记 + 嵌套 session_id trace 层级）列为后续，需扩 `E2AResponse` + 前端渲染。
-- **skill 声明角色**（`SubagentConfig` frontmatter 的 roles/system_prompt/allowed_tools/parallel_max）依赖 Phase 7 skill 系统，本 Phase 先支持 `objective`+`prompt`+可选 `system_prompt` 覆盖的裸形态，skill 绑定角色后置。
-- **model_tier（lite/pro）降档**：Twinkle 无 tier 配置，先复用 `TWINKLE_LLM_MODEL` + 可选 `model_name` 覆盖，tier 体系不做。
-- **fork 与嵌套**：先做 spawn，fork（消息前缀继承）列为紧随其后的第二步；多级嵌套与 team 编排（`team/member_subagents.py`）不进。
-- **递归保护**：子 agent 工具集排除 subagent 工具自身（单层委派），避免失控。
-- **无硬前置依赖**：AgentLoop/ToolManager 已落地即可做；富形态（skill 声明角色）依赖 Phase 7。
+**仍 deferred**：`fork_agent`（消息前缀继承）、流式转发（事件转发到父流）、skill 声明角色（`SubagentConfig` frontmatter）、多级嵌套与 team 编排。
 
-**验收**：主 agent 调 `spawn_subagent` 委派子任务 → 子 agent 独立跑完 ReAct 收敛 → 结果回灌 → 主 agent 总结给用户；并发两个 spawn 处理不同子任务互不串扰；超时/异常有兜底不挂死主循环。
+---
+
+### Phase 8a — Todo 增强  `[已完成]`
+**目标**：将现有 Todo 系统从"扁平清单"增强为"结构化任务追踪"，对齐 jiuwenswarm 的 TodoItem + Claude Code 的 TaskCreate。
+
+**已落地**：`twinkle/agentserver/todo/store.py`（`TodoTask` 数据模型增强：`id`(UUID)/`subject`/`description`/`blocked_by`/`owner`/`metadata`/`created_at`/`updated_at`；4 态：pending/in_progress/completed/cancelled；`TodoStore` API 重写：`create(subjects, sequential)`/`update(task_id, ...)`/`list(status?)`/`get(task_id)`）+ `twinkle/agentserver/tools/builtin/todo_tools.py`（4 个 @tool：`todo_create`/`todo_update`/`todo_list`/`todo_get`；`sequential=True` 一步创建线性依赖；轻量守卫：跳步检测 + 提醒，不拒绝）+ 前端 `TodoPanel.vue`（按状态分组 + 依赖/归属展示 + 脉冲动画）+ `webClient.ts`/`useSessions.ts` 类型更新。spec `docs/superpowers/specs/2026-08-01-todo-enhancement-design.md`。
+
+**验收**：TodoTask 有唯一 ID、可设依赖、可追踪归属；`sequential=True` 一步创建线性依赖；前端按状态分组展示。 ✅
 
 ---
 
@@ -218,6 +191,39 @@
 
 ---
 
+## 跨阶段基础设施
+
+以下能力不在单一 Phase 中，而是随各 Phase 逐步积累形成的基础设施层：
+
+### Hook 系统  `[已落地]`
+Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
+- **`twinkle/agentserver/hooks/`** 包（`base.py` 的 `AgentHook` 基类 + `manager.py` 的 `HookManager` 优先级排序 + `decorator.py` 的 `@hook` 装饰器）
+- **7 个 builtin hook**：
+  - `PermissionHook`（priority 100，before_tool_call 权限拦截）
+  - `ContextCompressionHook`（priority 95，before_model_call 自动压缩）
+  - `SkillHook`（priority 90，before_model_call skill 注入）
+  - `MemoryHook`（priority 80，before_model_call 记忆策略注入）
+  - `SubagentContextHook`（priority 50，before_invoke ContextVar 桥接）
+  - `LoggingHook`（priority 10，LLM/tool 调用日志）
+  - `RetryHook`（priority 0，transient 异常自动重试）
+- **事件**：`before_invoke`/`after_invoke`/`before_model_call`/`after_model_call`/`on_model_exception`/`before_tool_call`/`after_tool_call`/`on_tool_exception`
+- **中断机制**：`HookInterrupt`（PermissionHook ASK 挂起/恢复）
+
+### YAML 配置系统  `[已落地]`
+- **`twinkle/config/`** 包（`schema.py` 的 pydantic 严格模型 + `loader.py` 的 YAML/env 加载）
+- **优先级**：环境变量 > `.env` 文件 > `config.yaml` 默认值
+- **配置块**：agentserver / gateway / workspace / logging / sessions / todos / llm / agent / context_compression / skills / memory / permissions / subagent
+- spec `docs/superpowers/specs/2026-07-27-yaml-config-design.md`
+
+### Web 工具  `[已落地]`
+- **`web_fetch`**：httpx 异步抓取 + HTML→markdown + 长度截断 + Tavily extract fallback（anti-bot 403）
+- **`web_search`**：Tavily 主力 + DDG fallback（无 key 时自动降级）+ max_results 控制
+
+### 并行工具执行  `[已落地]`
+- `agent_loop.py` 在同一 `tool_calls` 内多个工具调用时使用 `asyncio.gather` 并行执行，不串行等待
+
+---
+
 ## 里程碑
 
 | 里程碑 | 验收标准 | 状态 |
@@ -225,12 +231,13 @@
 | M1 两进程通 | ws echo 贯穿 web↔gateway↔agentserver | ✅ |
 | M2 能调工具 | 真模型 + 只读工具闭环 + 多轮上下文 | ✅ |
 | M3 能管工具 | 多工具选择 + 任务规划 | ✅ |
-| M4 能扛长会话 | 100 轮不爆 token、不丢关键事实 | ⏳ |
+| M4 能扛长会话 | 100 轮不爆 token、不丢关键事实 | ✅ |
 | M5 工具可管控 | 危险工具审批 + 命令安全 + 审计日志 | ✅ |
-| M6 有长期记忆 | 跨会话事实召回 + RAG 注入 | |
-| M7 会定时跑 | cron 唤醒 agent + 结果推送通道 | |
+| M6 有长期记忆 | 跨会话事实召回 + RAG 注入 | ✅ |
+| M7 会定时跑 | cron 唤醒 agent + 结果推送通道 | ✅ |
 | M8 能用 skill | skill 加载 / 选择 / 注入指导多步任务 | ✅ |
-| M9 能委派子 agent | spawn/fork 委派 + 结果回灌 + 并发隔离 | |
+| M9 能委派子 agent | spawn 委派 + 结果回灌 + 超时隔离 | ✅ |
+| M9a Todo 增强 | 结构化任务追踪 + 依赖 + 归属 | ✅ |
 | M10 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
 | M11 能挂外部工具 | MCP server 工具接入并受策略管控 | |
 | M12 可观测 | OTel span 链 + 关键指标 | ✅ |
