@@ -171,6 +171,7 @@ class ContextOverflowRecoveryHook(AgentHook):
             ),
         }]
         self._consecutive_overflow_count = 0
+        ctx.request_retry(delay=0)
 
 
 # --- Config lazy reads ---
