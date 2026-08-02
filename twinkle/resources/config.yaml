@@ -76,3 +76,15 @@ subagent:
   child_permissions: false       # v1 必须 false（true 需流式，未支持→启动拒）
   max_result_chars: 8000         # 子最终结果截断上限（防父上下文爆炸）
   list_sessions_filter: true     # session.list 隐藏 __sub_ 前缀
+overflow_recovery:
+  max_recovery_attempts: 3
+  threshold_ratio: 0.85
+  aggressive_keep_recent: 3
+  context_window_limit_tokens: 0    # 0 = parse from 413 error; >0 = manual override
+repeat_tool_detection:
+  history_size: 30
+  repeat_warn: 10
+  pingpong_warn: 10
+  loop_block: 20
+  global_stop: 30
+  remediation_max_per_minute: 5

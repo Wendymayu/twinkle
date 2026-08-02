@@ -81,3 +81,17 @@ SUBAGENT_ABORT_TIMEOUT = settings.subagent.abort_timeout
 SUBAGENT_CHILD_PERMISSIONS = settings.subagent.child_permissions
 SUBAGENT_MAX_RESULT_CHARS = settings.subagent.max_result_chars
 SUBAGENT_LIST_SESSIONS_FILTER = settings.subagent.list_sessions_filter
+
+# --- overflow recovery (Phase 9) ---
+OVERFLOW_MAX_RECOVERY_ATTEMPTS = settings.overflow_recovery.max_recovery_attempts
+OVERFLOW_THRESHOLD_RATIO = settings.overflow_recovery.threshold_ratio
+OVERFLOW_AGGRESSIVE_KEEP_RECENT = settings.overflow_recovery.aggressive_keep_recent
+OVERFLOW_CONTEXT_WINDOW_LIMIT = settings.overflow_recovery.context_window_limit_tokens
+
+# --- repeat tool detection (Phase 9) ---
+REPEAT_TOOL_HISTORY_SIZE = settings.repeat_tool_detection.history_size
+REPEAT_TOOL_REPEAT_WARN = settings.repeat_tool_detection.repeat_warn
+REPEAT_TOOL_PINGPONG_WARN = settings.repeat_tool_detection.pingpong_warn
+REPEAT_TOOL_LOOP_BLOCK = settings.repeat_tool_detection.loop_block
+REPEAT_TOOL_GLOBAL_STOP = settings.repeat_tool_detection.global_stop
+REPEAT_TOOL_REMEDIATION_MAX_PER_MINUTE = settings.repeat_tool_detection.remediation_max_per_minute

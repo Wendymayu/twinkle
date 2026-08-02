@@ -152,6 +152,22 @@ class SubagentConfig(_StrictModel):
         return self
 
 
+class OverflowRecoveryConfig(_StrictModel):
+    max_recovery_attempts: int = 3          # consecutive overflow recovery max attempts
+    threshold_ratio: float = 0.85           # target ratio of model window after recovery
+    aggressive_keep_recent: int = 3         # keep_recent_pairs reduced to this on overflow
+    context_window_limit_tokens: int = 0    # 0 = parse from 413 error; >0 = manual override
+
+
+class RepeatToolDetectionConfig(_StrictModel):
+    history_size: int = 30                  # sliding window size
+    repeat_warn: int = 10                   # LOW threshold
+    pingpong_warn: int = 10                 # MEDIUM threshold
+    loop_block: int = 20                    # HIGH threshold
+    global_stop: int = 30                   # CRITICAL threshold
+    remediation_max_per_minute: int = 5     # remediation injection rate limit
+
+
 class TwinkleConfig(_StrictModel):
     agentserver: AgentserverConfig = AgentserverConfig()
     gateway: GatewayConfig = GatewayConfig()
@@ -166,6 +182,8 @@ class TwinkleConfig(_StrictModel):
     memory: MemoryConfig = MemoryConfig()
     permissions: PermissionsConfig = PermissionsConfig()
     subagent: SubagentConfig = SubagentConfig()
+    overflow_recovery: OverflowRecoveryConfig = OverflowRecoveryConfig()
+    repeat_tool_detection: RepeatToolDetectionConfig = RepeatToolDetectionConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":
