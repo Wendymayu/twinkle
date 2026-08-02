@@ -46,7 +46,8 @@
 - **Phase 8（子 Agent）已落地**：`spawn_subagent` + `SubagentExecutor` + `SubagentContextHook` + ContextVar 隔离 + 软硬超时 + 递归保护。对应里程碑 M9 ✅。
 - **Phase 8a（Todo 增强）已落地**：TodoTask 数据模型增强（id、blocked_by、owner、metadata）+ 4 个工具重写 + `sequential=True` + 前端状态分组。对应里程碑 M9a ✅。
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
-- **Phase 9–17 为后续规划**：Phase 9（溢出恢复+循环检测）→ Phase 10（HITL 中断/恢复）→ Phase 11（PlanNode 递归执行树）→ Phase 12（Agent State 持久化）→ Phase 13（Skill 自进化）→ Phase 14（MCP 接入）→ Phase 15（DeepAgent 多轮外层循环）→ Phase 16（Deep Research）→ Phase 17（Team 编排）。参考 jiuwenswarm 对应能力设计。
+- **Phase 9（溢出恢复 + 循环检测）已落地**：`ContextOverflowRecoveryHook`（413 自动压缩重试 + 熔断）+ `RepeatToolCallDetectorHook`（滑动窗口 + stable hash 循环检测 + 纠偏注入）。对应里程碑 M13 ✅。
+- **Phase 9–17 为后续规划**：Phase 9 已落地；Phase 10（HITL 中断/恢复）→ Phase 11（PlanNode 递归执行树）→ Phase 12（Agent State 持久化）→ Phase 13（Skill 自进化）→ Phase 14（MCP 接入）→ Phase 15（DeepAgent 多轮外层循环）→ Phase 16（Deep Research）→ Phase 17（Team 编排）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -165,15 +166,12 @@
 
 ---
 
-### Phase 9 — 上下文溢出恢复 + 重复调用检测
+### Phase 9 — 上下文溢出恢复 + 重复调用检测  `[已完成]`
 **目标**：agent 遇到上下文溢出时自动恢复，不再直接挂掉；agent 陷入重复工具调用循环时自动纠偏。
 
-内容：
-- **上下文溢出恢复（ContextOverflowRecoveryHook）**：`on_model_exception` 拦截 413 / `context_length_exceeded`，强制压缩后 `request_retry()` 重试，最多 3 次连续失败熔断。对齐 jiuwenswarm 的 `ContextOverflowRecoveryRail`（`jiuwenclaw/agentserver/deep_agent/rails/context_overflow_recovery_rail.py`）。
-- **重复工具调用检测（RepeatToolCallDetector）**：滑动窗口 + stable hash 检测重复/交替/无进展模式，4 级严重度（LOW→CRITICAL），超过阈值自动注入纠偏消息（`LocalAutoRemediator`），限频防风暴。对齐 jiuwenswarm 的 `RepeatToolCallDetector`（`openjiuwen/agent_teams/reliability/detectors/repeat_tool.py`）。
-- **无硬前置依赖**：两个能力独立，复用现有 Hook 系统，不依赖 Task Loop。
+**已落地**：`twinkle/agentserver/hooks/builtin/context_overflow_recovery_hook.py`（`ContextOverflowRecoveryHook` priority 60，`on_model_exception` 检测 413/`context_length_exceeded`，3 层判定 + Anthropic/OpenAI 格式 token 解析，强制激进压缩（`keep_recent_pairs` 减半 + `threshold_override = limit_tokens × 0.85`）+ `request_retry()`，连续 3 次失败熔断注入 `[CONTEXT_OVERFLOW]` 消息）+ `twinkle/agentserver/hooks/builtin/repeat_tool_call_detector_hook.py`（`RepeatToolCallDetectorHook` priority 88，`before_tool_call`/`after_tool_call`/`on_tool_exception` 记录 `(call_key, outcome_key)` 到 `deque(maxlen=30)` 滑动窗口，stable hash（SHA-256）+ 4 级分类（LOW: 同 call_key ≥ 10 → MEDIUM: A-B-A-B ≥ 10 → HIGH: 尾部连续相同 ≥ 20 → CRITICAL: ≥ 30），edge-triggered 只升不降，MEDIUM+ 自动注入 `[DETECTION]` 纠偏 system 消息，限频 5 次/分钟）+ `decorator.py` 改动（`ctx.extra["_tool_result"] = result` 传递 tool result 给 after-event hook）+ `config/schema.py` 新增 `OverflowRecoveryConfig` + `RepeatToolDetectionConfig`。spec `docs/superpowers/specs/2026-08-02-phase9-overflow-recovery-repeat-detection-design.md`。
 
-**验收**：LLM 抛 413 时自动压缩重试成功；agent 连续 3 次调用相同工具时自动注入纠偏消息跳出循环。
+**验收**：LLM 抛 413 时自动压缩重试成功；agent 连续 3 次调用相同工具时自动注入纠偏消息跳出循环。 ✅
 
 ---
 
@@ -299,14 +297,16 @@
 ### Hook 系统  `[已落地]`
 Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 - **`twinkle/agentserver/hooks/`** 包（`base.py` 的 `AgentHook` 基类 + `manager.py` 的 `HookManager` 优先级排序 + `decorator.py` 的 `@hook` 装饰器）
-- **7 个 builtin hook**：
+- **9 个 builtin hook**：
   - `PermissionHook`（priority 100，before_tool_call 权限拦截）
   - `ContextCompressionHook`（priority 95，before_model_call 自动压缩）
   - `SkillHook`（priority 90，before_model_call skill 注入）
+  - `RepeatToolCallDetectorHook`（priority 88，before/after_tool_call 循环检测 + before_model_call 纠偏注入）
   - `MemoryHook`（priority 80，before_model_call 记忆策略注入）
+  - `ContextOverflowRecoveryHook`（priority 60，on_model_exception 溢出恢复 + after_model_call 计数重置）
   - `SubagentContextHook`（priority 50，before_invoke ContextVar 桥接）
   - `LoggingHook`（priority 10，LLM/tool 调用日志）
-  - `RetryHook`（priority 0，transient 异常自动重试）
+  - `RetryHook`（priority 50，transient 异常自动重试）
 - **事件**：`before_invoke`/`after_invoke`/`before_model_call`/`after_model_call`/`on_model_exception`/`before_tool_call`/`after_tool_call`/`on_tool_exception`
 - **中断机制**：`HookInterrupt`（PermissionHook ASK 挂起/恢复）
 
@@ -339,7 +339,7 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M8 能用 skill | skill 加载 / 选择 / 注入指导多步任务 | ✅ |
 | M9 能委派子 agent | spawn 委派 + 结果回灌 + 超时隔离 | ✅ |
 | M9a Todo 增强 | 结构化任务追踪 + 依赖 + 归属 | ✅ |
-| M13 溢出恢复 + 循环检测 | 413 自动重试 + 重复调用纠偏 | |
+| M13 溢出恢复 + 循环检测 | 413 自动重试 + 重复调用纠偏 | ✅ |
 | M14 中断可恢复 | 审批中断后关闭浏览器回来能继续 | |
 | M15 引擎驱动编排 | PlanNode 树 + fallback + 沙箱 | |
 | M16 崩溃可恢复 | agent state 持久化 + 重启后恢复 | |
