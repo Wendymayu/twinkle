@@ -20,22 +20,34 @@ def test_build_agent_loop_wires_permission(monkeypatch):
 
 
 def test_build_agent_loop_auto_wires_subagent_and_compression():
-    """Minimal AgentLoop (no explicit hooks) auto-wires SubagentContextHook
-    (BEFORE_INVOKE) and ContextCompressionHook (BEFORE_MODEL_CALL); the rest
-    (retry/permission/skill/memory/logging) are caller-passed (no deps),
+    """Minimal AgentLoop (no explicit hooks) auto-wires:
+    - SubagentContextHook (BEFORE_INVOKE)
+    - ContextCompressionHook (BEFORE_MODEL_CALL)
+    - ContextOverflowRecoveryHook (ON_MODEL_EXCEPTION, AFTER_MODEL_CALL)
+    - RepeatToolCallDetectorHook (ON_TOOL_EXCEPTION, BEFORE_MODEL_CALL)
+    The rest (retry/permission/skill/memory/logging) are caller-passed (no deps),
     not auto-wired."""
     from twinkle.agentserver.sessions import session_store
     from twinkle.agentserver.server import build_agent_loop
     from twinkle.agentserver.hooks.base import HookEvent
 
+    auto_wired_events = {
+        HookEvent.BEFORE_INVOKE,           # SubagentContextHook
+        HookEvent.BEFORE_MODEL_CALL,       # ContextCompressionHook + RepeatToolCallDetectorHook
+        HookEvent.AFTER_MODEL_CALL,        # ContextOverflowRecoveryHook
+        HookEvent.BEFORE_TOOL_CALL,        # RepeatToolCallDetectorHook
+        HookEvent.AFTER_TOOL_CALL,         # RepeatToolCallDetectorHook
+        HookEvent.ON_MODEL_EXCEPTION,      # ContextOverflowRecoveryHook
+        HookEvent.ON_TOOL_EXCEPTION,       # RepeatToolCallDetectorHook
+    }
     store = session_store()
     loop = build_agent_loop(store)
-    assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_INVOKE)
-    assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_MODEL_CALL)
+    for event in auto_wired_events:
+        assert loop._hook_manager.has_callbacks_for(event), f"expected callbacks for {event}"
     for event in HookEvent:
-        if event in (HookEvent.BEFORE_INVOKE, HookEvent.BEFORE_MODEL_CALL):
+        if event in auto_wired_events:
             continue
-        assert not loop._hook_manager.has_callbacks_for(event)
+        assert not loop._hook_manager.has_callbacks_for(event), f"unexpected callbacks for {event}"
 
 
 def test_build_agent_loop_wires_retry_when_caller_passed():
