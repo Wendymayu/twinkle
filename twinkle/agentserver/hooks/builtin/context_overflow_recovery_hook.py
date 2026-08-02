@@ -10,7 +10,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from twinkle.agentserver.compression import compress_messages, estimate_tokens
+from twinkle.agentserver.compression import compress_messages
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
 
 if TYPE_CHECKING:
@@ -193,11 +193,6 @@ def _get_threshold_ratio() -> float:
 def _get_config_context_limit() -> int:
     from twinkle.config import settings
     return settings.overflow_recovery.context_window_limit_tokens
-
-
-def _get_fallback_threshold() -> int:
-    from twinkle.config import CONTEXT_TOKEN_THRESHOLD
-    return CONTEXT_TOKEN_THRESHOLD
 
 
 def _get_summary_prompt() -> str:

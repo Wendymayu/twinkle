@@ -2,12 +2,10 @@
 forced compression + retry, circuit-break, count reset."""
 
 import asyncio
-from unittest.mock import AsyncMock
-
 import httpx
 
 from twinkle.agentserver.compression import estimate_tokens
-from twinkle.agentserver.hooks.base import HookContext, ModelCallInputs
+from twinkle.agentserver.hooks.base import ModelCallInputs
 from twinkle.agentserver.hooks.builtin.context_overflow_recovery_hook import (
     ContextOverflowRecoveryHook,
     _is_context_overflow_error,
