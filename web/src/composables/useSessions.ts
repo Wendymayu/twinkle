@@ -225,6 +225,10 @@ function init() {
         inputDisabled.value = true // disable input while an approval is pending
       },
     )
+    // 连接就绪即拉已装 skill:SkillsView.onMounted 的 loadInstalled 可能在 ws.onopen 前
+    // 触发(竞态),那次 send 抛 InvalidStateError → 静默置空且不重试 → 首次进入显示空。
+    // onopen 补一枪:共享 installedSkills 更新后,已挂载的 SkillsView 响应式重渲染。
+    loadInstalled()
     const saved = client.getSessionId()
     loadSessions()
       .then(() => (saved ? selectSession(saved).catch(() => createSession()) : createSession()))
