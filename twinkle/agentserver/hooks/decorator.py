@@ -61,6 +61,8 @@ def hook(
                 ctx.exception = None
                 try:
                     result = await method(self, ctx, *args, **kwargs)
+                    # Store result for after-event hooks (e.g., RepeatToolCallDetectorHook)
+                    ctx.extra["_tool_result"] = result
                     # 4. Trigger after event on success
                     await hook_manager.execute(after, ctx)
                     return result

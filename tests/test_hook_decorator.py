@@ -11,6 +11,7 @@ from twinkle.agentserver.hooks.base import (
     InvokeInputs,
     ModelCallInputs,
     RetryRequest,
+    ToolCallInputs,
 )
 from twinkle.agentserver.hooks.decorator import hook
 from twinkle.agentserver.hooks.manager import HookManager
@@ -284,3 +285,35 @@ def test_hook_decorator_on_exception_none_propagates_without_hooks():
     assert rec.calls == ["before_model_call"]
     assert "on_model_exception" not in rec.calls
     assert "after_model_call" not in rec.calls
+
+
+def test_after_event_receives_tool_result():
+    """decorator stores method return value in ctx.extra['_tool_result'] before after-event."""
+    results = {}
+
+    class SpyHook(AgentHook):
+        priority = 50
+        async def after_tool_call(self, ctx: HookContext) -> None:
+            results["tool_result"] = ctx.extra.get("_tool_result")
+
+    class FakeLoop:
+        def __init__(self):
+            self._hook_manager = HookManager()
+            self._hook_manager.register_hook(SpyHook())
+
+    loop = FakeLoop()
+    ctx = HookContext(
+        agent=loop,
+        event=HookEvent.BEFORE_TOOL_CALL,
+        inputs=ToolCallInputs(name="test", args={}, tool_call_id="tc1"),
+        session_id=None,
+        request_id=None,
+        extra={},
+    )
+
+    @hook(HookEvent.BEFORE_TOOL_CALL, HookEvent.AFTER_TOOL_CALL)
+    async def tool_method(self, ctx):
+        return "tool-output-42"
+
+    asyncio.run(tool_method(loop, ctx))
+    assert results["tool_result"] == "tool-output-42"
