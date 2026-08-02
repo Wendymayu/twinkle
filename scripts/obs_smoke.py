@@ -100,12 +100,13 @@ async def echo(text: str) -> str:
 
 
 class _Env:
-    """Duck-typed envelope (agent_loop reads .request_id/.session_id/.params)."""
+    """Duck-typed envelope (agent_loop reads .request_id/.session_id/.params/.channel)."""
 
     def __init__(self):
         self.request_id = "smoke-1"
         self.session_id = "smoke-sess"
         self.method = "chat"
+        self.channel = "web"
         self.params = {"query": "please echo hello"}
 
 
