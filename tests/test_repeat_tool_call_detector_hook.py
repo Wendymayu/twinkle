@@ -44,12 +44,14 @@ def test_stable_result_hash_different_content():
 
 # --- Helper to simulate tool calls ---
 
+_SESSION_ID = "test-session"
+
 def _make_tool_ctx(name, args, result=""):
     """Create a HookContext with ToolCallInputs."""
     return HookContext(
         agent=None, event=None,
         inputs=ToolCallInputs(name=name, args=args, tool_call_id="tc1"),
-        session_id=None, request_id=None,
+        session_id=_SESSION_ID, request_id=None,
         extra={"_tool_result": result},
     )
 
@@ -59,7 +61,7 @@ def _make_model_ctx(messages):
     return HookContext(
         agent=None, event=None,
         inputs=ModelCallInputs(messages=messages, tools=[]),
-        session_id=None, request_id=None,
+        session_id=_SESSION_ID, request_id=None,
         extra={},
     )
 
@@ -82,7 +84,8 @@ def test_detects_repeat_calls_low():
     hook = RepeatToolCallDetectorHook(repeat_warn=3, pingpong_warn=10, loop_block=20, global_stop=30)
     calls = [("read_file", {"path": "a.txt"}, "content")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    assert hook._fired_severity == Severity.LOW
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity == Severity.LOW
 
 
 def test_detects_pingpong_medium():
@@ -100,7 +103,8 @@ def test_detects_pingpong_medium():
         ("read_file", {"path": "b.txt"}, "result_b"),
     ]
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    assert hook._fired_severity == Severity.MEDIUM
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity == Severity.MEDIUM
 
 
 def test_detects_trailing_identical_high():
@@ -108,7 +112,8 @@ def test_detects_trailing_identical_high():
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=3, global_stop=30)
     calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    assert hook._fired_severity == Severity.HIGH
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity == Severity.HIGH
 
 
 def test_detects_critical_loop():
@@ -116,7 +121,8 @@ def test_detects_critical_loop():
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=3)
     calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    assert hook._fired_severity == Severity.CRITICAL
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity == Severity.CRITICAL
 
 
 def test_no_detection_under_threshold():
@@ -124,7 +130,8 @@ def test_no_detection_under_threshold():
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=30)
     calls = [("read_file", {"path": "a.txt"}, "content")] * 2
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    assert hook._fired_severity is None
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity is None
 
 
 def test_edge_triggered_only_escalates():
@@ -133,13 +140,15 @@ def test_edge_triggered_only_escalates():
     # 3 repeats -> LOW
     calls = [("read_file", {"path": "a.txt"}, "content")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    assert hook._fired_severity == Severity.LOW
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity == Severity.LOW
 
     # 1 more different call — severity should not drop
     calls2 = [("write_file", {"path": "b.txt"}, "ok")]
     asyncio.run(_simulate_tool_call_sequence(hook, calls2))
     # fired_severity stays LOW (not reset, not escalated)
-    assert hook._fired_severity == Severity.LOW
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity == Severity.LOW
 
 
 # --- Remediation injection tests ---
@@ -230,4 +239,5 @@ def test_different_results_not_counted_as_loop():
     ]
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
     # trailing_identical should be 0 (different outcomes), so no HIGH
-    assert hook._fired_severity is None
+    state = hook._states.get(_SESSION_ID)
+    assert state.fired_severity is None

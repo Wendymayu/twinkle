@@ -21,11 +21,12 @@ class _FakeLLM:
 
 
 class _Ctx:
-    """Minimal ctx stub: hook touches ctx.inputs.messages, ctx.exception, ctx.extra."""
-    def __init__(self, messages, exception=None):
+    """Minimal ctx stub: hook touches ctx.inputs.messages, ctx.exception, ctx.extra, ctx.session_id."""
+    def __init__(self, messages, exception=None, session_id="test-session"):
         self.inputs = ModelCallInputs(messages=messages, tools=[])
         self.exception = exception
         self.extra = {}
+        self.session_id = session_id
         self._retry_request = None
         self._force_finish_request = None
 
@@ -168,12 +169,12 @@ def test_resets_count_on_success():
     # Simulate 1 overflow
     ctx1 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
     asyncio.run(hook.on_model_exception(ctx1))
-    assert hook._consecutive_overflow_count == 1
+    assert hook._overflow_counts.get("test-session", 0) == 1
 
     # Successful model call resets count
     ctx2 = _Ctx([{"role": "system", "content": "s"}], exception=None)
     asyncio.run(hook.after_model_call(ctx2))
-    assert hook._consecutive_overflow_count == 0
+    assert hook._overflow_counts.get("test-session", 0) == 0
 
 
 def test_uses_parsed_limit_for_threshold():

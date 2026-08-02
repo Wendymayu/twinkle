@@ -12,6 +12,8 @@ import time
 from collections import deque
 from enum import IntEnum
 
+from dataclasses import dataclass, field
+
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
 
 log = logging.getLogger("twinkle.hooks.repeat_tool_detection")
@@ -23,6 +25,15 @@ class Severity(IntEnum):
     MEDIUM = 2
     HIGH = 3
     CRITICAL = 4
+
+
+@dataclass
+class _SessionState:
+    """Per-session runtime state for the detector."""
+    history: deque = field(default_factory=lambda: deque(maxlen=30))
+    pending_call_key: str | None = None
+    fired_severity: Severity | None = None
+    remediation_timestamps: list[float] = field(default_factory=list)
 
 
 def stable_call_hash(name: str, args: dict) -> str:
@@ -68,34 +79,43 @@ class RepeatToolCallDetectorHook(AgentHook):
         self._global_stop = global_stop
         self._remediation_max_per_minute = remediation_max_per_minute
 
-        # Runtime state
-        self._history: deque[tuple[str, str]] = deque(
-            maxlen=history_size or _get_history_size()
-        )
-        self._pending_call_key: str | None = None
-        self._fired_severity: Severity | None = None
-        self._remediation_timestamps: list[float] = []
+        # Per-session runtime state — keyed by session_id
+        self._states: dict[str, _SessionState] = {}
+
+    def _get_state(self, ctx: HookContext) -> _SessionState:
+        """Get or create per-session state."""
+        sid = ctx.session_id or "_default"
+        if sid not in self._states:
+            self._states[sid] = _SessionState(
+                history=deque(maxlen=self._history_size or _get_history_size()),
+                pending_call_key=None,
+                fired_severity=None,
+                remediation_timestamps=[],
+            )
+        return self._states[sid]
 
     async def before_tool_call(self, ctx: HookContext) -> None:
-        self._pending_call_key = stable_call_hash(
+        state = self._get_state(ctx)
+        state.pending_call_key = stable_call_hash(
             ctx.inputs.name, ctx.inputs.args  # type: ignore[attr-defined]
         )
 
     async def after_tool_call(self, ctx: HookContext) -> None:
         result = ctx.extra.get("_tool_result", "")
-        self._record_and_classify(result)
+        self._record_and_classify(ctx, result)
 
     async def on_tool_exception(self, ctx: HookContext) -> None:
         outcome = str(ctx.exception) if ctx.exception else "error"
-        self._record_and_classify(outcome)
+        self._record_and_classify(ctx, outcome)
 
     async def before_model_call(self, ctx: HookContext) -> None:
         """Inject remediation message in before_model_call if loop detected."""
-        if self._fired_severity is None or self._fired_severity < Severity.MEDIUM:
+        state = self._get_state(ctx)
+        if state.fired_severity is None or state.fired_severity < Severity.MEDIUM:
             return
-        if not self._check_remediation_budget():
+        if not self._check_remediation_budget(state):
             return
-        severity_label = self._fired_severity.name
+        severity_label = state.fired_severity.name
         ctx.inputs.messages = list(ctx.inputs.messages) + [{
             "role": "system",
             "content": (
@@ -104,7 +124,7 @@ class RepeatToolCallDetectorHook(AgentHook):
                 "Do not repeat the same tool call."
             ),
         }]
-        self._remediation_timestamps.append(time.monotonic())
+        state.remediation_timestamps.append(time.monotonic())
         log.info(
             "[RepeatToolDetection] Injected remediation message (severity=%s)",
             severity_label,
@@ -112,28 +132,29 @@ class RepeatToolCallDetectorHook(AgentHook):
 
     # --- Internal methods ---
 
-    def _record_and_classify(self, outcome: str) -> None:
+    def _record_and_classify(self, ctx: HookContext, outcome: str) -> None:
         """Record completed call and run classification detection."""
-        if self._pending_call_key is None:
+        state = self._get_state(ctx)
+        if state.pending_call_key is None:
             return
-        call_key = self._pending_call_key
-        self._pending_call_key = None
+        call_key = state.pending_call_key
+        state.pending_call_key = None
         outcome_key = stable_result_hash(outcome[:1000])
-        self._history.append((call_key, outcome_key))
+        state.history.append((call_key, outcome_key))
 
-        severity = self._classify(call_key)
+        severity = self._classify(state, call_key)
         if severity is None:
             return
         # Edge-triggered: only fire when severity rises
-        if self._fired_severity is not None and severity <= self._fired_severity:
+        if state.fired_severity is not None and severity <= state.fired_severity:
             return
-        self._fired_severity = severity
+        state.fired_severity = severity
         log.warning(
             "[RepeatToolDetection] Anomaly detected: severity=%s, call_key=%s",
             severity.name, call_key[:8],
         )
 
-    def _classify(self, call_key: str) -> Severity | None:
+    def _classify(self, state: _SessionState, call_key: str) -> Severity | None:
         """4-tier classification detection, returns highest severity."""
         repeat_warn = self._repeat_warn or _get_repeat_warn()
         pingpong_warn = self._pingpong_warn or _get_pingpong_warn()
@@ -141,42 +162,42 @@ class RepeatToolCallDetectorHook(AgentHook):
         global_stop = self._global_stop or _get_global_stop()
 
         # CRITICAL / HIGH: trailing identical (call+outcome)
-        trailing = self._trailing_identical()
+        trailing = self._trailing_identical(state)
         if trailing >= global_stop:
             return Severity.CRITICAL
         if trailing >= loop_block:
             return Severity.HIGH
 
         # MEDIUM: A-B-A-B alternation
-        alternation = self._trailing_alternation()
+        alternation = self._trailing_alternation(state)
         if alternation >= pingpong_warn:
             return Severity.MEDIUM
 
         # LOW: same call_key repeated in window
-        repeats = sum(1 for ck, _ in self._history if ck == call_key)
+        repeats = sum(1 for ck, _ in state.history if ck == call_key)
         if repeats >= repeat_warn:
             return Severity.LOW
 
         return None
 
-    def _trailing_identical(self) -> int:
+    def _trailing_identical(self, state: _SessionState) -> int:
         """Count of trailing consecutive identical (call_key, outcome_key) pairs."""
-        if not self._history:
+        if not state.history:
             return 0
-        last = self._history[-1]
+        last = state.history[-1]
         count = 0
-        for record in reversed(self._history):
+        for record in reversed(state.history):
             if record == last:
                 count += 1
             else:
                 break
         return count
 
-    def _trailing_alternation(self) -> int:
+    def _trailing_alternation(self, state: _SessionState) -> int:
         """Count of trailing A-B-A-B alternation pattern."""
-        if len(self._history) < 2:
+        if len(state.history) < 2:
             return 0
-        sequence = list(reversed(self._history))
+        sequence = list(reversed(state.history))
         first = sequence[0]
         second = sequence[1]
         if first == second or first[0] == second[0]:
@@ -190,14 +211,14 @@ class RepeatToolCallDetectorHook(AgentHook):
                 break
         return count
 
-    def _check_remediation_budget(self) -> bool:
+    def _check_remediation_budget(self, state: _SessionState) -> bool:
         """Rate-limit: at most N injections per minute."""
         max_per_minute = self._remediation_max_per_minute or _get_remediation_max_per_minute()
         now = time.monotonic()
-        self._remediation_timestamps = [
-            ts for ts in self._remediation_timestamps if now - ts < 60
+        state.remediation_timestamps = [
+            ts for ts in state.remediation_timestamps if now - ts < 60
         ]
-        return len(self._remediation_timestamps) < max_per_minute
+        return len(state.remediation_timestamps) < max_per_minute
 
 
 # --- Config lazy reads ---

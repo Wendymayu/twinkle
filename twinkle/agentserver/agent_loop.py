@@ -406,6 +406,18 @@ class AgentLoop:
                 except Exception as exc:
                     ctx.exception = exc
                     await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
+                    # Check force_finish first — e.g., overflow circuit breaker
+                    ff = ctx.consume_force_finish_request()
+                    if ff is not None:
+                        yield E2AResponse(
+                            request_id=envelope.request_id,
+                            sequence=seq,
+                            is_final=True,
+                            status="succeeded",
+                            response_kind="e2a.complete",
+                            body={"result": {"content": str(ff.result or "")}},
+                        )
+                        return
                     retry_req = ctx.consume_retry_request()
                     if retry_req is not None and retry_attempt < _MAX_HOOK_RETRIES:
                         if retry_req.delay > 0:

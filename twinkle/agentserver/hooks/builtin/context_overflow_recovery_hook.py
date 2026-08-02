@@ -90,25 +90,28 @@ class ContextOverflowRecoveryHook(AgentHook):
         self._max_recovery_attempts = max_recovery_attempts
         self._aggressive_keep_recent = aggressive_keep_recent
         self._threshold_ratio = threshold_ratio
-        self._consecutive_overflow_count: int = 0
+        # Per-session overflow counts — keyed by session_id
+        self._overflow_counts: dict[str, int] = {}
 
     async def on_model_exception(self, ctx: HookContext) -> None:
         exc = ctx.exception
         if exc is None or not _is_context_overflow_error(exc):
             return
 
-        self._consecutive_overflow_count += 1
+        sid = ctx.session_id or "_default"
+        count = self._overflow_counts.get(sid, 0) + 1
+        self._overflow_counts[sid] = count
         actual_tokens, limit_tokens = _parse_token_limits(exc)
         max_attempts = self._max_recovery_attempts or _get_max_recovery_attempts()
 
         log.warning(
             "[ContextOverflowRecovery] Context overflow detected "
-            "(attempt %d/%d) actual_tokens=%s limit_tokens=%s",
-            self._consecutive_overflow_count, max_attempts,
+            "(attempt %d/%d, session=%s) actual_tokens=%s limit_tokens=%s",
+            count, max_attempts, sid,
             actual_tokens, limit_tokens,
         )
 
-        if self._consecutive_overflow_count > max_attempts:
+        if count > max_attempts:
             await self._circuit_break(ctx)
             return
 
@@ -148,22 +151,25 @@ class ContextOverflowRecoveryHook(AgentHook):
         ctx.request_retry(delay=0)
 
     async def after_model_call(self, ctx: HookContext) -> None:
-        if ctx.exception is None and self._consecutive_overflow_count > 0:
-            log.info(
-                "[ContextOverflowRecovery] LLM call succeeded after %d overflow recovery attempt(s)",
-                self._consecutive_overflow_count,
-            )
         if ctx.exception is None:
-            self._consecutive_overflow_count = 0
+            sid = ctx.session_id or "_default"
+            count = self._overflow_counts.get(sid, 0)
+            if count > 0:
+                log.info(
+                    "[ContextOverflowRecovery] LLM call succeeded after %d overflow recovery attempt(s)",
+                    count,
+                )
+            self._overflow_counts.pop(sid, None)
 
     async def _circuit_break(self, ctx: HookContext) -> None:
         """熔断：直接返回结果，不再调 LLM（上下文已溢出，再调必然再 413）。"""
+        sid = ctx.session_id or "_default"
         log.error(
             "[ContextOverflowRecovery] Circuit breaker triggered after %d "
-            "consecutive context overflow errors",
-            self._consecutive_overflow_count,
+            "consecutive context overflow errors (session=%s)",
+            self._overflow_counts.get(sid, 0), sid,
         )
-        self._consecutive_overflow_count = 0
+        self._overflow_counts.pop(sid, None)
         ctx.request_force_finish(
             result="上下文持续溢出，自动压缩恢复失败。请开始新会话继续对话。"
         )
