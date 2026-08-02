@@ -2,7 +2,6 @@
 remediation injection, rate limiting, edge-triggered behavior."""
 
 import asyncio
-import time
 
 from twinkle.agentserver.hooks.base import HookContext, ModelCallInputs, ToolCallInputs
 from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
@@ -231,4 +230,4 @@ def test_different_results_not_counted_as_loop():
     ]
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
     # trailing_identical should be 0 (different outcomes), so no HIGH
-    assert hook._fired_severity is None or hook._fired_severity <= Severity.LOW
+    assert hook._fired_severity is None
