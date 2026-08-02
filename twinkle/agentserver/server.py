@@ -143,6 +143,14 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
                 if envelope.method == "approval.respond":
                     await APPROVAL_REGISTRY.handle_respond(envelope, send)
                     continue
+                if envelope.method == "approval.check_pending":
+                    pending = APPROVAL_REGISTRY.get_pending(envelope.session_id or "")
+                    await send(E2AResponse(
+                        request_id=envelope.request_id, sequence=0, is_final=True,
+                        status="succeeded", response_kind="e2a.result",
+                        body={"type": "approval.check_pending", "pending": pending},
+                    ))
+                    continue
                 if handles_session_rpc(envelope.method):
                     async for frame in dispatch_session_rpc(envelope, store):
                         await send(frame)

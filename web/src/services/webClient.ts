@@ -165,4 +165,9 @@ export class WebClient {
       })
     })
   }
+
+  /** Check for pending approvals on the current session (used after reconnection). */
+  async checkPendingApprovals(sessionId: string): Promise<any> {
+    return this.request('approval.check_pending', { session_id: sessionId })
+  }
 }

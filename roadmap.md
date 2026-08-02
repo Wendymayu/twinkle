@@ -47,7 +47,8 @@
 - **Phase 8a（Todo 增强）已落地**：TodoTask 数据模型增强（id、blocked_by、owner、metadata）+ 4 个工具重写 + `sequential=True` + 前端状态分组。对应里程碑 M9a ✅。
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 9（溢出恢复 + 循环检测）已落地**：`ContextOverflowRecoveryHook`（413 自动压缩重试 + 熔断）+ `RepeatToolCallDetectorHook`（滑动窗口 + stable hash 循环检测 + 纠偏注入）。对应里程碑 M13 ✅。
-- **Phase 9–17 为后续规划**：Phase 9 已落地；Phase 10（HITL 中断/恢复）→ Phase 11（PlanNode 递归执行树）→ Phase 12（Agent State 持久化）→ Phase 13（Skill 自进化）→ Phase 14（MCP 接入）→ Phase 15（DeepAgent 多轮外层循环）→ Phase 16（Deep Research）→ Phase 17（Team 编排）。参考 jiuwenswarm 对应能力设计。
+- **Phase 10（HITL 中断/恢复）已落地**：`ApprovalPendingRecord` + `ApprovalRegistry.save_pending/clear_pending/get_pending` + `approval.check_pending` RPC + 前端重连恢复审批卡片。对应里程碑 M14 ✅。
+- **Phase 11–17 为后续规划**：Phase 11（PlanNode 递归执行树）→ Phase 12（Agent State 持久化）→ Phase 13（Skill 自进化）→ Phase 14（MCP 接入）→ Phase 15（DeepAgent 多轮外层循环）→ Phase 16（Deep Research）→ Phase 17（Team 编排）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -175,7 +176,7 @@
 
 ---
 
-### Phase 10 — HITL 中断/恢复（跨请求断点续跑）
+### Phase 10 — HITL 中断/恢复（跨请求断点续跑）  `[已完成]`
 **目标**：用户审批中断后，关闭浏览器或服务重启，回来能从断点继续。
 
 内容：
@@ -340,7 +341,7 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M9 能委派子 agent | spawn 委派 + 结果回灌 + 超时隔离 | ✅ |
 | M9a Todo 增强 | 结构化任务追踪 + 依赖 + 归属 | ✅ |
 | M13 溢出恢复 + 循环检测 | 413 自动重试 + 重复调用纠偏 | ✅ |
-| M14 中断可恢复 | 审批中断后关闭浏览器回来能继续 | |
+| M14 中断可恢复 | 审批中断后关闭浏览器回来能继续 | ✅ |
 | M15 引擎驱动编排 | PlanNode 树 + fallback + 沙箱 | |
 | M16 崩溃可恢复 | agent state 持久化 + 重启后恢复 | |
 | M10 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |

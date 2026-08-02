@@ -233,8 +233,38 @@ function init() {
     const saved = client.getSessionId()
     loadSessions()
       .then(() => (saved ? selectSession(saved).catch(() => createSession()) : createSession()))
+      .then(() => checkAndRestorePendingApproval())
       .catch(() => { /* session bootstrap failed — user can retry via the + 新对话 button */ })
   })
+}
+
+/** After (re)connection, check for pending approvals and restore approval cards
+ *  so the user can resume from a breakpoint after closing the browser. */
+async function checkAndRestorePendingApproval() {
+  try {
+    const result = await client.checkPendingApprovals(client.getSessionId())
+    const pending = result?.pending ?? []
+    for (const p of pending) {
+      // Avoid duplicate cards (e.g. network blip without full page reload)
+      const exists = messages.value.some(m => m.kind === 'approval' && m.approvalId === p.approval_id)
+      if (!exists) {
+        messages.value.push({
+          role: 'assistant',
+          kind: 'approval',
+          content: '',
+          approvalId: p.approval_id,
+          tool: p.tool,
+          args: p.args,
+          reason: p.reason,
+          requestId: p.request_id,
+          decided: null,
+        })
+        inputDisabled.value = true
+      }
+    }
+  } catch {
+    // Non-critical — if it fails, the user can still interact normally
+  }
 }
 
 /** Mark an approval card as decided so its action buttons swap for a result

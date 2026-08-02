@@ -12,6 +12,7 @@ import json
 import logging
 import platform
 import sys
+import time
 from datetime import date
 from typing import AsyncIterator
 
@@ -24,7 +25,7 @@ from twinkle.agentserver.todo import (
     reset_todo_events,
 )
 from twinkle.agentserver.permission_context import set_permission_channel
-from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
+from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY, ApprovalPendingRecord
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.agentserver.hooks.base import (
     AgentHook,
@@ -185,6 +186,8 @@ class AgentLoop:
             await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
             raise
         finally:
+            # Clear any lingering pending approvals for this session (safety net)
+            APPROVAL_REGISTRY.clear_all_pending(session_id)
             await self._hook_manager.execute(HookEvent.AFTER_INVOKE, ctx)
 
     # --- ReAct core with hook trigger points --- #
@@ -331,6 +334,17 @@ class AgentLoop:
                                             # ASK: register Future + yield e2a.ask + suspend await
                                             approval_id = hi.data["approval_id"]
                                             future = APPROVAL_REGISTRY.register(approval_id)
+                                            # PERSIST: save approval state to disk for reconnection recovery
+                                            APPROVAL_REGISTRY.save_pending(session_id, ApprovalPendingRecord(
+                                                approval_id=approval_id,
+                                                tool=hi.data["tool"],
+                                                args=hi.data["args"],
+                                                tool_call_id=tc["id"],
+                                                reason=hi.data["reason"],
+                                                request_id=envelope.request_id,
+                                                session_id=session_id,
+                                                created_at=time.time(),
+                                            ))
                                             yield E2AResponse(
                                                 request_id=envelope.request_id, sequence=seq, is_final=False,
                                                 status="in_progress", response_kind="e2a.ask",
