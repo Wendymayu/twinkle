@@ -158,9 +158,9 @@ def test_circuit_break_after_max_attempts():
     ctx3 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
     asyncio.run(hook.on_model_exception(ctx3))
 
-    # Circuit break: requests retry so LLM sees the [CONTEXT_OVERFLOW] message
-    assert ctx3._retry_request is not None
-    assert any("[CONTEXT_OVERFLOW]" in m.get("content", "") for m in ctx3.inputs.messages)
+    # Circuit break: requests force_finish so user gets a graceful message (not another 413)
+    assert ctx3._force_finish_request is not None
+    assert "上下文持续溢出" in ctx3._force_finish_request
 
 
 def test_resets_count_on_success():

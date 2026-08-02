@@ -157,21 +157,16 @@ class ContextOverflowRecoveryHook(AgentHook):
             self._consecutive_overflow_count = 0
 
     async def _circuit_break(self, ctx: HookContext) -> None:
-        """熔断：注入消息让 LLM 产出最终回答，而非抛异常挂死。"""
+        """熔断：直接返回结果，不再调 LLM（上下文已溢出，再调必然再 413）。"""
         log.error(
             "[ContextOverflowRecovery] Circuit breaker triggered after %d "
             "consecutive context overflow errors",
             self._consecutive_overflow_count,
         )
-        ctx.inputs.messages = list(ctx.inputs.messages) + [{
-            "role": "system",
-            "content": (
-                "[CONTEXT_OVERFLOW] 上下文持续溢出，自动压缩恢复失败。"
-                "请用当前已有信息总结回答用户，建议用户开始新会话。"
-            ),
-        }]
         self._consecutive_overflow_count = 0
-        ctx.request_retry(delay=0)
+        ctx.request_force_finish(
+            result="上下文持续溢出，自动压缩恢复失败。请开始新会话继续对话。"
+        )
 
 
 # --- Config lazy reads ---
