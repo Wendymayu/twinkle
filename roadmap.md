@@ -48,7 +48,7 @@
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 9（溢出恢复 + 循环检测）已落地**：`ContextOverflowRecoveryHook`（413 自动压缩重试 + 熔断）+ `RepeatToolCallDetectorHook`（滑动窗口 + stable hash 循环检测 + 纠偏注入）。对应里程碑 M13 ✅。
 - **Phase 10（HITL 中断/恢复）已落地**：`ApprovalPendingRecord` + `ApprovalRegistry.save_pending/clear_pending/get_pending` + `approval.check_pending` RPC + 前端重连恢复审批卡片。对应里程碑 M14 ✅。
-- **Phase 11–17 为后续规划**：Phase 11（PlanNode 递归执行树）→ Phase 12（Agent State 持久化）→ Phase 13（Skill 自进化）→ Phase 14（MCP 接入）→ Phase 15（DeepAgent 多轮外层循环）→ Phase 16（Deep Research）→ Phase 17（Team 编排）。参考 jiuwenswarm 对应能力设计。
+- **Phase 11–18 为后续规划**：Phase 11（PlanNode 递归执行树）→ Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 14（Skill 自进化）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 18（Team 编排）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -206,20 +206,53 @@
 
 ---
 
-### Phase 12 — Agent State 持久化 + 崩溃恢复
-**目标**：agent 运行时状态（任务计划、停止条件、中断状态）持久化到 session，崩溃后可恢复。
+### Phase 12 — 中断恢复（对话历史驱动）
+**目标**：agent 在任何中断（模型报错、用户停止、进程崩溃、审批中断）后，用户说「继续」或发新消息，LLM 能从对话历史自然恢复，不丢失任务上下文。
+
+**设计理念**：对齐 Claude Code 的中断恢复模式——**对话历史就是状态**，不需要额外的 `DeepAgentState` 或 `Checkpointer`。LLM 读到中断标记就能理解发生了什么、从哪里继续。与 jiuwenswarm 的 `DeepAgentState` + `save_state/load_state`（为外层循环的循环变量设计）不同，Twinkle 当前是单轮 ReAct 架构，所有「状态」都在对话历史 + TodoStore + 审批文件中，不需要额外的状态持久化机制。
 
 内容：
-- **DeepAgentState**：per-session 可变状态对象，包含：迭代计数、TodoPlan、停止条件状态、pending follow-ups。每轮迭代后 checkpoint 到 session。
-- **Checkpointer**：在 key 生命周期点（`before_invoke`/`on_interrupt`/`after_invoke`）持久化 agent state 到 session 文件。重启后 `load_state()` 恢复。
-- **恢复逻辑**：`_sanitize_orphan_tool_calls` 升级为完整恢复——不仅注入 `[interrupted]` 消息，还恢复中断时的 tool_call 上下文，让 LLM 可以继续。
-- **对齐 jiuwenswarm**：`DeepAgentState`（`openjiuwen/harness/schema/state.py`）+ `save_state/load_state`（`openjiuwen/harness/deep_agent.py`）。
+- **中断标记写入**：`run_stream` 的 `finally` 块中，如果请求不是正常完成（模型报错、异常中断、用户停止等），往 session 写一条 assistant 标记消息，包含中断原因和当前上下文。这样不管用户下次说什么，LLM 都能看到中断信息。
+- **`_sanitize_orphan_tool_calls` 升级**：从 session 历史推导更丰富的中断上下文——不仅注入 `[interrupted]`，还包含：被中断的工具名和参数、当前 Todo 进度（从 TodoStore 读）、审批中断的 reason（从 `.approval_pending.json` 读）。
+- **审批中断恢复**：进程崩溃后 `.approval_pending.json` 中的审批记录无法恢复 `asyncio.Future`。改为在 `_sanitize_orphan_tool_calls` 中读取审批记录，注入 `[interrupted: approval was pending (reason: ...)]`，让 LLM 重新决策（重新请求审批或换方案），而非尝试恢复 Future。
+- **模型失败标记**：模型 API 报错/超时后，session 里只有 user 消息没有 assistant 回复。在 `except Exception` 的 `raise` 前往 session append 一条 assistant 标记 `[SYSTEM] 模型调用失败（...）`，避免 LLM 看到连续两条 user 消息而困惑。
 
-**验收**：agent 执行到第 5 步时进程崩溃 → 重启 → 恢复到第 5 步继续执行，不丢失任务计划和进度。
+**两条恢复路径**：
+- **路径 A（正常中断）**：`run_stream` 的 `finally` 块能执行 → 实时写入中断标记。覆盖：模型报错、用户停止、Gateway 断连、审批中断。
+- **路径 B（进程崩溃）**：`finally` 块来不及执行 → 下次请求时 `_sanitize_orphan_tool_calls` 从历史 + TodoStore + 审批文件推导上下文补写。覆盖：进程崩溃、kill -9、断电。
+
+**用户行为无关性**：中断标记是 assistant 消息，不强制用户继续。用户说「继续」→ LLM 恢复任务；用户说别的 → LLM 回答新问题，不主动提旧任务。与 Claude Code 的 Ctrl+C → 换话题行为一致。
+
+**验收**：
+1. agent 执行到第 3 步时模型报错 → session 里有中断标记 → 用户说「继续」→ LLM 从中断点恢复执行。
+2. agent 执行到第 5 步时进程崩溃 → 重启 → 用户发新消息 → `_sanitize_orphan_tool_calls` 补写上下文 → LLM 知道上次在做什么、Todo 进度到哪了。
+3. agent 审批中断后进程崩溃 → 重启 → 审批记录转化为 `[interrupted]` 消息 → LLM 重新决策。
+4. 用户中断后不说继续，而是问新问题 → LLM 正常回答新问题，不主动提旧任务。
 
 ---
 
-### Phase 13 — Skill 自进化
+### Phase 13 — 文件快照与撤销（Claude Code 风格 Checkpoint）
+**目标**：agent 修改文件后，用户可以撤销（undo）改动，回退到之前的版本。对齐 Claude Code 的 `/rewind` + Checkpoint 机制。
+
+**设计理念**：Claude Code 的 Checkpoint 是**文件状态快照**——每次用户发消息时自动保存被修改的文件内容，支持选择性回退（恢复代码、恢复对话、压缩上下文等）。Twinkle 采用更轻量的方案：只存写操作前的文件内容，支持 LLM 驱动或用户主动的撤销。
+
+内容：
+- **FileSnapshotStore**：在 `write_file` / `edit_file` 执行前，保存旧文件内容到 per-session 快照文件（`<session_dir>/.file_snapshots/<timestamp>_<hash>.json`，内容：`{path, content, timestamp, tool_call_id}`）。新文件创建不存快照（无旧内容可回退）。
+- **`undo_file` 工具**：`@tool`，读取最近的快照，恢复旧内容。LLM 可在用户说「撤销」时调用。参数：`file_path`（可选，不传则恢复最近一次修改）、`steps`（回退几步，默认 1）。
+- **`file_history` 工具**：`@tool`，列出某个文件的修改历史（时间戳 + 工具调用摘要），供 LLM 或用户选择回退到哪个版本。
+- **快照清理**：session 结束时清理快照文件；快照数量上限（如 100），超出时 FIFO 清理。
+- **局限性**：`command_exec` 的副作用（如 `rm`、`mv`）不在快照范围内——与 Claude Code 一致，Bash 命令的副作用不可自动撤销。用户应依赖 Git 做最终版本管理。
+
+**对齐 Claude Code**：Claude Code 的 Checkpoint 在每次用户发消息时存全量快照，支持 5 种精细化回退模式（恢复代码+对话 / 仅恢复对话 / 仅恢复代码 / 从此处总结 / 到此处总结）。Twinkle 的轻量版只做文件内容回退，不做对话回退（对话历史是 append-only，不支持删除中间消息）。
+
+**验收**：
+1. agent 调 `write_file` 修改了 `report.md` → 用户说「撤销」→ LLM 调 `undo_file` → 文件恢复到修改前的内容。
+2. agent 连续修改了 3 个文件 → 用户说「撤销刚才的修改」→ LLM 调 `undo_file` 恢复最近一次修改。
+3. agent 修改了 `report.md` 两次 → 用户说「回到第一个版本」→ LLM 调 `file_history` 查看 → 调 `undo_file(steps=2)` 回退到最初版本。
+
+---
+
+### Phase 14 — Skill 自进化
 **目标**：skill 定义能根据运行反馈自动改进。
 
 内容：
@@ -234,7 +267,7 @@
 
 ---
 
-### Phase 14 — MCP 工具接入
+### Phase 15 — MCP 工具接入
 **目标**：让 twinkle 能挂载标准 MCP（Model Context Protocol）server 的工具，补足工具生态。
 
 内容：
@@ -247,7 +280,7 @@
 
 ---
 
-### Phase 15 — DeepAgent 多轮外层循环 + 停止条件
+### Phase 16 — DeepAgent 多轮外层循环 + 停止条件
 **目标**：从"单轮 ReAct"升级到"多轮迭代直到任务完成"，支持复杂多步任务的可靠执行。
 
 内容：
@@ -262,7 +295,7 @@
 
 ---
 
-### Phase 16 — Deep Research（深度研究任务管理器）
+### Phase 17 — Deep Research（深度研究任务管理器）
 **目标**：agent 能执行多步检索→分析→综合→报告的深度研究任务，结果异步推送。
 
 内容：
@@ -275,7 +308,7 @@
 
 ---
 
-### Phase 17 — Team 编排（多 Agent 协作）
+### Phase 18 — Team 编排（多 Agent 协作）
 **目标**：多角色 agent 协作，支持团队级任务分配、成员间通信、共享状态、故障恢复。
 
 内容：
@@ -285,7 +318,7 @@
 - **ReliabilityMonitor**：团队级异常检测（ping-pong 检测、输出长度异常、成员错误率）。
 - **对齐 jiuwenswarm**：`TeamManager`（`jiuwenclaw/agentserver/team/team_manager.py`）+ `RecoveryManager`（`openjiuwen/agent_teams/agent/recovery_manager.py`）+ `ReliabilityMonitor`（`openjiuwen/agent_teams/reliability/monitor.py`）。
 
-**前置依赖**：Phase 11（PlanNode）+ Phase 12（Agent State 持久化）+ Phase 15（DeepAgent Task Loop）。
+**前置依赖**：Phase 11（PlanNode）+ Phase 12（中断恢复）+ Phase 16（DeepAgent Task Loop）。
 
 **验收**：3 个 agent 组成团队（研究员+写作员+审校员）→ 协作完成报告 → 一个成员崩溃后自动恢复 → 最终报告质量优于单 agent。
 
@@ -343,12 +376,13 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M13 溢出恢复 + 循环检测 | 413 自动重试 + 重复调用纠偏 | ✅ |
 | M14 中断可恢复 | 审批中断后关闭浏览器回来能继续 | ✅ |
 | M15 引擎驱动编排 | PlanNode 树 + fallback + 沙箱 | |
-| M16 崩溃可恢复 | agent state 持久化 + 重启后恢复 | |
-| M10 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
-| M11 能挂外部工具 | MCP server 工具接入并受策略管控 | |
-| M17 多轮迭代 | DeepAgent 外层循环 + 停止条件链 | |
-| M18 深度研究 | 多步检索→分析→综合→报告 | |
-| M19 多 Agent 协作 | Team 编排 + 成员恢复 + 可靠性监控 | |
+| M16 中断可恢复 | 中断标记 + `_sanitize_orphan_tool_calls` 升级 + 审批中断恢复 | |
+| M17 文件可撤销 | 文件快照 + undo_file + file_history | |
+| M18 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
+| M19 能挂外部工具 | MCP server 工具接入并受策略管控 | |
+| M20 多轮迭代 | DeepAgent 外层循环 + 停止条件链 | |
+| M21 深度研究 | 多步检索→分析→综合→报告 | |
+| M22 多 Agent 协作 | Team 编排 + 成员恢复 + 可靠性监控 | |
 | M12 可观测 | OTel span 链 + 关键指标 | ✅ |
 
 ---

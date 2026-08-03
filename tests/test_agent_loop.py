@@ -387,3 +387,97 @@ def test_parallel_tool_calls_disabled(session_store) -> None:
     tool_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_msgs) == 1
     assert tool_msgs[0]["content"] == "tool-saw:solo"
+
+
+# --- Phase 12: Interrupt recovery tests --- #
+
+
+class _FailingLLM:
+    """Raises RuntimeError on the first stream() call."""
+    def __init__(self):
+        self.calls = 0
+
+    async def stream(self, messages, tools):
+        self.calls += 1
+        raise RuntimeError("model API unreachable")
+        yield  # make this an async generator
+
+
+def test_interrupt_snapshot_on_model_exception(session_store) -> None:
+    """When the model raises an exception, run_stream's finally block writes
+    an interrupt snapshot assistant message to the session so the LLM can
+    understand what happened on the next request."""
+    store = session_store
+    llm = _FailingLLM()
+    loop = AgentLoop(llm, store, _reg_with_echo_tool())
+
+    async def run():
+        try:
+            [f async for f in loop.run_stream(_env("hi", session_id="s-int"))]
+        except RuntimeError:
+            pass  # expected
+
+    asyncio.run(run())
+    msgs = store.get_messages("s-int")
+    # Should have: system, user, then interrupt snapshot
+    assistant_msgs = [m for m in msgs if m.get("role") == "assistant"]
+    assert len(assistant_msgs) == 1
+    assert "[SYSTEM] 任务中断" in assistant_msgs[0]["content"]
+    assert "RuntimeError" in assistant_msgs[0]["content"]
+
+
+def test_no_interrupt_snapshot_on_normal_completion(session_store) -> None:
+    """When the request completes normally, no interrupt snapshot is written."""
+    store = session_store
+    llm = _ScriptedLLM([
+        [TextDelta("ok"), Finish("stop", {"role": "assistant", "content": "ok", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, store, _reg_with_echo_tool())
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("hi", session_id="s-ok"))]
+
+    asyncio.run(run())
+    msgs = store.get_messages("s-ok")
+    # No [SYSTEM] 任务中断 messages should exist
+    interrupt_msgs = [m for m in msgs if m.get("role") == "assistant"
+                      and "[SYSTEM] 任务中断" in m.get("content", "")]
+    assert len(interrupt_msgs) == 0
+
+
+def test_sanitize_orphan_tool_calls_includes_tool_name_and_args(session_store) -> None:
+    """_sanitize_orphan_tool_calls injects enriched context: tool name + args."""
+    # Seed an orphan: assistant with tool_calls but no tool result
+    asyncio.run(session_store.append("s-orphan", {"role": "system", "content": "sys"}))
+    asyncio.run(session_store.append("s-orphan", {"role": "user", "content": "do x"}))
+    asyncio.run(session_store.append("s-orphan", {
+        "role": "assistant", "content": None,
+        "tool_calls": [{"id": "c1", "type": "function",
+                        "function": {"name": "echo", "arguments": '{"text":"hi"}'}}]}))
+
+    @tool
+    async def echo(text: str) -> str:
+        """echo"""
+        return f"tool-saw:{text}"
+
+    from twinkle.agentserver.tools.manager import ToolManager
+    tm = ToolManager()
+    tm.register(echo)
+    llm = _ScriptedLLM([
+        [Finish("stop", {"role": "assistant", "content": "recovered", "tool_calls": None})],
+    ])
+    loop = AgentLoop(llm, session_store, tm)
+
+    async def run():
+        return [f async for f in loop.run_stream(_env("resume", session_id="s-orphan"))]
+
+    asyncio.run(run())
+    msgs = session_store.get_messages("s-orphan")
+    tool_msgs = [m for m in msgs if m.get("role") == "tool"]
+    # The orphan tool_call should have a synthetic tool_result
+    assert len(tool_msgs) == 1
+    content = tool_msgs[0]["content"]
+    # Phase 12: enriched context includes tool name and args
+    assert "echo" in content
+    assert "interrupted" in content
+    assert "text" in content  # args should be present

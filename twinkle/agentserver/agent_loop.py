@@ -169,10 +169,13 @@ class AgentLoop:
 
         await self._hook_manager.execute(HookEvent.BEFORE_INVOKE, ctx)
 
+        completed_normally = False
         try:
             async for frame in self._inner_run_stream(ctx, envelope):
                 yield frame
+            completed_normally = True  # _inner_run_stream returned normally
         except HookInterrupt:
+            completed_normally = True  # HookInterrupt already yielded e2a.error
             yield E2AResponse(
                 request_id=request_id,
                 sequence=0,
@@ -186,6 +189,24 @@ class AgentLoop:
             await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
             raise
         finally:
+            # Phase 12: write interrupt snapshot when request did not complete normally
+            # (model failure, CancelledError, uncaught exception, etc.)
+            # CancelledError is a BaseException — it bypasses except Exception
+            # and would re-cancel the awaits below, skipping clear_all_pending
+            # and AFTER_INVOKE.  Catch CancelledError explicitly so the snapshot
+            # write completes or at least fails gracefully.
+            if not completed_normally:
+                try:
+                    snapshot = await self._build_interrupt_snapshot(ctx, session_id)
+                    await self._session_store.append(
+                        session_id,
+                        {"role": "assistant", "content": snapshot},
+                        request_id=request_id,
+                    )
+                except asyncio.CancelledError:
+                    log.warning("interrupt snapshot cancelled for session %s", session_id)
+                except Exception:
+                    log.exception("failed to write interrupt snapshot for session %s", session_id)
             # Clear any lingering pending approvals for this session (safety net)
             APPROVAL_REGISTRY.clear_all_pending(session_id)
             await self._hook_manager.execute(HookEvent.AFTER_INVOKE, ctx)
@@ -206,7 +227,7 @@ class AgentLoop:
         PLAN_TODO_SESSION_ID.set(session_id or "default")
         reset_todo_events()
         set_permission_channel(envelope.channel or "web")
-        await self._sanitize_orphan_tool_calls(session_id, envelope.request_id)
+        await self._fill_missing_tool_results(session_id, envelope.request_id)
         # Insert the base system prompt once per session
         messages = self._session_store.get_messages(session_id)
         if not messages or messages[0].get("role") != "system":
@@ -524,12 +545,57 @@ class AgentLoop:
         all_todos = [snap for tc_todos in per_tc_todos for snap in tc_todos]
         return results, all_todos
 
-    async def _sanitize_orphan_tool_calls(self, session_id: str, request_id: str) -> None:
+    async def _build_interrupt_snapshot(self, ctx: HookContext, session_id: str) -> str:
+        """Build an interrupt snapshot message from session history + TodoStore.
+
+        Called from run_stream's finally block when the request did not complete
+        normally (model failure, CancelledError, uncaught exception). Writes an
+        assistant message so the LLM can understand what happened on the next
+        request. All information is derived from existing state — no extra
+        persistence needed.
+        """
+        parts = ["[SYSTEM] 任务中断。"]
+
+        # 1. Exception info
+        if ctx.exception:
+            exc_type = type(ctx.exception).__name__
+            exc_msg = str(ctx.exception)
+            if len(exc_msg) > 100:
+                exc_msg = exc_msg[:100] + "..."
+            parts.append(f"中断原因：{exc_type}: {exc_msg}")
+        else:
+            parts.append("中断原因：请求被取消")
+
+        # 2. Last tool calls from session history
+        msgs = self._session_store.get_messages(session_id)
+        for m in reversed(msgs):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                tools = [tc.get("function", {}).get("name", "unknown") for tc in m.get("tool_calls", [])]
+                parts.append(f"中断前正在执行：{', '.join(tools)}")
+                break
+
+        # 3. Todo progress
+        try:
+            from twinkle.agentserver.todo import get_todo_store
+            todos = get_todo_store()
+            tasks = await todos.list(session_id)
+            if tasks:
+                done = sum(1 for t in tasks if t.status == "completed")
+                parts.append(f"任务进度：{done}/{len(tasks)} 已完成")
+        except Exception:
+            pass
+
+        return " ".join(parts)
+
+    async def _fill_missing_tool_results(self, session_id: str, request_id: str) -> None:
         """If the session's most recent assistant-with-tool_calls message lacks
         results for some of its tool_calls (a crash mid-approval, possibly after
         some results were already appended), inject a synthetic tool_result for
         each missing tool_call_id so the next LLM call doesn't error on orphan
-        tool_calls."""
+        tool_calls.
+
+        Phase 12 upgrade: enriched context — tool name + args, approval info
+        from .approval_pending.json, Todo progress from TodoStore."""
         msgs = self._session_store.get_messages(session_id)
         if not msgs:
             return
@@ -543,15 +609,32 @@ class AgentLoop:
                 break
         if last_assistant is None:
             return
+
+        # Read approval info for pending tool calls
+        pending = APPROVAL_REGISTRY.get_pending(session_id)
+        pending_map = {p["tool_call_id"]: p for p in pending if p.get("tool_call_id")}
+
         for tc in last_assistant["tool_calls"]:
             tc_id = tc.get("id")
             if tc_id and not any(m.get("role") == "tool" and m.get("tool_call_id") == tc_id
                                 for m in msgs):
+                tool_name = tc.get("function", {}).get("name", "unknown")
+                tool_args = tc.get("function", {}).get("arguments", "")
+                parts = [f"[interrupted: {tool_name} was interrupted, result unknown."]
+                if tool_args:
+                    args_preview = tool_args[:200] + ("..." if len(tool_args) > 200 else "")
+                    parts.append(f"Args: {args_preview}.")
+                approval = pending_map.get(tc_id)
+                if approval:
+                    parts.append(f"Approval was pending (reason: {approval.get('reason', 'unknown')}).")
+                parts.append("]")
+                content = " ".join(parts)
                 await self._session_store.append(
                     session_id,
                     {"role": "tool", "tool_call_id": tc_id,
-                     "content": "[interrupted: previous request did not complete]"},
+                     "content": content},
                     request_id=request_id)
+
 
     @staticmethod
     def _merge_system_messages(messages: list[dict]) -> list[dict]:
