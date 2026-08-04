@@ -61,6 +61,9 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "NotImplementedError": NotImplementedError,
     "StopIteration": StopIteration,
     "AttributeError": AttributeError,
+    # Required for class inheritance
+    "super": super,
+    "property": property,
 }
 
 # Modules that plan_code must never import

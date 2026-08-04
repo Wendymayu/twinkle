@@ -26,6 +26,7 @@ _DENIED_CALL_NAMES: frozenset[str] = frozenset(
 )
 
 # Forbidden dunder attribute names
+# Note: __init__ is NOT forbidden — super().__init__() is legitimate
 _DENIED_DUNDER_ATTRS: frozenset[str] = frozenset(
     {
         "__import__",
@@ -39,7 +40,6 @@ _DENIED_DUNDER_ATTRS: frozenset[str] = frozenset(
         "__bases__",
         "__subclasses__",
         "__mro__",
-        "__init__",
     }
 )
 
