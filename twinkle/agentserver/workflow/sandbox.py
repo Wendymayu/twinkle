@@ -3,16 +3,18 @@
 Provides a restricted execution environment for plan_code that:
 1. Replaces __builtins__ with a safe whitelist (no open/exec/eval/getattr)
 2. Replaces __import__ with a custom safe_import that blocks forbidden modules
-3. Exposes PlanNode and HookInterrupt for plan_code to use
+3. Exposes PlanNode, HookInterrupt, and asyncio for plan_code to use
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 from typing import Any
 
 # ~40 safe builtins — no open/exec/eval/getattr/type
 _SAFE_BUILTINS: dict[str, Any] = {
+    "__build_class__": __build_class__,  # required for class statements in exec()
     "True": True,
     "False": False,
     "None": None,
@@ -150,7 +152,10 @@ def build_namespace() -> dict[str, Any]:
 
     namespace: dict[str, Any] = {
         "__builtins__": builtins,
+        "__name__": "__workflow_plan__",
+        "__qualname__": "__workflow_plan__",
         "PlanNode": PlanNode,
         "HookInterrupt": HookInterrupt,
+        "asyncio": asyncio,
     }
     return namespace

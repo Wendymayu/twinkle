@@ -168,6 +168,12 @@ class RepeatToolDetectionConfig(_StrictModel):
     remediation_max_per_minute: int = 5     # remediation injection rate limit
 
 
+class WorkflowConfig(_StrictModel):
+    execution_timeout: float = 300.0
+    max_fallback_count: int = 3
+    enable_fallback: bool = True
+
+
 class TwinkleConfig(_StrictModel):
     agentserver: AgentserverConfig = AgentserverConfig()
     gateway: GatewayConfig = GatewayConfig()
@@ -184,6 +190,7 @@ class TwinkleConfig(_StrictModel):
     subagent: SubagentConfig = SubagentConfig()
     overflow_recovery: OverflowRecoveryConfig = OverflowRecoveryConfig()
     repeat_tool_detection: RepeatToolDetectionConfig = RepeatToolDetectionConfig()
+    workflow: WorkflowConfig = WorkflowConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":
