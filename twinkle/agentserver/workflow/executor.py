@@ -8,13 +8,10 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 
-from twinkle.agentserver.hooks.base import HookInterrupt
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.tools.manager import ToolManager
-from twinkle.agentserver.workflow.context import workflow_executor_ctx
 from twinkle.agentserver.workflow.json_utils import extract_llm_json
 from twinkle.agentserver.workflow.node import PlanNode
 from twinkle.agentserver.workflow.sandbox import build_namespace
@@ -23,8 +20,6 @@ from twinkle.config.schema import WorkflowConfig
 
 if TYPE_CHECKING:
     from twinkle.agentserver.tools.builtin.subagent.executor import SubagentExecutor
-
-log = logging.getLogger("twinkle.workflow")
 
 
 # ---------------------------------------------------------------------------
@@ -71,9 +66,8 @@ class WorkflowExecutor:
         """Validate → load → bind callbacks → execute with timeout."""
         root = self._prepare_root_node(plan_code)
 
-        token = workflow_executor_ctx.set(self)
+        self._fallback_count = 0
         try:
-            self._fallback_count = 0
             return await asyncio.wait_for(
                 root.run(inputs),
                 timeout=self._config.execution_timeout,
@@ -82,8 +76,6 @@ class WorkflowExecutor:
             raise ExecutionTimeoutError(
                 f"Workflow exceeded {self._config.execution_timeout}s"
             ) from exc
-        finally:
-            workflow_executor_ctx.reset(token)
 
     # ------------------------------------------------------------------
     # Internal pipeline

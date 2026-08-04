@@ -3,7 +3,7 @@
 Provides a restricted execution environment for plan_code that:
 1. Replaces __builtins__ with a safe whitelist (no open/exec/eval/getattr)
 2. Replaces __import__ with a custom safe_import that blocks forbidden modules
-3. Exposes PlanNode, HookInterrupt, and asyncio for plan_code to use
+3. Exposes PlanNode, HookInterrupt, and a restricted asyncio for plan_code to use
 """
 
 from __future__ import annotations
@@ -82,6 +82,29 @@ _FORBIDDEN_MODULES: frozenset[str] = frozenset(
 _ALLOWED_IMPORT_PREFIXES: tuple[str, ...] = ("twinkle.agentserver.workflow",)
 
 
+class _SafeAsyncio:
+    """Restricted asyncio proxy — only exposes safe coroutines.
+
+    Blocks create_subprocess_shell/exec, open_connection, start_server, etc.
+    """
+
+    _ALLOWED = frozenset({
+        "sleep", "gather", "create_task", "wait_for",
+        "shield", "timeout", "Event", "Lock", "Queue",
+        "run", "iscoroutine", "iscoroutinefunction",
+    })
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._ALLOWED:
+            return getattr(asyncio, name)
+        raise AttributeError(
+            f"asyncio.{name} is forbidden in plan_code"
+        )
+
+    def __hasattr__(self, name: str) -> bool:
+        return name in self._ALLOWED
+
+
 def safe_import(
     name: str,
     globals_: dict[str, Any] | None = None,
@@ -156,6 +179,6 @@ def build_namespace() -> dict[str, Any]:
         "__qualname__": "__workflow_plan__",
         "PlanNode": PlanNode,
         "HookInterrupt": HookInterrupt,
-        "asyncio": asyncio,
+        "asyncio": _SafeAsyncio(),
     }
     return namespace

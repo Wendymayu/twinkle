@@ -7,7 +7,7 @@ is auto-wired in build_agent_loop, mirroring SubagentContextHook/SubagentExecuto
 from __future__ import annotations
 
 import json
-import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,8 +18,6 @@ from twinkle.agentserver.workflow.context import workflow_executor_ctx
 if TYPE_CHECKING:
     from twinkle.agentserver.workflow.executor import WorkflowExecutor
 
-log = logging.getLogger("twinkle.workflow")
-
 
 @tool
 async def execute_workflow(workflow_name: str, inputs: str = "{}") -> str:
@@ -28,12 +26,19 @@ async def execute_workflow(workflow_name: str, inputs: str = "{}") -> str:
     if executor is None:
         return "Error: WorkflowExecutor 未初始化"
 
+    # Validate workflow_name — prevent path traversal
+    if not re.match(r"^[a-zA-Z0-9_-]+$", workflow_name):
+        return f"Error: invalid workflow name: {workflow_name}"
+
     # Load plan_code from <WORKSPACE>/workflows/<workflow_name>/root.py
     from twinkle.config import settings
     workspace_dir = settings.workspace.dir
-    plan_path = Path(workspace_dir) / "workflows" / workflow_name / "root.py"
+    workflows_root = (Path(workspace_dir) / "workflows").resolve()
+    plan_path = (workflows_root / workflow_name / "root.py").resolve()
+    if not str(plan_path).startswith(str(workflows_root)):
+        return f"Error: invalid workflow path"
     if not plan_path.is_file():
-        return f"Error: workflow not found at {plan_path}"
+        return f"Error: workflow not found: {workflow_name}"
 
     plan_code = plan_path.read_text(encoding="utf-8")
 

@@ -34,6 +34,23 @@ _DENIED_DUNDER_ATTRS: frozenset[str] = frozenset(
         "__globals__",
         "__locals__",
         "__dict__",
+        "__traceback__",
+        "__class__",
+        "__bases__",
+        "__subclasses__",
+        "__mro__",
+        "__init__",
+    }
+)
+
+# Forbidden attribute names on objects (e.g., tb_frame, f_back, f_builtins)
+_DENIED_ATTR_NAMES: frozenset[str] = frozenset(
+    {
+        "tb_frame",
+        "f_back",
+        "f_builtins",
+        "f_globals",
+        "f_locals",
     }
 )
 
@@ -130,6 +147,10 @@ class PlanCodeValidator:
         if node.attr in _DENIED_DUNDER_ATTRS:
             errors.append(
                 f"Forbidden dunder access: {node.attr} (line {node.lineno})"
+            )
+        if node.attr in _DENIED_ATTR_NAMES:
+            errors.append(
+                f"Forbidden attribute access: {node.attr} (line {node.lineno})"
             )
 
     def _check_call(self, node: ast.Call, errors: list[str]) -> None:

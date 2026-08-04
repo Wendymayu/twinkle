@@ -21,7 +21,7 @@ from typing import Any, Union
 
 from twinkle.agentserver.hooks.base import HookInterrupt
 
-__all__ = ["HookInterrupt", "PlanNode"]
+__all__ = ["PlanNode"]
 
 
 class PlanNode(ABC):
