@@ -51,6 +51,8 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "sum": sum,
     "tuple": tuple,
     "zip": zip,
+    # I/O — print for workflow logging (output goes to AgentServer stdout)
+    "print": print,
     # Exception types — plan_code may need to raise
     "Exception": Exception,
     "ValueError": ValueError,
