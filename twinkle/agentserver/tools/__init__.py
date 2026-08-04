@@ -42,7 +42,10 @@ def tool_manager() -> ToolManager:
     tm.register(cron_tools.cron_delete_job)
     tm.register(cron_tools.cron_run_now)
     tm.register(subagent.spawn_subagent)
-    tm.register(workflow_tools.execute_workflow)
+    # Dynamic description — lists available workflows so the LLM knows what to call
+    wf_tool = workflow_tools.execute_workflow
+    wf_tool.card.description = workflow_tools._build_tool_description()
+    tm.register(wf_tool)
     return tm
 
 
