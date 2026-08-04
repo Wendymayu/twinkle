@@ -88,3 +88,21 @@ repeat_tool_detection:
   loop_block: 20
   global_stop: 30
   remediation_max_per_minute: 5
+evolution:
+  enabled: false                # 总开关，默认关（进化改用户 skill，保守 opt-in）
+  trigger: after_invoke         # after_invoke | after_tool_call | after_model_call | none
+  auto_save: false              # 默认审批门（不静默写改）；true 才自动落盘
+  max_text_records: 2           # 单轮文本经验上限
+  max_script_records: 1         # 单轮脚本经验上限
+  scoring:
+    w_effectiveness: 0.5
+    w_utilization: 0.3
+    w_freshness: 0.2
+    freshness_half_life_days: 90
+    stale_version_penalty: 0.7
+  distill:
+    min_score: 0.4              # 分低于此 + 零调用 → 删
+  signals:
+    execution_failure: true
+    script_artifact: true
+    user_intent: false          # 默认关

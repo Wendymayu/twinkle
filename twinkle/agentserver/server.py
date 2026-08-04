@@ -25,6 +25,7 @@ from twinkle.agentserver.skills import get_skillnet_client
 from twinkle.agentserver.skills.rpc import dispatch_skill_rpc, handles_skill_rpc, run_skill_rpc
 from twinkle.agentserver.tools import tool_manager
 from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT
+from twinkle.config import EVOLUTION_ENABLED as _EVOLUTION_ENABLED
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
 
@@ -92,6 +93,11 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
         RepeatToolCallDetectorHook(),
     ]:
         loop.register_hook(hook)
+    # SkillEvolutionHook: auto-wire when evolution.enabled
+    if _EVOLUTION_ENABLED:
+        from twinkle.agentserver.evolution import get_orchestrator
+        from twinkle.agentserver.hooks.builtin import SkillEvolutionHook
+        loop.register_hook(SkillEvolutionHook(orchestrator=get_orchestrator()))
     return loop
 
 

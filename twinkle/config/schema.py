@@ -159,6 +159,35 @@ class OverflowRecoveryConfig(_StrictModel):
     context_window_limit_tokens: int = 0    # 0 = parse from 413 error; >0 = manual override
 
 
+class EvolutionScoringConfig(_StrictModel):
+    w_effectiveness: float = 0.5
+    w_utilization: float = 0.3
+    w_freshness: float = 0.2
+    freshness_half_life_days: int = 90
+    stale_version_penalty: float = 0.7
+
+
+class EvolutionDistillConfig(_StrictModel):
+    min_score: float = 0.4
+
+
+class EvolutionSignalsConfig(_StrictModel):
+    execution_failure: bool = True
+    script_artifact: bool = True
+    user_intent: bool = False
+
+
+class EvolutionConfig(_StrictModel):
+    enabled: bool = False
+    trigger: Literal["after_invoke", "after_tool_call", "after_model_call", "none"] = "after_invoke"
+    auto_save: bool = False
+    max_text_records: int = 2
+    max_script_records: int = 1
+    scoring: EvolutionScoringConfig = EvolutionScoringConfig()
+    distill: EvolutionDistillConfig = EvolutionDistillConfig()
+    signals: EvolutionSignalsConfig = EvolutionSignalsConfig()
+
+
 class RepeatToolDetectionConfig(_StrictModel):
     history_size: int = 30                  # sliding window size
     repeat_warn: int = 10                   # LOW threshold
@@ -184,6 +213,7 @@ class TwinkleConfig(_StrictModel):
     subagent: SubagentConfig = SubagentConfig()
     overflow_recovery: OverflowRecoveryConfig = OverflowRecoveryConfig()
     repeat_tool_detection: RepeatToolDetectionConfig = RepeatToolDetectionConfig()
+    evolution: EvolutionConfig = EvolutionConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":
