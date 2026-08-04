@@ -80,13 +80,20 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
         SubagentContextHook, ContextCompressionHook,
         ContextOverflowRecoveryHook, RepeatToolCallDetectorHook,
     )
+    from twinkle.agentserver.workflow.tools import WorkflowContextHook
+    from twinkle.agentserver.workflow.executor import WorkflowExecutor
     from twinkle.config import settings
     executor = create_subagent_executor(
         llm=llm, store=store, parent_tools=tools, config=settings.subagent
     )
+    workflow_executor = WorkflowExecutor(
+        llm=llm, tools=tools, subagent_executor=executor,
+        config=settings.workflow,
+    )
     # ContextCompressionHook auto-wire:dep 是 llm,在此构造(同 SubagentContextHook/executor)。
     for hook in list(hooks or []) + [
         SubagentContextHook(executor),
+        WorkflowContextHook(workflow_executor),
         ContextCompressionHook(llm=llm),
         ContextOverflowRecoveryHook(llm=llm),
         RepeatToolCallDetectorHook(),

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from twinkle.agentserver.tools.base import Tool, ToolCard
 from twinkle.agentserver.tools.builtin import command_exec, cron_tools, file_tools, memory_tools, skill_tools, subagent, todo_tools, web_fetch, web_search
+from twinkle.agentserver.workflow import tools as workflow_tools
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.local_function import LocalFunction
 from twinkle.agentserver.tools.manager import ToolManager
@@ -41,6 +42,7 @@ def tool_manager() -> ToolManager:
     tm.register(cron_tools.cron_delete_job)
     tm.register(cron_tools.cron_run_now)
     tm.register(subagent.spawn_subagent)
+    tm.register(workflow_tools.execute_workflow)
     return tm
 
 
