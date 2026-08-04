@@ -1,11 +1,13 @@
 """init_providers — build TracerProvider + MeterProvider; OTLP gRPC/console/none.
 
-Returns (tracer, meter); does NOT set global providers — instrumentors take
-the tracer/meter as params, so tests stay free of global-provider pollution.
+Returns (tracer, meter); also sets global providers so that:
+1. BatchSpanProcessor gets flushed on shutdown
+2. Third-party OTel instrumentation (e.g. grpc/aiohttp) picks up the same provider
 Fail-soft: any error -> log + that signal disabled.
 """
 from __future__ import annotations
 
+import atexit
 import logging
 
 log = logging.getLogger("twinkle.observability.provider")
@@ -47,6 +49,19 @@ def _init_tracer(cfg, resource):
                     )
                 )
             )
+
+        # Set global provider so BatchSpanProcessor flushes on shutdown
+        from opentelemetry import trace
+        trace.set_tracer_provider(tp)
+
+        # Register atexit to flush pending spans
+        def _shutdown_tracer():
+            try:
+                tp.shutdown()
+            except Exception:
+                pass
+        atexit.register(_shutdown_tracer)
+
         return tp.get_tracer("twinkle")
     except Exception:
         log.exception("tracer provider init failed; traces disabled")
@@ -81,6 +96,19 @@ def _init_meter(cfg, resource):
                 )
             )
         mp = MeterProvider(metric_readers=readers, resource=resource)
+
+        # Set global provider so PeriodicExportingMetricReader flushes on shutdown
+        from opentelemetry import metrics
+        metrics.set_meter_provider(mp)
+
+        # Register atexit to flush pending metrics
+        def _shutdown_meter():
+            try:
+                mp.shutdown()
+            except Exception:
+                pass
+        atexit.register(_shutdown_meter)
+
         return mp.get_meter("twinkle")
     except Exception:
         log.exception("meter provider init failed; metrics disabled")
