@@ -21,7 +21,8 @@ export interface ChatMsg {
 }
 interface TodoState { tasks: TodoTask[]; remaining: number; total: number }
 export interface InstalledSkill { name: string; description: string }
-export interface RemoteSkillItem { name: string; description: string; skill_url: string }
+export interface SkillNetSkillItem { name: string; description: string; skill_url: string }
+export interface SkillHubSkillItem { name: string; description: string; slug: string; downloads: number; score: number }
 
 const client = new WebClient()
 const sessions = ref<SessionItem[]>([])
@@ -42,7 +43,7 @@ const previewFile = ref<string | null>(null)
 const previewContent = ref<string>('')
 const previewLoading = ref(false)
 const historyAsBubbles = ref(true)
-const searchResults = ref<RemoteSkillItem[]>([])
+const searchResults = ref<(SkillNetSkillItem | SkillHubSkillItem)[]>([])
 const installedSkills = ref<InstalledSkill[]>([])
 const skillsLoading = ref(false)
 const skillsError = ref<string | null>(null)
@@ -151,11 +152,13 @@ async function loadInstalled() {
   }
 }
 
-async function searchSkills(q: string, force = false) {
+function clearSearch() { searchResults.value = [] }
+
+async function searchSkills(q: string, force = false, source: 'skillnet' | 'skillhub' = 'skillnet') {
   skillsLoading.value = true
   skillsError.value = null
   try {
-    const payload = await client.request('skills.search', { q, force_refresh: force }, 60000)
+    const payload = await client.request('skills.search', { q, force_refresh: force, source }, 60000)
     searchResults.value = payload?.skills ?? []
   } catch (e: any) {
     searchResults.value = []
@@ -165,10 +168,12 @@ async function searchSkills(q: string, force = false) {
   }
 }
 
-async function installSkill(url: string): Promise<{ ok: boolean; skillName?: string; error?: string }> {
-  // 后台任务 + 延迟结果;真实 GitHub 下载(并发拉文件),慢网络放宽到 180s。失败帧 → request reject。
+async function installSkill(args: {
+  source: 'skillnet' | 'skillhub'; slug?: string; url?: string
+}): Promise<{ ok: boolean; skillName?: string; error?: string }> {
+  // 后台任务 + 延迟结果。source=skillhub 走 zip 下载,skillnet 走 GitHub raw。失败帧 → request reject。
   try {
-    const payload = await client.request('skills.install', { url }, 180000)
+    const payload = await client.request('skills.install', { ...args, force: false }, 180000)
     if (payload?.ok) {
       await loadInstalled() // 刷新已安装列表
       return { ok: true, skillName: payload.skill_name }
@@ -176,6 +181,20 @@ async function installSkill(url: string): Promise<{ ok: boolean; skillName?: str
     return { ok: false, error: payload?.error || '安装失败' }
   } catch (e: any) {
     return { ok: false, error: e?.message || '安装失败' }
+  }
+}
+
+async function uninstallSkill(name: string): Promise<{ ok: boolean; error?: string }> {
+  // 本地瞬时操作(走后台任务通路)。rmtree 不可逆 → 前端 confirm 二次确认。
+  try {
+    const payload = await client.request('skills.uninstall', { name }, 30000)
+    if (payload?.ok) {
+      await loadInstalled()
+      return { ok: true }
+    }
+    return { ok: false, error: payload?.error || '卸载失败' }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || '卸载失败' }
   }
 }
 
@@ -287,7 +306,7 @@ export function useSessions() {
     selectedSessionId, sessionFiles, previewFile, previewContent,
     previewLoading, historyAsBubbles,
     searchResults, installedSkills, skillsLoading, skillsError,
-    searchSkills, loadInstalled, installSkill,
+    searchSkills, loadInstalled, clearSearch, installSkill, uninstallSkill,
     init, loadSessions, createSession, selectSession, deleteSession, sendQuery,
     loadSessionFiles, readSessionFile, restoreSession,
     webClient: client,

@@ -73,7 +73,7 @@ SkillManager.list_skills() mtime 变 → 重扫 → SkillHook 下一步注入
 
 config 驱动，`get_skillnet_client()` 进程级惰性单例（放 `skills/__init__.py`，仿 `get_skill_manager()`）。
 
-- `fetch_remote_skills(force_refresh: bool = False) -> list[RemoteSkill]`
+- `fetch_remote_skills(force_refresh: bool = False) -> list[SkillNetSkill]`
   - Tree API：`GET https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1`（1 次，拿全仓库路径）。
   - 筛出 `{skills_path}/<name>/SKILL.md` 路径。
   - 批量 raw 拉 SKILL.md（`https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}`），**复用 `skills/store.py::parse_skill_md`** 解析 `name`/`description`。

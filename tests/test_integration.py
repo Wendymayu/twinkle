@@ -314,7 +314,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
     from twinkle.agentserver.skills import (
         _set_skill_manager, _set_skillnet_client, SkillManager,
     )
-    from twinkle.agentserver.skills.remote import RemoteSkill
+    from twinkle.agentserver.skills.remote import SkillNetSkill
 
     agentserver_port = port_factory()
     gateway_port = port_factory()
@@ -329,7 +329,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
     monkeypatch.setattr("twinkle.config.SKILLS_DIR", str(skills_dir))
     _set_skill_manager(SkillManager(str(skills_dir)))
     _set_skillnet_client(_FakeSkillNetClient(catalog=[
-        RemoteSkill("foo", "a foo skill", "url_foo", "skills/foo/SKILL.md"),
+        SkillNetSkill("foo", "a foo skill", "url_foo", "skills/foo/SKILL.md"),
     ]))
     try:
         async def run() -> None:

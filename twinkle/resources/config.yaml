@@ -31,6 +31,7 @@ skills:
   mode: all                               # all = 每步注入 skill 清单;auto_list = 模型按需调 list_skill 拉
   enabled: []                             # 列表;空 = 全开
   skillnet_api_url: http://api-skillnet.openkg.cn  # SkillNet 公开搜索服务(关键词搜索,503+ skill)
+  skillhub_api_url: https://api.skillhub.cn  # SkillHub 公开列表/下载 API(关键词搜索 + zip 下载,免鉴权)
   github_token: ${TWINKLE_GITHUB_TOKEN:-}  # 可选;空=匿名(~60/小时),配 token 提 GitHub 下载额度
   remote_timeout: 60.0                    # 搜索/下载单次请求超时秒
   remote_max_retries: 3                   # 瞬时错误(5xx/网络)重试次数

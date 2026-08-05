@@ -29,7 +29,7 @@ CATALOG_TTL = 3600.0
 
 
 @dataclass
-class RemoteSkill:
+class SkillNetSkill:
     name: str
     description: str
     skill_url: str        # github.com/{owner}/{repo}/tree|blob/{ref}/{path}
@@ -94,7 +94,7 @@ class SkillNetClient:
         self._max_retries = max_retries
         self._ttl = ttl
         self._transport = _transport
-        self._query_cache: dict[tuple, tuple[list[RemoteSkill], float]] = {}
+        self._query_cache: dict[tuple, tuple[list[SkillNetSkill], float]] = {}
 
     def _headers(self) -> dict[str, str]:
         # 搜索 API 无需 auth;GitHub 下载用 token 提额度。
@@ -126,7 +126,7 @@ class SkillNetClient:
         raise SkillNetError("请求失败: 超出重试")
 
     async def search_remote_skills(self, q: str, force_refresh: bool = False,
-                                   limit: int = 20, page: int = 1) -> list[RemoteSkill]:
+                                   limit: int = 20, page: int = 1) -> list[SkillNetSkill]:
         """关键词搜索 SkillNet 公开 API({api}/v1/search,mode=keyword)。按查询缓存(TTL)。
         服务端搜索——q 传给 API,非客户端拉全量过滤。"""
         key = (q, limit, page)
@@ -143,7 +143,7 @@ class SkillNetClient:
             return []
         items = data.get("data") or []
         results = [
-            RemoteSkill(
+            SkillNetSkill(
                 name=it.get("skill_name", ""),
                 description=it.get("skill_description") or "",
                 skill_url=it.get("skill_url") or "",

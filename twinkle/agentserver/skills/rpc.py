@@ -17,7 +17,7 @@ from twinkle.agentserver.skills.remote import safe_child_path, safe_skill_name
 
 log = logging.getLogger("twinkle.agentserver.skills.rpc")
 
-_SKILL_METHODS = {"skills.list_local", "skills.search", "skills.install",
+_SKILL_METHODS = {"skills.list_local", "skills.search", "skills.install", "skills.uninstall",
                   "skills.evolve", "skills.evolve_list", "skills.evolve_simplify",
                   "skills.evolve_pending", "skills.evolve_approve", "skills.evolve_reject"}
 
@@ -65,16 +65,32 @@ async def run_skill_rpc(envelope: E2AEnvelope, send, client) -> None:
         if method == "skills.search":
             q = (envelope.params.get("q") or "").strip()
             force = bool(envelope.params.get("force_refresh"))
-            # 服务端搜索:q 原样透传给 SkillNet API(非客户端拉全量过滤);空查询不发 API。
-            skills = await client.search_remote_skills(q, force_refresh=force) if q else []
-            body = {"type": "skills.search", "skills": [
-                {"name": s.name, "description": s.description, "skill_url": s.skill_url}
-                for s in skills]}
+            source = envelope.params.get("source", "skillnet")
+            if source == "skillhub":
+                from twinkle.agentserver.skills import get_skillhub_client
+                hub = get_skillhub_client()
+                skills = await hub.search_remote_skills(q, force_refresh=force) if q else []
+                body = {"type": "skills.search", "skills": [
+                    {"name": s.name, "description": s.description, "slug": s.slug,
+                     "downloads": s.downloads, "score": s.score}
+                    for s in skills]}
+            else:
+                # 服务端搜索:q 原样透传给 SkillNet API(非客户端拉全量过滤);空查询不发 API。
+                skills = await client.search_remote_skills(q, force_refresh=force) if q else []
+                body = {"type": "skills.search", "skills": [
+                    {"name": s.name, "description": s.description, "skill_url": s.skill_url}
+                    for s in skills]}
             await send(_result(envelope, body))
         elif method == "skills.install":
-            url = envelope.params.get("url")
+            source = envelope.params.get("source", "skillnet")
             force = bool(envelope.params.get("force"))
-            skill_name, skill_dir, temp_root = await client.download_skill(url)
+            if source == "skillhub":
+                from twinkle.agentserver.skills import get_skillhub_client
+                slug = envelope.params.get("slug")
+                skill_name, skill_dir, temp_root = await get_skillhub_client().download_skill(slug)
+            else:
+                url = envelope.params.get("url")
+                skill_name, skill_dir, temp_root = await client.download_skill(url)
             try:
                 from twinkle.config import SKILLS_DIR
                 safe_skill_name(skill_name)
@@ -94,6 +110,19 @@ async def run_skill_rpc(envelope: E2AEnvelope, send, client) -> None:
         elif method in ("skills.evolve", "skills.evolve_simplify",
                         "skills.evolve_approve", "skills.evolve_reject"):
             await _run_evolve_rpc(envelope, send)
+        elif method == "skills.uninstall":
+            name = (envelope.params.get("name") or "").strip()
+            safe_skill_name(name)
+            from twinkle.config import SKILLS_DIR
+            dest = safe_child_path(Path(SKILLS_DIR), name)
+            if not dest.exists():
+                await send(_result(envelope,
+                    {"type": "skills.uninstall", "ok": False,
+                     "error": f"skill '{name}' 未安装"}, succeeded=False))
+                return
+            shutil.rmtree(dest)
+            await send(_result(envelope,
+                {"type": "skills.uninstall", "ok": True, "skill_name": name}))
         else:
             await send(_result(envelope,
                 {"type": method, "error": f"unknown skill method: {method}"}, succeeded=False))

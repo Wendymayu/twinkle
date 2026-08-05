@@ -77,6 +77,7 @@ class SkillsConfig(_StrictModel):
     mode: SkillMode = "all"
     enabled: list[str] = []  # [] = all skills open
     skillnet_api_url: str = "http://api-skillnet.openkg.cn"  # SkillNet 公开搜索服务(关键词搜索)
+    skillhub_api_url: str = "https://api.skillhub.cn"  # SkillHub 公开列表/下载 API(关键词搜索 + zip 下载)
     github_token: str = ""  # "" = anonymous (60/hour) — GitHub 下载用
     remote_timeout: float = 60.0
     remote_max_retries: int = 3

@@ -134,10 +134,10 @@ def test_skill_list_local_routes_inline(tmp_path) -> None:
 def test_skill_search_runs_as_background_task(tmp_path) -> None:
     """skills.search runs as a non-inline background task and sends a delayed e2a.result."""
     from twinkle.agentserver.skills import _set_skillnet_client
-    from twinkle.agentserver.skills.remote import RemoteSkill
+    from twinkle.agentserver.skills.remote import SkillNetSkill
     _set_skillnet_client(_FakeSkillNetClient(catalog=[
-        RemoteSkill("foo", "a foo skill", "url_foo", "skills/foo/SKILL.md"),
-        RemoteSkill("bar", "a bar skill", "url_bar", "skills/bar/SKILL.md"),
+        SkillNetSkill("foo", "a foo skill", "url_foo", "skills/foo/SKILL.md"),
+        SkillNetSkill("bar", "a bar skill", "url_bar", "skills/bar/SKILL.md"),
     ]))
     try:
         port = _free_port()

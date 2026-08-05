@@ -35,3 +35,9 @@ def test_skill_config_yaml_override(tmp_path):
     assert c.skills.mode == "auto_list"
     assert c.skills.dir == "/tmp/skills"
     assert c.skills.enabled == ["doc-audit", "code-refactor"]
+
+
+def test_skills_skillhub_defaults():
+    # skillhub_api_url 是 config.yaml 字面量(非 env 驱动),可直接断言 loaded 常量
+    assert cfg.settings.skills.skillhub_api_url == "https://api.skillhub.cn"
+    assert cfg.SKILLS_SKILLHUB_API_URL == "https://api.skillhub.cn"
