@@ -1,7 +1,7 @@
 """Tests for SubagentContextHook — sets the subagent ContextVar bridge.
 
 The hook holds the executor (passed at construction, auto-wired by
-build_agent_loop). ContextVar .set() inside asyncio.run() does NOT propagate
+create_agent). ContextVar .set() inside asyncio.run() does NOT propagate
 to the outer context, so assertions run inside the same coroutine that awaits
 before_invoke.
 """

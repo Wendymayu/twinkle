@@ -15,29 +15,28 @@ from twinkle.e2a.models import E2AEnvelope, E2AResponse
 class _SuspendingLoop:
     """Yields e2a.ask, awaits the registry Future, then yields e2a.complete."""
     def __init__(self):
-        self.envelopes = []
-    async def run_stream(self, envelope):
+        self.requests = []
+        self.session_store = None
+    async def run(self, request):
         from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
-        self.envelopes.append(envelope)
+        self.requests.append(request)
         aid = str(uuid.uuid4())
         fut = APPROVAL_REGISTRY.register(aid)
-        yield E2AResponse(request_id=envelope.request_id, sequence=0, is_final=False,
+        yield E2AResponse(request_id=request.request_id, sequence=0, is_final=False,
                           status="in_progress", response_kind="e2a.ask",
                           body={"approval_id": aid, "tool": "echo", "args": {},
                                 "tool_call_id": "c1", "reason": "require-approval"})
         decision = await fut
-        yield E2AResponse(request_id=envelope.request_id, sequence=1, is_final=True,
+        yield E2AResponse(request_id=request.request_id, sequence=1, is_final=True,
                           status="succeeded", response_kind="e2a.complete",
                           body={"result": {"content": f"approved:{decision}"}})
 
-
-class _FakeStore: ...
 
 
 def test_approval_respond_resumes_suspended_stream(free_port):
     async def scenario():
         loop = _SuspendingLoop()
-        handler = ws_handler(loop, _FakeStore())
+        handler = ws_handler(loop)
         srv = await serve(handler, "127.0.0.1", free_port)
         try:
             uri = f"ws://127.0.0.1:{free_port}"

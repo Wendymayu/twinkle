@@ -3,7 +3,7 @@
 Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
 AgentLoop (ReAct: think -> tool -> result -> re-decide). Stream-only; no
 unary mode. ws_handler(loop, store) lets tests inject a fake loop;
-build_agent_loop(store) wires the real config-driven loop for production.
+create_agent(store) wires the real config-driven loop for production.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 
 from websockets.asyncio.server import ServerConnection, serve
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import AgentRequest, ReActAgent
 from twinkle.agentserver.hooks.base import AgentHook
 from twinkle.agentserver.hooks.builtin import LoggingHook
 from twinkle.agentserver.llm_client import LLMClient
@@ -48,11 +48,11 @@ async def _safe_send(ws: ServerConnection, resp: E2AResponse) -> None:
         log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
-def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, llm: LLMClient | None = None) -> AgentLoop:
-    """Production wiring — config-driven AgentLoop backed by *store*.
+def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm: LLMClient | None = None) -> ReActAgent:
+    """Production wiring — config-driven ReActAgent backed by *store*.
 
     *store* is injected so the caller controls which SessionStore instance
-    the loop (chat/ReAct path) and ``ws_handler`` (RPC path) share.
+    the agent (chat/ReAct path) and ``ws_handler`` (RPC path) share.
     *hooks* is the list of AgentHook instances to register (callers that need
     permission enforcement pass PermissionHook; minimal test setups pass an
     empty list). *llm* is an optional override (tests inject a scripted client;
@@ -63,19 +63,17 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
     spawn_subagent tool is registered in tool_manager() like the other builtins
     (it needs no executor at registration — it reads one from the ContextVar at
     invoke). SubagentContextHook is auto-wired (not caller-passed) because its
-    dependency (the executor) is built here from the loop's llm/store/tools —
+    dependency (the executor) is built here from the agent's llm/store/tools —
     mirroring jiuwenswarm's adapter, which binds the executor onto its stream
     rail. The caller's hooks (PermissionHook etc.) have external/no deps and
     are caller-passed.
 
     ContextCompressionHook is likewise auto-wired (not caller-passed): its sole
-    dependency (llm) is available here, same dep-availability principle as
-    SubagentContextHook/executor — so it needs no caller involvement.
+    dependency (llm) is available here.
     """
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
     tools = tool_manager()
-    loop = AgentLoop(llm, store, tools)
     from twinkle.agentserver.tools.builtin.subagent import create_subagent_executor
     from twinkle.agentserver.hooks.builtin import (
         SubagentContextHook, ContextCompressionHook,
@@ -91,33 +89,32 @@ def build_agent_loop(store: SessionStore, hooks: list[AgentHook] | None = None, 
         llm=llm, tools=tools, subagent_executor=executor,
         config=settings.workflow,
     )
-    # ContextCompressionHook auto-wire:dep 是 llm,在此构造(同 SubagentContextHook/executor)。
-    for hook in list(hooks or []) + [
+    all_hooks = list(hooks or []) + [
         SubagentContextHook(executor),
         WorkflowContextHook(workflow_executor),
         ContextCompressionHook(llm=llm),
         ContextOverflowRecoveryHook(llm=llm),
         RepeatToolCallDetectorHook(),
-    ]:
-        loop.register_hook(hook)
-    # SkillEvolutionHook: auto-wire when evolution.enabled
+    ]
     if _EVOLUTION_ENABLED:
         from twinkle.agentserver.evolution import get_orchestrator
         from twinkle.agentserver.hooks.builtin import SkillEvolutionHook
-        loop.register_hook(SkillEvolutionHook(orchestrator=get_orchestrator()))
-    return loop
+        all_hooks.append(SkillEvolutionHook(orchestrator=get_orchestrator()))
+    return ReActAgent(llm, store, tools, hooks=tuple(all_hooks))
 
 
-def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnection], Awaitable[None]]:
-    """Return a ws handler bound to the given AgentLoop + SessionStore.
+def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None]]:
+    """Return a ws handler bound to *agent*.
 
-    Phase 4: concurrent per-request task model so a suspended run_stream
+    Phase 4: concurrent per-request task model so a suspended run
     (awaiting approval) does not block reading the next inbound message
     (approval.respond). Routes ``approval.respond`` to the ApprovalRegistry
-    inline; session RPCs inline; everything else spawns a run_stream task,
+    inline; session RPCs inline; everything else spawns a run task,
     one active per session.
     """
     from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
+
+    store = agent.session_store
 
     async def handler(ws: ServerConnection) -> None:
         try:
@@ -136,8 +133,14 @@ def ws_handler(loop: AgentLoop, store: SessionStore) -> Callable[[ServerConnecti
                     log.debug("send on closed connection, dropping %s", resp.request_id)
 
         async def run_task(envelope: E2AEnvelope) -> None:
+            request = AgentRequest(
+                session_id=envelope.session_id or envelope.request_id,
+                request_id=envelope.request_id,
+                query=(envelope.params or {}).get("query", ""),
+                channel=envelope.channel or "web",
+            )
             try:
-                async for frame in loop.run_stream(envelope):
+                async for frame in agent.run(request):
                     await send(frame)
             except Exception as exc:
                 log.exception("agent loop failed for %s: %s", envelope.request_id, exc)
@@ -212,8 +215,8 @@ async def main() -> None:
     ensure_workspace_dir()
     store = session_store()
     engine = permission_engine()
-    loop = build_agent_loop(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook()])
-    handler = ws_handler(loop, store)
+    agent = create_agent(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook()])
+    handler = ws_handler(agent)
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
         await asyncio.Future()  # run forever

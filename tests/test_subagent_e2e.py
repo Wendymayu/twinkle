@@ -20,14 +20,14 @@ NOT strip the TextDelta calls.
 """
 import asyncio
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 from twinkle.agentserver.hooks.builtin.subagent_context_hook import SubagentContextHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.tools import tool_manager
 from twinkle.agentserver.tools.builtin.subagent import spawn_subagent
 from twinkle.agentserver.tools.builtin.subagent import SubagentExecutor
 from twinkle.config.schema import SubagentConfig
-from twinkle.e2a.models import E2AEnvelope
+from twinkle.agentserver.agent import AgentRequest
 
 
 class _ScriptedLLM:
@@ -43,8 +43,7 @@ class _ScriptedLLM:
 
 
 def _env(query, sid="parent", rid="r1"):
-    return E2AEnvelope(request_id=rid, session_id=sid, method="chat.send",
-                       params={"query": query})
+    return AgentRequest(session_id=sid, request_id=rid, query=query)
 
 
 def test_parent_delegates_then_summarizes(session_store):
@@ -73,7 +72,7 @@ def test_parent_delegates_then_summarizes(session_store):
     loop.register_hook(SubagentContextHook(executor))
 
     async def run():
-        return [f async for f in loop.run_stream(_env("what is the answer?"))]
+        return [f async for f in loop.run(_env("what is the answer?"))]
 
     frames = asyncio.run(run())
     final = frames[-1]
@@ -123,7 +122,7 @@ def test_concurrent_spawns_do_not_cross_contaminate(session_store):
     loop.register_hook(SubagentContextHook(executor))
 
     async def run():
-        return [f async for f in loop.run_stream(_env("do both", sid="p2"))]
+        return [f async for f in loop.run(_env("do both", sid="p2"))]
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.complete"

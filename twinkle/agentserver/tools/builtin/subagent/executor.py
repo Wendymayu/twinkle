@@ -1,4 +1,4 @@
-"""SubagentExecutor — builds + runs an isolated child AgentLoop (black-box).
+"""SubagentExecutor — builds + runs an isolated child ReActAgent (black-box).
 
 execute_subagent: fresh child session, trimmed ToolManager (no spawn_subagent /
 memory-writes), reused LLMClient/SessionStore (the child always uses the
@@ -22,7 +22,8 @@ from twinkle.agentserver.tools.builtin.subagent.models import (
     SubagentResult,
     SubagentTaskSpec,
 )
-from twinkle.e2a.models import E2AEnvelope
+# AgentRequest imported lazily inside methods to avoid circular import:
+#   agent -> ToolManager -> subagent -> executor -> agent
 
 if TYPE_CHECKING:
     from twinkle.agentserver.hooks.base import AgentHook
@@ -73,7 +74,7 @@ class SubagentExecutor:
         # guidance) so the child uses command_exec/file tools correctly, then
         # append the sub-agent role addendum. Pre-seeding this as the first
         # message also makes _inner_run_stream skip its default build_system_prompt() seed.
-        from twinkle.agentserver.agent_loop import build_system_prompt  # lazy: avoid circular (agent_loop -> tools -> subagent -> executor)
+        from twinkle.agentserver.agent import build_system_prompt  # lazy: avoid circular (agent -> tools -> subagent -> executor)
         return build_system_prompt() + "\n\n" + _SUBAGENT_ADDENDUM
 
     def _build_query(self, task: SubagentTaskSpec) -> str:
@@ -88,24 +89,22 @@ class SubagentExecutor:
 
     # --- build + run ---
 
-    def _build_loop(self) -> AgentLoop:
-        from twinkle.agentserver.agent_loop import AgentLoop  # lazy: avoid circular (agent_loop -> tools -> subagent -> executor)
+    def _build_child_agent(self) -> "ReActAgent":
+        from twinkle.agentserver.agent import ReActAgent  # lazy: avoid circular (agent -> tools -> subagent -> executor)
         tool_manager = self._build_tool_manager()
-        loop = AgentLoop(self._llm, self._store, tool_manager,  # type: ignore[arg-type]
-                               max_steps=self._config.max_steps)
-        for hook in self._hook_list():
-            loop.register_hook(hook)
-        return loop
+        return ReActAgent(self._llm, self._store, tool_manager,
+                          hooks=tuple(self._hook_list()),
+                          max_steps=self._config.max_steps)
 
-    async def _drive_child(self, child_loop: AgentLoop, child_env: E2AEnvelope) -> str:
-        """Run child run_stream in a child task (ContextVar isolation); drain
+    async def _drive_child(self, child_loop: "ReActAgent", child_request: "AgentRequest") -> str:
+        """Run child agent in a child task (ContextVar isolation); drain
         frames via a queue; return the e2a.complete content. Black-box: chunk /
         todo_update frames are discarded."""
         queue: asyncio.Queue = asyncio.Queue()
 
         async def _run():
             try:
-                async for frame in child_loop.run_stream(child_env):
+                async for frame in child_loop.run(child_request):
                     await queue.put(frame)
             except Exception as exc:       # child raised -> forward as a frame
                 await queue.put(exc)
@@ -153,14 +152,14 @@ class SubagentExecutor:
             session_id, {"role": "system", "content": self._system_prompt()},
             request_id=parent_request_id,
         )
-        loop = self._build_loop()
-        envelope = E2AEnvelope(
-            request_id=f"{parent_request_id}__sub_{uuid.uuid4().hex[:8]}",
+        child_agent = self._build_child_agent()
+        from twinkle.agentserver.agent import AgentRequest  # lazy: avoid circular
+        child_request = AgentRequest(
             session_id=session_id,
-            method="chat.send",
-            params={"query": self._build_query(task)},
+            request_id=f"{parent_request_id}__sub_{uuid.uuid4().hex[:8]}",
+            query=self._build_query(task),
         )
-        child_task = asyncio.create_task(self._drive_child(loop, envelope))
+        child_task = asyncio.create_task(self._drive_child(child_agent, child_request))
         try:
             final = await asyncio.wait_for(child_task, timeout=self._config.hard_timeout)
             return SubagentResult(success=True, result=final)

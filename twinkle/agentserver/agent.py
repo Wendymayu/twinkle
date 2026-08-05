@@ -1,9 +1,9 @@
-"""AgentLoop — the ReAct core: think -> (tool -> result)* -> answer.
+"""ReActAgent — a ReAct-pattern agent: think -> (tool -> result)* -> answer.
 
-run_stream is an async generator yielding E2AResponse frames so the
-ws send boundary stays in server.py (loop never touches the socket).
+run() is an async generator yielding E2AResponse frames so the ws send
+boundary stays in server.py (agent never touches the socket).
 
-Twinkle is stream-only; run_unary has been removed.
+Twinkle is stream-only; unary has been removed.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import logging
 import platform
 import sys
 import time
+from dataclasses import dataclass
 from datetime import date
 from typing import AsyncIterator
 
@@ -38,7 +39,7 @@ from twinkle.agentserver.hooks.base import (
 )
 from twinkle.agentserver.hooks.decorator import hook
 from twinkle.agentserver.hooks.manager import HookManager
-from twinkle.e2a.models import E2AEnvelope, E2AResponse
+from twinkle.e2a.models import E2AResponse
 from twinkle.config import (
     AGENT_MAX_STEPS as MAX_STEPS,
     MEMORY_DIR,
@@ -49,6 +50,27 @@ from twinkle.config import (
 log = logging.getLogger("twinkle.agentserver")
 
 
+# ---------------------------------------------------------------------------
+# AgentRequest — pure business input, no transport-layer concepts
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentRequest:
+    """One agent run's business inputs. No E2A / WebSocket concepts.
+
+    server.py is responsible for constructing this from the transport envelope.
+    """
+
+    session_id: str
+    request_id: str
+    query: str
+    channel: str = "web"
+
+
+# ---------------------------------------------------------------------------
+# System prompt builder
+# ---------------------------------------------------------------------------
+
 def build_system_prompt() -> str:
     """Build the base system prompt injected once per session at position 0.
 
@@ -57,7 +79,7 @@ def build_system_prompt() -> str:
     are resolved at injection time so the prompt stays current.
     """
     os_type = sys.platform
-    today = date.today().isoformat()
+    today_date = date.today().isoformat()
     workspace = WORKSPACE_DIR
     memory_dir = MEMORY_DIR
     skills_dir = SKILLS_DIR
@@ -84,7 +106,7 @@ def build_system_prompt() -> str:
 # 运行环境
 
 当前平台：`{os_type}`
-当前日期：`{today}`
+当前日期：`{today_date}`
 
 **必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
 
@@ -121,47 +143,67 @@ def build_system_prompt() -> str:
 
 你有技能工具（list_skill/read_skill）。可用技能清单见系统注入的"可用技能"段。"""
 
+
 _MAX_HOOK_RETRIES = 3
 
 
-class AgentLoop:
+# ---------------------------------------------------------------------------
+# ReActAgent
+# ---------------------------------------------------------------------------
+
+class ReActAgent:
+    """A ReAct-pattern agent: LLM think → tool calls → results → re-decide.
+
+    Hooks are injected at construction time via *hooks*.  ``run()`` is the
+    single public entry point — it processes one user message through the
+    ReAct loop and yields E2AResponse frames.
+    """
+
     def __init__(
         self,
         llm: LLMClient,
         store: SessionStore,
         tools: ToolManager,
+        *,
+        hooks: tuple[AgentHook, ...] = (),
         max_steps: int | None = None,
     ) -> None:
         self._llm = llm
         self._session_store = store
         self._tool_manager = tools
         self._hook_manager = HookManager()
+        for h in hooks:
+            self._hook_manager.register_hook(h)
         self._max_steps = max_steps if max_steps is not None else MAX_STEPS
 
+    @property
+    def session_store(self) -> SessionStore:
+        """The SessionStore this agent reads/writes conversation history from."""
+        return self._session_store
+
     def register_hook(self, hook_instance: AgentHook) -> None:
-        """Register an AgentHook on this loop (sync — safe to call from build_agent_loop)."""
+        """Register an AgentHook (kept for test injection — prefer constructor)."""
         self._hook_manager.register_hook(hook_instance)
 
     def unregister_hook(self, hook_instance: AgentHook) -> None:
-        """Unregister an AgentHook from this loop."""
+        """Unregister an AgentHook."""
         self._hook_manager.unregister_hook(hook_instance)
 
-    # --- Public entry point — signature unchanged --- #
+    # -- Public entry point -------------------------------------------------
 
-    async def run_stream(self, envelope: E2AEnvelope) -> AsyncIterator[E2AResponse]:
-        """Entry point — creates HookContext, triggers BEFORE/AFTER_INVOKE,
-        delegates ReAct logic to _inner_run_stream.
+    async def run(self, request: AgentRequest) -> AsyncIterator[E2AResponse]:
+        """Process one user message through the ReAct loop.
 
-        Signature unchanged: (envelope) -> AsyncIterator[E2AResponse].
+        Triggers BEFORE_INVOKE / AFTER_INVOKE hooks, delegates to the
+        internal ReAct loop, writes interrupt snapshots on failure.
         """
-        session_id = envelope.session_id
-        request_id = envelope.request_id
-        query = (envelope.params or {}).get("query", "")
+        session_id = request.session_id
+        request_id = request.request_id
 
         ctx = HookContext(
             agent=self,
             event=HookEvent.BEFORE_INVOKE,
-            inputs=InvokeInputs(query=query, envelope=envelope),
+            inputs=InvokeInputs(query=request.query),
             session_id=session_id,
             request_id=request_id,
             extra={},
@@ -171,11 +213,11 @@ class AgentLoop:
 
         completed_normally = False
         try:
-            async for frame in self._inner_run_stream(ctx, envelope):
+            async for frame in self._run_react_loop(ctx, request):
                 yield frame
-            completed_normally = True  # _inner_run_stream returned normally
+            completed_normally = True
         except HookInterrupt:
-            completed_normally = True  # HookInterrupt already yielded e2a.error
+            completed_normally = True
             yield E2AResponse(
                 request_id=request_id,
                 sequence=0,
@@ -189,12 +231,6 @@ class AgentLoop:
             await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
             raise
         finally:
-            # Phase 12: write interrupt snapshot when request did not complete normally
-            # (model failure, CancelledError, uncaught exception, etc.)
-            # CancelledError is a BaseException — it bypasses except Exception
-            # and would re-cancel the awaits below, skipping clear_all_pending
-            # and AFTER_INVOKE.  Catch CancelledError explicitly so the snapshot
-            # write completes or at least fails gracefully.
             if not completed_normally:
                 try:
                     snapshot = await self._build_interrupt_snapshot(ctx, session_id)
@@ -207,41 +243,44 @@ class AgentLoop:
                     log.warning("interrupt snapshot cancelled for session %s", session_id)
                 except Exception:
                     log.exception("failed to write interrupt snapshot for session %s", session_id)
-            # Clear any lingering pending approvals for this session (safety net)
             APPROVAL_REGISTRY.clear_all_pending(session_id)
             await self._hook_manager.execute(HookEvent.AFTER_INVOKE, ctx)
 
-    # --- ReAct core with hook trigger points --- #
+    # -- ReAct loop ---------------------------------------------------------
 
-    async def _inner_run_stream(
+    async def _run_react_loop(
         self,
         ctx: HookContext,
-        envelope: E2AEnvelope,
+        request: AgentRequest,
     ) -> AsyncIterator[E2AResponse]:
         """The ReAct loop with hook trigger points.
 
-        Model calls use manual self._hook_manager.execute() (async generator incompatible with @hook).
-        Tool calls use @hook-decorated _hooked_tool_call.
+        Model calls use manual self._hook_manager.execute() (async generator
+        incompatible with @hook).  Tool calls use @hook-decorated _tool_call.
         """
-        session_id = envelope.session_id
+        session_id = request.session_id
+        request_id = request.request_id
+
         PLAN_TODO_SESSION_ID.set(session_id or "default")
         reset_todo_events()
-        set_permission_channel(envelope.channel or "web")
-        await self._fill_missing_tool_results(session_id, envelope.request_id)
+        set_permission_channel(request.channel)
+        await self._fill_missing_tool_results(session_id, request_id)
+
         # Insert the base system prompt once per session
         messages = self._session_store.get_messages(session_id)
         if not messages or messages[0].get("role") != "system":
             await self._session_store.append(
                 session_id,
                 {"role": "system", "content": build_system_prompt()},
-                request_id=envelope.request_id,
+                request_id=request_id,
             )
-        query = (envelope.params or {}).get("query", "")
+
         await self._session_store.append(
             session_id,
-            {"role": "user", "content": query},
-            request_id=envelope.request_id,
+            {"role": "user", "content": request.query},
+            request_id=request_id,
         )
+
         seq = 0
         full_text = ""
         for _step in range(self._max_steps):
@@ -251,17 +290,14 @@ class AgentLoop:
             ctx.inputs = ModelCallInputs(messages=msgs, tools=self._tool_manager.schemas())
             await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
 
-            # -- Merge leading system messages into one (identity first, operational last) -- #
-            # Mirrors jiuwenswarm's SystemPromptBuilder: a single merged system prompt
-            # avoids "lost in the middle" — identity gets the beginning-attention hotspot,
-            # operational sections stay close to conversation for recency bias.
+            # -- Merge leading system messages into one -- #
             ctx.inputs.messages = self._merge_system_messages(ctx.inputs.messages)
 
-            # Check force_finish — skip LLM call if requested
+            # Check force_finish
             ff = ctx.consume_force_finish_request()
             if ff is not None:
                 yield E2AResponse(
-                    request_id=envelope.request_id,
+                    request_id=request_id,
                     sequence=seq,
                     is_final=True,
                     status="succeeded",
@@ -276,14 +312,11 @@ class AgentLoop:
                 ctx.retry_attempt = retry_attempt
                 ctx.exception = None
                 try:
-                    # Use ctx.inputs.messages (not stale local msgs) so that a
-                    # context-compression hook that replaces ctx.inputs.messages
-                    # during ON_MODEL_EXCEPTION takes effect on retry.
                     async for ev in self._llm.stream(messages=ctx.inputs.messages, tools=ctx.inputs.tools):
                         if isinstance(ev, TextDelta):
                             full_text += ev.content
                             yield E2AResponse(
-                                request_id=envelope.request_id,
+                                request_id=request_id,
                                 sequence=seq,
                                 is_final=False,
                                 status="in_progress",
@@ -295,21 +328,20 @@ class AgentLoop:
                             await self._session_store.append(
                                 session_id,
                                 ev.assistant_message,
-                                request_id=envelope.request_id,
+                                request_id=request_id,
                                 event_type="chat.final",
                             )
                             tcs = ev.assistant_message.get("tool_calls")
                             if ev.finish_reason == "tool_calls" and tcs:
                                 if len(tcs) > 1:
-                                    # --- Parallel path: concurrent execution via asyncio.gather ---
+                                    # --- Parallel path ---
                                     try:
                                         par_results, par_todos = await self._try_parallel_tool_calls(
-                                            tcs, session_id, envelope.request_id,
+                                            tcs, session_id, request_id,
                                         )
-                                        # Emit todo frames + append tool results in order
                                         for snap in par_todos:
                                             yield E2AResponse(
-                                                request_id=envelope.request_id,
+                                                request_id=request_id,
                                                 sequence=seq, is_final=False,
                                                 status="in_progress",
                                                 response_kind="e2a.todo_update",
@@ -320,83 +352,72 @@ class AgentLoop:
                                             await self._session_store.append(
                                                 session_id,
                                                 {"role": "tool", "tool_call_id": tc_id, "content": result},
-                                                request_id=envelope.request_id,
+                                                request_id=request_id,
                                                 event_type="chat.tool_result",
                                             )
-                                        # AFTER_MODEL_CALL for tool_calls turn
                                         await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                                         _reask = True
-                                        break  # exit async-for loop
+                                        break
                                     except HookInterrupt:
-                                        # ASK needs yield — fall through to sequential path
                                         log.info("parallel tool calls fell back to sequential (HookInterrupt)")
-                                        # Fall through to sequential path below
                                 if len(tcs) <= 1 or _reask is False:
-                                    # --- Sequential path (single tc, or fallback from parallel) ---
+                                    # --- Sequential path ---
                                     for tc in tcs:
                                         name = tc["function"]["name"]
                                         try:
                                             args = json.loads(tc["function"]["arguments"] or "{}")
                                         except Exception:
                                             args = {}
-                                        # Tool call via @hook-decorated method
                                         ctx.inputs = ToolCallInputs(
                                             name=name, args=args, tool_call_id=tc["id"]
                                         )
                                         try:
-                                            result = await self._hooked_tool_call(ctx)
+                                            result = await self._tool_call(ctx)
                                         except HookInterrupt as hi:
                                             if "approval_id" not in hi.data:
                                                 yield E2AResponse(
-                                                    request_id=envelope.request_id, sequence=seq, is_final=True,
+                                                    request_id=request_id, sequence=seq, is_final=True,
                                                     status="failed", response_kind="e2a.error",
                                                     body={"error": "tool execution interrupted"})
                                                 return
-                                            # ASK: register Future + yield e2a.ask + suspend await
+                                            # ASK: register Future + yield e2a.ask + suspend
                                             approval_id = hi.data["approval_id"]
                                             future = APPROVAL_REGISTRY.register(approval_id)
-                                            # PERSIST: save approval state to disk for reconnection recovery
                                             APPROVAL_REGISTRY.save_pending(session_id, ApprovalPendingRecord(
                                                 approval_id=approval_id,
                                                 tool=hi.data["tool"],
                                                 args=hi.data["args"],
                                                 tool_call_id=tc["id"],
                                                 reason=hi.data["reason"],
-                                                request_id=envelope.request_id,
+                                                request_id=request_id,
                                                 session_id=session_id,
                                                 created_at=time.time(),
                                             ))
                                             yield E2AResponse(
-                                                request_id=envelope.request_id, sequence=seq, is_final=False,
+                                                request_id=request_id, sequence=seq, is_final=False,
                                                 status="in_progress", response_kind="e2a.ask",
                                                 body={"approval_id": approval_id, "tool": hi.data["tool"],
                                                       "args": hi.data["args"], "tool_call_id": tc["id"],
                                                       "reason": hi.data["reason"]})
                                             seq += 1
-                                            decision = await future  # SUSPEND — ws_handler concurrency resumes it
+                                            decision = await future  # SUSPEND
                                             if decision in ("allow", "allow_always"):
-                                                # Record approval decision in ctx.extra so
-                                                # PermissionHook's bypass branch can persist
-                                                # allow_always — AgentLoop doesn't hold engine.
                                                 ctx.extra["_approval_decision"] = decision
                                                 ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
                                                 try:
-                                                    result = await self._hooked_tool_call(ctx)
+                                                    result = await self._tool_call(ctx)
                                                 except HookInterrupt:
-                                                    raise  # bypass already applied; a second interrupt shouldn't occur
+                                                    raise
                                                 except Exception as exc:
                                                     result = f"[tool error] {type(exc).__name__}: {exc}"
                                             else:
                                                 result = (f"[tool denied by user: {hi.data['tool']}] "
                                                           f"{hi.data.get('reason', '')}")
                                         except Exception as exc:
-                                            # Non-HookInterrupt tool failure (after @hook retry exhausted
-                                            # or non-transient): turn into a tool_result string so the loop
-                                            # keeps going instead of crashing the agent loop.
                                             result = f"[tool error] {type(exc).__name__}: {exc}"
                                         for snap in flush_todo_events():
                                             yield E2AResponse(
-                                                request_id=envelope.request_id,
+                                                request_id=request_id,
                                                 sequence=seq,
                                                 is_final=False,
                                                 status="in_progress",
@@ -406,21 +427,16 @@ class AgentLoop:
                                             seq += 1
                                         await self._session_store.append(
                                             session_id,
-                                            {
-                                                "role": "tool",
-                                                "tool_call_id": tc["id"],
-                                                "content": result,
-                                            },
-                                            request_id=envelope.request_id,
+                                            {"role": "tool", "tool_call_id": tc["id"], "content": result},
+                                            request_id=request_id,
                                             event_type="chat.tool_result",
                                         )
-                                    # AFTER_MODEL_CALL for tool_calls turn (sequential path)
                                     await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                                 _reask = True
-                                break  # exit async-for loop; retry loop will also break
-                            # AFTER_MODEL_CALL for final answer turn
+                                break
+                            # Final answer
                             yield E2AResponse(
-                                request_id=envelope.request_id,
+                                request_id=request_id,
                                 sequence=seq,
                                 is_final=True,
                                 status="succeeded",
@@ -430,22 +446,20 @@ class AgentLoop:
                             await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                             return
                     if _reask:
-                        break  # exit retry loop; outer _step loop will continue
-                    # LLM stream ended without Finish — shouldn't happen, but handle gracefully
+                        break
                     await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
-                    break  # exit retry loop, fall through to next step
+                    break
                 except asyncio.CancelledError:
-                    raise  # never interfere with cancellation
+                    raise
                 except HookInterrupt:
-                    raise  # interrupt propagates immediately
+                    raise
                 except Exception as exc:
                     ctx.exception = exc
                     await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
-                    # Check force_finish first — e.g., overflow circuit breaker
                     ff = ctx.consume_force_finish_request()
                     if ff is not None:
                         yield E2AResponse(
-                            request_id=envelope.request_id,
+                            request_id=request_id,
                             sequence=seq,
                             is_final=True,
                             status="succeeded",
@@ -459,20 +473,22 @@ class AgentLoop:
                             await asyncio.sleep(retry_req.delay)
                         log.info("hook requested LLM retry, attempt %d/%d",
                                  retry_attempt + 1, _MAX_HOOK_RETRIES)
-                        continue  # retry the LLM call
-                    raise  # no retry or max attempts exceeded
+                        continue
+                    raise
             if _reask:
-                continue  # next _step: re-ask model with tool results
+                continue
 
-        # exceeded max_steps without converging
+        # exceeded max_steps
         yield E2AResponse(
-            request_id=envelope.request_id,
+            request_id=request_id,
             sequence=seq,
             is_final=True,
             status="failed",
             response_kind="e2a.error",
             body={"error": f"agent loop exceeded max_steps={self._max_steps}"},
         )
+
+    # -- Parallel tool execution --------------------------------------------
 
     async def _try_parallel_tool_calls(
         self,
@@ -485,15 +501,6 @@ class AgentLoop:
         Each tool call gets its own HookContext (isolated inputs + extra) and
         its own TODO_EVENTS buffer so concurrent calls don't race on shared
         state.  Results are returned in the same order as *tcs*.
-
-        Returns:
-            (results, todo_snaps) where results is [(tool_call_id, result_str)]
-            and todo_snaps is the merged list of todo events from all calls.
-
-        Raises:
-            HookInterrupt: if any tool call triggers a permission ASK — the
-            caller must fall back to sequential execution to yield the
-            e2a.ask frame.
         """
         per_tc_results: list[tuple[str, str] | None] = [None] * len(tcs)
         per_tc_todos: list[list[dict]] = [[] for _ in range(len(tcs))]
@@ -505,7 +512,6 @@ class AgentLoop:
             except Exception:
                 args = {}
 
-            # Isolated TODO buffer for this tool call
             tc_todo_buffer: list[dict] = []
             TODO_EVENTS.set(tc_todo_buffer)
 
@@ -515,12 +521,12 @@ class AgentLoop:
                 inputs=ToolCallInputs(name=name, args=args, tool_call_id=tc["id"]),
                 session_id=session_id,
                 request_id=request_id,
-                extra={},  # isolated — no shared approval state
+                extra={},
             )
             try:
-                result = await self._hooked_tool_call(tc_ctx)
+                result = await self._tool_call(tc_ctx)
             except HookInterrupt:
-                raise  # signal caller to fall back to sequential
+                raise
             except Exception as exc:
                 result = f"[tool error] {type(exc).__name__}: {exc}"
 
@@ -532,12 +538,10 @@ class AgentLoop:
             return_exceptions=True,
         )
 
-        # Check for HookInterrupt — any means we must fall back to sequential
         for r in raw_results:
             if isinstance(r, HookInterrupt):
                 raise r
 
-        # Collect results in order — all should be None (successful _run_one returns None)
         results: list[tuple[str, str]] = []
         for r in per_tc_results:
             if r is not None:
@@ -545,18 +549,12 @@ class AgentLoop:
         all_todos = [snap for tc_todos in per_tc_todos for snap in tc_todos]
         return results, all_todos
 
-    async def _build_interrupt_snapshot(self, ctx: HookContext, session_id: str) -> str:
-        """Build an interrupt snapshot message from session history + TodoStore.
+    # -- Interrupt snapshot -------------------------------------------------
 
-        Called from run_stream's finally block when the request did not complete
-        normally (model failure, CancelledError, uncaught exception). Writes an
-        assistant message so the LLM can understand what happened on the next
-        request. All information is derived from existing state — no extra
-        persistence needed.
-        """
+    async def _build_interrupt_snapshot(self, ctx: HookContext, session_id: str) -> str:
+        """Build an interrupt snapshot message from session history + TodoStore."""
         parts = ["[SYSTEM] 任务中断。"]
 
-        # 1. Exception info
         if ctx.exception:
             exc_type = type(ctx.exception).__name__
             exc_msg = str(ctx.exception)
@@ -566,7 +564,6 @@ class AgentLoop:
         else:
             parts.append("中断原因：请求被取消")
 
-        # 2. Last tool calls from session history
         msgs = self._session_store.get_messages(session_id)
         for m in reversed(msgs):
             if m.get("role") == "assistant" and m.get("tool_calls"):
@@ -574,7 +571,6 @@ class AgentLoop:
                 parts.append(f"中断前正在执行：{', '.join(tools)}")
                 break
 
-        # 3. Todo progress
         try:
             from twinkle.agentserver.todo import get_todo_store
             todos = get_todo_store()
@@ -587,21 +583,13 @@ class AgentLoop:
 
         return " ".join(parts)
 
-    async def _fill_missing_tool_results(self, session_id: str, request_id: str) -> None:
-        """If the session's most recent assistant-with-tool_calls message lacks
-        results for some of its tool_calls (a crash mid-approval, possibly after
-        some results were already appended), inject a synthetic tool_result for
-        each missing tool_call_id so the next LLM call doesn't error on orphan
-        tool_calls.
+    # -- Orphan tool-result fill --------------------------------------------
 
-        Phase 12 upgrade: enriched context — tool name + args, approval info
-        from .approval_pending.json, Todo progress from TodoStore."""
+    async def _fill_missing_tool_results(self, session_id: str, request_id: str) -> None:
+        """Inject synthetic tool_result for orphan tool_calls from a crash."""
         msgs = self._session_store.get_messages(session_id)
         if not msgs:
             return
-        # find the LAST assistant message that carries tool_calls — the only one
-        # that could be orphaned by a mid-batch crash (earlier assistants are
-        # complete, or the LLM would have errored before reaching this one).
         last_assistant = None
         for m in reversed(msgs):
             if m.get("role") == "assistant" and m.get("tool_calls"):
@@ -610,7 +598,6 @@ class AgentLoop:
         if last_assistant is None:
             return
 
-        # Read approval info for pending tool calls
         pending = APPROVAL_REGISTRY.get_pending(session_id)
         pending_map = {p["tool_call_id"]: p for p in pending if p.get("tool_call_id")}
 
@@ -631,32 +618,20 @@ class AgentLoop:
                 content = " ".join(parts)
                 await self._session_store.append(
                     session_id,
-                    {"role": "tool", "tool_call_id": tc_id,
-                     "content": content},
+                    {"role": "tool", "tool_call_id": tc_id, "content": content},
                     request_id=request_id)
 
+    # -- System message merge -----------------------------------------------
 
     @staticmethod
     def _merge_system_messages(messages: list[dict]) -> list[dict]:
-        """Merge all leading system-role messages into ONE, ordered so that
-        identity/principles appear first and operational instructions last.
+        """Merge all leading system-role messages into ONE.
 
-        Mirrors jiuwenswarm's SystemPromptBuilder: a single merged system
-        prompt avoids "lost in the middle" — identity gets the beginning
-        attention hotspot, skill/memory/compression sections stay closer
-        to the conversation for recency bias.
-
-        Ordering within the merged content:
-          1. SYSTEM_PROMPT (starts with "# 身份与行为原则")
-          2. Skill section (starts with "## 可用技能" or "你有 skills")
-          3. Memory section (starts with "## 长期记忆")
-          4. Compression summary (starts with "[prior context summary]")
-          5. Any other system messages (preserve original order)
+        Order: identity → skill → memory → summary → other.
         """
         if not messages:
             return messages
 
-        # Collect consecutive system messages at the head of the list
         system_msgs: list[dict] = []
         rest_start = 0
         for i, m in enumerate(messages):
@@ -666,13 +641,11 @@ class AgentLoop:
             else:
                 break
 
-        # If only one system message or none, no merge needed
         if len(system_msgs) <= 1:
             return messages
 
         rest = messages[rest_start:]
 
-        # Classify by content prefix for ordering
         identity_parts: list[str] = []
         skill_parts: list[str] = []
         memory_parts: list[str] = []
@@ -697,7 +670,6 @@ class AgentLoop:
             else:
                 other_parts.append(content)
 
-        # Assemble: identity → skill → memory → summary → other
         merged_content = "\n\n".join(
             part for part in (
                 identity_parts + skill_parts + memory_parts
@@ -707,16 +679,11 @@ class AgentLoop:
 
         return [{"role": "system", "content": merged_content}] + rest
 
-    # --- @hook-decorated methods --- #
+    # -- @hook-decorated tool call ------------------------------------------
 
     @hook(HookEvent.BEFORE_TOOL_CALL, HookEvent.AFTER_TOOL_CALL,
           on_exception=HookEvent.ON_TOOL_EXCEPTION)
-    async def _hooked_tool_call(self, ctx: HookContext) -> str:
-        """Tool execution wrapped with @hook lifecycle.
-
-        Reads tool name/args from ctx.inputs (ToolCallInputs) — single data
-        channel so hooks that modify ctx.inputs.args (e.g. arg sanitization)
-        take effect in the method body automatically.
-        """
+    async def _tool_call(self, ctx: HookContext) -> str:
+        """Tool execution wrapped with @hook lifecycle."""
         inputs: ToolCallInputs = ctx.inputs  # type: ignore[assignment]
         return await self._tool_manager.execute(inputs.name, inputs.args)

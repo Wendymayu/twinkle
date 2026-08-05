@@ -19,14 +19,15 @@ def _free_port() -> int:
 
 
 class _RecordingLoop:
-    """Records the env it received and streams back one canned frame."""
-    def __init__(self):
+    """Records the request it received and streams back one canned frame."""
+    def __init__(self, store=None):
         self.seen = None
+        self.session_store = store
 
-    async def run_stream(self, env):
-        self.seen = env
+    async def run(self, request):
+        self.seen = request
         yield E2AResponse(
-            request_id=env.request_id,
+            request_id=request.request_id,
             sequence=0,
             is_final=True,
             status="succeeded",
@@ -48,11 +49,11 @@ class _FakeSkillNetClient:
 
 def test_malformed_envelope_returns_error(tmp_path) -> None:
     port = _free_port()
-    loop_obj = _RecordingLoop()
     store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = _RecordingLoop(store)
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
         try:
             async with connect(f"ws://127.0.0.1:{port}") as ws:
                 await ws.recv()  # connection.ack
@@ -69,11 +70,11 @@ def test_malformed_envelope_returns_error(tmp_path) -> None:
 
 def test_valid_envelope_dispatches_to_loop(tmp_path) -> None:
     port = _free_port()
-    loop_obj = _RecordingLoop()
     store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = _RecordingLoop(store)
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
         try:
             async with connect(f"ws://127.0.0.1:{port}") as ws:
                 await ws.recv()  # connection.ack
@@ -88,7 +89,7 @@ def test_valid_envelope_dispatches_to_loop(tmp_path) -> None:
                 assert data["body"]["result"]["content"] == "ok"
             assert loop_obj.seen is not None
             assert loop_obj.seen.session_id == "s1"
-            assert loop_obj.seen.params["query"] == "hi"
+            assert loop_obj.seen.query == "hi"
         finally:
             server.close()
             await server.wait_closed()
@@ -100,15 +101,15 @@ def test_skill_list_local_routes_inline(tmp_path) -> None:
     """skills.list_local is routed inline by ws_handler (never reaches the ReAct loop)."""
     from twinkle.agentserver.skills import _set_skill_manager, SkillManager
     port = _free_port()
-    loop_obj = _RecordingLoop()
     store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = _RecordingLoop(store)
     sk_dir = tmp_path / "skills" / "foo"
     sk_dir.mkdir(parents=True)
     (sk_dir / "SKILL.md").write_text("---\nname: foo\ndescription: d\n---\nbody", encoding="utf-8")
     _set_skill_manager(SkillManager(str(tmp_path / "skills")))
     try:
         async def run() -> None:
-            server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
+            server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
             try:
                 async with connect(f"ws://127.0.0.1:{port}") as ws:
                     await ws.recv()  # connection.ack
@@ -140,10 +141,10 @@ def test_skill_search_runs_as_background_task(tmp_path) -> None:
     ]))
     try:
         port = _free_port()
-        loop_obj = _RecordingLoop()
         store = SessionStore(str(tmp_path / "sessions"))
+        loop_obj = _RecordingLoop(store)
         async def run() -> None:
-            server = await serve(ws_handler(loop_obj, store), "127.0.0.1", port)
+            server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
             try:
                 async with connect(f"ws://127.0.0.1:{port}") as ws:
                     await ws.recv()  # connection.ack

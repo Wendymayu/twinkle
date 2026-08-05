@@ -1,6 +1,6 @@
 import asyncio
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
 from twinkle.agentserver.permissions.audit import ToolPermissionLog
@@ -9,7 +9,7 @@ from twinkle.agentserver.permissions.policy import PermissionPolicy
 from twinkle.agentserver.hooks.builtin.permission_hook import PermissionHook
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
-from twinkle.e2a.models import E2AEnvelope
+from twinkle.agentserver.agent import AgentRequest
 
 
 class _ScriptedLLM:
@@ -22,8 +22,7 @@ class _ScriptedLLM:
 
 
 def _env(query, rid="r1", session_id="s1"):
-    return E2AEnvelope(request_id=rid, session_id=session_id, channel="web",
-                       method="chat.send", params={"query": query})
+    return AgentRequest(session_id=session_id, request_id=rid, query=query)
 
 
 def _engine(tmp_path):
@@ -59,7 +58,7 @@ def test_ask_then_allow_resumes_and_executes(session_store, tmp_path) -> None:
 
     async def run():
         frames = []
-        async for f in loop.run_stream(_env("call echo")):
+        async for f in loop.run(_env("call echo")):
             frames.append(f)
             if f.response_kind == "e2a.ask":
                 APPROVAL_REGISTRY.resolve(f.body["approval_id"], "allow")
@@ -90,7 +89,7 @@ def test_ask_then_denied_injects_deny_result(session_store, tmp_path) -> None:
 
     async def run():
         frames = []
-        async for f in loop.run_stream(_env("call echo")):
+        async for f in loop.run(_env("call echo")):
             frames.append(f)
             if f.response_kind == "e2a.ask":
                 APPROVAL_REGISTRY.resolve(f.body["approval_id"], "deny")
@@ -123,7 +122,7 @@ def test_allow_always_persists_then_skips_next_ask(session_store, tmp_path) -> N
 
     async def run():
         frames = []
-        async for f in loop.run_stream(_env("twice")):
+        async for f in loop.run(_env("twice")):
             frames.append(f)
             if f.response_kind == "e2a.ask":
                 APPROVAL_REGISTRY.resolve(f.body["approval_id"], "allow_always")
@@ -156,7 +155,7 @@ def test_multi_tool_batch_each_asks_then_resumes(session_store, tmp_path) -> Non
 
     async def run():
         frames = []
-        async for f in loop.run_stream(_env("batch")):
+        async for f in loop.run(_env("batch")):
             frames.append(f)
             if f.response_kind == "e2a.ask":
                 APPROVAL_REGISTRY.resolve(f.body["approval_id"], "allow")

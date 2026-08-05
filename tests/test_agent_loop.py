@@ -1,10 +1,9 @@
 import asyncio
 import json
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import AgentRequest, ReActAgent as AgentLoop
 from twinkle.agentserver.llm_client import TextDelta, Finish
 from twinkle.agentserver.tools.decorator import tool
-from twinkle.e2a.models import E2AEnvelope
 
 
 class _ScriptedLLM:
@@ -21,11 +20,10 @@ class _ScriptedLLM:
 
 
 def _env(query, rid="r1", session_id="s1"):
-    return E2AEnvelope(
-        request_id=rid,
+    return AgentRequest(
         session_id=session_id,
-        method="chat.send",
-        params={"query": query},
+        request_id=rid,
+        query=query,
     )
 
 
@@ -51,7 +49,7 @@ def test_plain_answer_streams_chunks_and_complete(session_store) -> None:
     loop = AgentLoop(llm, store, _reg_with_echo_tool())
 
     async def run():
-        frames = [f async for f in loop.run_stream(_env("hi"))]
+        frames = [f async for f in loop.run(_env("hi"))]
         return frames
 
     frames = asyncio.run(run())
@@ -78,7 +76,7 @@ def test_tool_call_round_trip_then_answer(session_store) -> None:
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        frames = [f async for f in loop.run_stream(_env("call echo"))]
+        frames = [f async for f in loop.run(_env("call echo"))]
         return frames
 
     frames = asyncio.run(run())
@@ -120,9 +118,9 @@ def test_cross_turn_remembers_context(session_store) -> None:
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        async for _ in loop.run_stream(_env("turn1", rid="r1", session_id="s1")):
+        async for _ in loop.run(_env("turn1", rid="r1", session_id="s1")):
             pass
-        async for _ in loop.run_stream(_env("turn2", rid="r2", session_id="s1")):
+        async for _ in loop.run(_env("turn2", rid="r2", session_id="s1")):
             pass
 
     asyncio.run(run())
@@ -145,11 +143,11 @@ def test_max_steps_emits_error(session_store, monkeypatch) -> None:
                         "function": {"name": "echo", "arguments": '{"text": "x"}'}}]})
     llm = _ScriptedLLM([ [tool_finish] for _ in range(20) ])
     # default-independent: force a small cap so 20 scripted turns always exceed it
-    monkeypatch.setattr("twinkle.agentserver.agent_loop.MAX_STEPS", 2)
+    monkeypatch.setattr("twinkle.agentserver.agent.MAX_STEPS", 2)
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        frames = [f async for f in loop.run_stream(_env("loop"))]
+        frames = [f async for f in loop.run(_env("loop"))]
         return frames
 
     frames = asyncio.run(run())
@@ -179,7 +177,7 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
     loop = AgentLoop(llm, store, tool_manager())
 
     async def run():
-        return [f async for f in loop.run_stream(_env("plan something", session_id="s-todo"))]
+        return [f async for f in loop.run(_env("plan something", session_id="s-todo"))]
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.complete"
@@ -219,7 +217,7 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
     loop = AgentLoop(llm, store, tool_manager())
 
     async def run():
-        return [f async for f in loop.run_stream(_env("plan", session_id="s-upd"))]
+        return [f async for f in loop.run(_env("plan", session_id="s-upd"))]
 
     frames = asyncio.run(run())
     todo_frames = [f for f in frames if f.response_kind == "e2a.todo_update"]
@@ -246,7 +244,7 @@ def test_max_steps_instance_param_emits_error(session_store) -> None:
     loop = AgentLoop(llm, store, reg, max_steps=2)   # instance param, no monkeypatch
 
     async def run():
-        return [f async for f in loop.run_stream(_env("loop"))]
+        return [f async for f in loop.run(_env("loop"))]
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.error"
@@ -297,7 +295,7 @@ def test_parallel_tool_calls_two_echoes(session_store) -> None:
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        return [f async for f in loop.run_stream(_env("two echoes", session_id="s-par"))]
+        return [f async for f in loop.run(_env("two echoes", session_id="s-par"))]
 
     frames = asyncio.run(run())
     final = frames[-1]
@@ -347,7 +345,7 @@ def test_parallel_tool_calls_one_error_one_ok(session_store) -> None:
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        return [f async for f in loop.run_stream(_env("mixed", session_id="s-mix"))]
+        return [f async for f in loop.run(_env("mixed", session_id="s-mix"))]
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.complete"
@@ -378,7 +376,7 @@ def test_parallel_tool_calls_disabled(session_store) -> None:
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        return [f async for f in loop.run_stream(_env("single", session_id="s-solo"))]
+        return [f async for f in loop.run(_env("single", session_id="s-solo"))]
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.complete"
@@ -413,7 +411,7 @@ def test_interrupt_snapshot_on_model_exception(session_store) -> None:
 
     async def run():
         try:
-            [f async for f in loop.run_stream(_env("hi", session_id="s-int"))]
+            [f async for f in loop.run(_env("hi", session_id="s-int"))]
         except RuntimeError:
             pass  # expected
 
@@ -435,7 +433,7 @@ def test_no_interrupt_snapshot_on_normal_completion(session_store) -> None:
     loop = AgentLoop(llm, store, _reg_with_echo_tool())
 
     async def run():
-        return [f async for f in loop.run_stream(_env("hi", session_id="s-ok"))]
+        return [f async for f in loop.run(_env("hi", session_id="s-ok"))]
 
     asyncio.run(run())
     msgs = store.get_messages("s-ok")
@@ -469,7 +467,7 @@ def test_sanitize_orphan_tool_calls_includes_tool_name_and_args(session_store) -
     loop = AgentLoop(llm, session_store, tm)
 
     async def run():
-        return [f async for f in loop.run_stream(_env("resume", session_id="s-orphan"))]
+        return [f async for f in loop.run(_env("resume", session_id="s-orphan"))]
 
     asyncio.run(run())
     msgs = session_store.get_messages("s-orphan")

@@ -30,7 +30,7 @@ def test_e2e_cron_wake_push(tmp_path):
     + CronSchedulerService(fake agent_client 直连 loop) + CapturingHandler，
     验证 wake→_run_agent→push→enqueue_outbound 全链路。
     """
-    from twinkle.agentserver.agent_loop import AgentLoop
+    from twinkle.agentserver.agent import AgentRequest, ReActAgent as AgentLoop
     from twinkle.agentserver.sessions import SessionStore
     from twinkle.agentserver.tools import tool_manager
     from twinkle.gateway.cron.models import CronJob, _Event
@@ -48,7 +48,13 @@ def test_e2e_cron_wake_push(tmp_path):
             self.sent.append(envelope)
 
         async def send_request_stream(self, envelope):
-            async for resp in self._loop.run_stream(envelope):
+            request = AgentRequest(
+                session_id=envelope.session_id or envelope.request_id,
+                request_id=envelope.request_id,
+                query=(envelope.params or {}).get("query", ""),
+                channel=envelope.channel or "web",
+            )
+            async for resp in self._loop.run(request):
                 yield resp
 
     class CapturingHandler:

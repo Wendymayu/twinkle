@@ -8,7 +8,7 @@ from pathlib import Path
 
 from websockets.asyncio.server import serve
 
-from twinkle.agentserver.server import ws_handler, build_agent_loop
+from twinkle.agentserver.server import ws_handler, create_agent
 from twinkle.agentserver.llm_client import Finish
 from twinkle.agentserver.skills import _set_skill_manager, SkillManager
 from twinkle.gateway.message_handler import MessageHandler
@@ -63,10 +63,10 @@ def test_skill_flow_through_gateway_and_agentserver(free_port, tmp_path, monkeyp
         store = session_store()
         # hooks=[]:本 E2E 不验 SkillHook 注入(单测 test_skill_hook 覆盖),
         # 只验工具链(list_skill/read_skill 经 tool_manager 执行)+ tool_result 回灌
-        loop = build_agent_loop(store, hooks=[], llm=scripted)
+        loop = create_agent(store, hooks=[], llm=scripted)
 
         async def scenario():
-            handler = ws_handler(loop, store)
+            handler = ws_handler(loop)
             srv = await serve(handler, "127.0.0.1", free_port)
             try:
                 ac = AgentClient(f"ws://127.0.0.1:{free_port}")

@@ -12,7 +12,7 @@ from pathlib import Path
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.server import ws_handler
 from twinkle.agentserver.sessions import SessionStore
@@ -106,7 +106,7 @@ def test_end_to_end_tool_round_trip(tmp_path, port_factory) -> None:
     loop_obj = AgentLoop(_ScriptedLLM(scripts), store, _reg_with_echo())
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", agentserver_port)
         try:
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
@@ -177,7 +177,7 @@ def test_session_rpc_round_trip(tmp_path, port_factory) -> None:
             "s-seed", {"role": "user", "content": "hello"}, request_id="r0"
         )
 
-        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", agentserver_port)
         try:
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
@@ -255,7 +255,7 @@ def test_session_files_ws_round_trip(tmp_path, port_factory) -> None:
     loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo())
 
     async def run() -> None:
-        server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+        server = await serve(ws_handler(loop_obj), "127.0.0.1", agentserver_port)
         try:
             agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
             await agent_client.connect()
@@ -333,7 +333,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
     ]))
     try:
         async def run() -> None:
-            server = await serve(ws_handler(loop_obj, store), "127.0.0.1", agentserver_port)
+            server = await serve(ws_handler(loop_obj), "127.0.0.1", agentserver_port)
             try:
                 agent_client = AgentClient(f"ws://127.0.0.1:{agentserver_port}")
                 await agent_client.connect()

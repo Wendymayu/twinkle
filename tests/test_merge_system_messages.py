@@ -1,7 +1,7 @@
 """Tests for _merge_system_messages — ensures identity-first ordering
 and correct handling of edge cases (single system, no system, mixed)."""
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 
 
 def _msg(role, content):

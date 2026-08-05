@@ -1,10 +1,10 @@
 import asyncio
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
-from twinkle.e2a.models import E2AEnvelope
+from twinkle.agentserver.agent import AgentRequest
 
 
 class _ScriptedLLM:
@@ -17,8 +17,7 @@ class _ScriptedLLM:
 
 
 def _env(query, rid="r1", session_id="s1"):
-    return E2AEnvelope(request_id=rid, session_id=session_id, method="chat.send",
-                       params={"query": query})
+    return AgentRequest(session_id=session_id, request_id=rid, query=query)
 
 
 def test_orphan_assistant_tool_calls_sanitized(session_store) -> None:
@@ -38,7 +37,7 @@ def test_orphan_assistant_tool_calls_sanitized(session_store) -> None:
         [Finish("stop", {"role": "assistant", "content": "recovered", "tool_calls": None})],
     ])
     loop = AgentLoop(llm, session_store, tm)
-    asyncio.run(_collect(loop.run_stream(_env("resume", session_id="s1"))))
+    asyncio.run(_collect(loop.run(_env("resume", session_id="s1"))))
     msgs = session_store.get_messages("s1")
     roles = [m["role"] for m in msgs]
     assert "tool" in roles  # the orphan got a synthetic tool result
@@ -66,7 +65,7 @@ def test_mid_batch_orphan_sanitized(session_store) -> None:
         [Finish("stop", {"role": "assistant", "content": "recovered", "tool_calls": None})],
     ])
     loop = AgentLoop(llm, session_store, tm)
-    asyncio.run(_collect(loop.run_stream(_env("resume", session_id="s1"))))
+    asyncio.run(_collect(loop.run(_env("resume", session_id="s1"))))
     msgs = session_store.get_messages("s1")
     # c1's real result preserved; c2's synthetic result injected (this is the I-1 fix)
     tool_msgs = [m for m in msgs if m["role"] == "tool"]

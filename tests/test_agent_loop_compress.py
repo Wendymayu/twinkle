@@ -1,10 +1,10 @@
 import asyncio
 
-from twinkle.agentserver import agent_loop
+from twinkle.agentserver.agent import ReActAgent
 from twinkle.agentserver.compression import estimate_tokens
 from twinkle.agentserver.hooks.builtin import ContextCompressionHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
-from twinkle.e2a.models import E2AEnvelope
+from twinkle.agentserver.agent import AgentRequest
 
 
 class _Store:
@@ -46,17 +46,15 @@ def test_run_stream_compresses_before_llm():
     big += [{"role": "user", "content": f"turn{i} " + "x" * 200} for i in range(20)]
     store = _Store(big)
     real_llm = _LLM()
-    loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools())
+    loop = ReActAgent(llm=real_llm, store=store, tools=_Tools())
     loop.register_hook(ContextCompressionHook(
         llm=real_llm, token_threshold=1, keep_recent_pairs=2, summary_prompt="p"))
 
-    env = E2AEnvelope(
-        request_id="r1", session_id="s1", method="chat.send", params={"query": "hi"}
-    )
+    req = AgentRequest(session_id="s1", request_id="r1", query="hi")
     frames = []
 
     async def collect():
-        async for f in loop.run_stream(env):
+        async for f in loop.run(req):
             frames.append(f)
 
     asyncio.run(collect())
@@ -69,17 +67,15 @@ def test_run_stream_no_compress_under_threshold():
     small = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
     store = _Store(small)
     real_llm = _LLM()
-    loop = agent_loop.AgentLoop(llm=real_llm, store=store, tools=_Tools())
+    loop = ReActAgent(llm=real_llm, store=store, tools=_Tools())
     loop.register_hook(ContextCompressionHook(
         llm=real_llm, token_threshold=60_000, keep_recent_pairs=6, summary_prompt="p"))
 
-    env = E2AEnvelope(
-        request_id="r2", session_id="s2", method="chat.send", params={"query": "yo"}
-    )
+    req = AgentRequest(session_id="s2", request_id="r2", query="yo")
     frames = []
 
     async def collect():
-        async for f in loop.run_stream(env):
+        async for f in loop.run(req):
             frames.append(f)
 
     asyncio.run(collect())

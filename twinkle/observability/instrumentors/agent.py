@@ -1,4 +1,4 @@
-"""Instrument AgentLoop.run_stream -> twinkle.agent.invoke (root span).
+"""Instrument ReActAgent.run -> twinkle.agent.invoke (root span).
 
 Opens the root span as current so child gen_ai.chat / gen_ai.tool spans
 (parent = current) attach under it. Stamps request_id/session_id onto the
@@ -21,12 +21,12 @@ from twinkle.observability.context import (
 
 def instrument_agent(tracer, metrics, cfg, *, agent_cls=None) -> bool:
     if agent_cls is None:
-        from twinkle.agentserver.agent_loop import AgentLoop as agent_cls
+        from twinkle.agentserver.agent import ReActAgent as agent_cls
 
     def factory(original):
-        async def traced(self, envelope):
-            req_id = getattr(envelope, "request_id", None)
-            sess_id = getattr(envelope, "session_id", None)
+        async def traced(self, request):
+            req_id = getattr(request, "request_id", None)
+            sess_id = getattr(request, "session_id", None)
             start = time.perf_counter()
             with tracer.start_as_current_span(A.SPAN_AGENT_INVOKE) as span:
                 rctx_tok = set_request_context(
@@ -37,11 +37,7 @@ def instrument_agent(tracer, metrics, cfg, *, agent_cls=None) -> bool:
                 span.set_attribute(A.TWINKLE_SESSION_ID, sess_id or "")
                 status = "succeeded"
                 try:
-                    async for ev in original(self, envelope):
-                        # A terminal error frame (e.g. agent loop hit MAX_STEPS ->
-                        # yields e2a.error) is a normal yield+return, NOT an
-                        # exception — without this check the span would be
-                        # mislabeled "succeeded" even though the task failed.
+                    async for ev in original(self, request):
                         if status != "failed":
                             rk = getattr(ev, "response_kind", None)
                             est = getattr(ev, "status", None)
@@ -68,4 +64,4 @@ def instrument_agent(tracer, metrics, cfg, *, agent_cls=None) -> bool:
 
     from twinkle.observability.wrap import patch_method
 
-    return patch_method(agent_cls, "run_stream", factory)
+    return patch_method(agent_cls, "run", factory)

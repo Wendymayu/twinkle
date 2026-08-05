@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 from twinkle.agentserver.hooks.base import (
     AgentHook,
     HookContext,
@@ -18,7 +18,7 @@ from twinkle.agentserver.hooks.base import (
 from twinkle.agentserver.hooks.builtin.logging_hook import LoggingHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.tools.decorator import tool
-from twinkle.e2a.models import E2AEnvelope
+from twinkle.agentserver.agent import AgentRequest
 
 
 class _CallOrderHook(AgentHook):
@@ -48,11 +48,10 @@ class _CallOrderHook(AgentHook):
 
 
 def _env(query, rid="r1", session_id="s1"):
-    return E2AEnvelope(
-        request_id=rid,
+    return AgentRequest(
         session_id=session_id,
-        method="chat.send",
-        params={"query": query},
+        request_id=rid,
+        query=query,
     )
 
 
@@ -93,7 +92,7 @@ def test_hooks_called_on_plain_answer(session_store) -> None:
     loop.register_hook(order_hook)
 
     async def run():
-        frames = [f async for f in loop.run_stream(_env("hello"))]
+        frames = [f async for f in loop.run(_env("hello"))]
         return frames
 
     frames = asyncio.run(run())
@@ -126,7 +125,7 @@ def test_hooks_called_on_tool_call_round_trip(session_store) -> None:
     loop.register_hook(order_hook)
 
     async def run():
-        frames = [f async for f in loop.run_stream(_env("call echo"))]
+        frames = [f async for f in loop.run(_env("call echo"))]
         return frames
 
     frames = asyncio.run(run())
@@ -157,7 +156,7 @@ def test_existing_tests_still_pass(session_store) -> None:
     loop = AgentLoop(llm, store, _reg_with_echo_tool())
 
     async def run():
-        frames = [f async for f in loop.run_stream(_env("hi"))]
+        frames = [f async for f in loop.run(_env("hi"))]
         return frames
 
     frames = asyncio.run(run())

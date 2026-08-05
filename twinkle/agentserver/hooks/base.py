@@ -114,7 +114,7 @@ class AgentHook:
 class InvokeInputs:
     """Inputs for BEFORE/AFTER_INVOKE events."""
     query: str
-    envelope: Any  # E2AEnvelope — using Any to avoid circular import
+    envelope: Any = None  # E2AEnvelope — using Any to avoid circular import; deprecated, prefer AgentRequest
 
 
 @dataclass

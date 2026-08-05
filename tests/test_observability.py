@@ -494,13 +494,13 @@ class _FakeEnvelope:
 
 
 class _FakeAgentBase:
-    async def run_stream(self, envelope):
+    async def run(self, request):
         yield "frame-1"
         yield "frame-2"
 
 
 class _BoomAgentBase:
-    async def run_stream(self, envelope):
+    async def run(self, request):
         yield "frame-1"
         raise RuntimeError("loop failed")
 
@@ -515,7 +515,7 @@ def test_instrument_agent_emits_invoke_span(tracer_exporter, meter_metricreader)
     assert instrument_agent(tracer, metrics, _Cfg(), agent_cls=_FakeAgent) is True
 
     async def run():
-        return [f async for f in _FakeAgent().run_stream(_FakeEnvelope("req-1", "sess-1"))]
+        return [f async for f in _FakeAgent().run(_FakeEnvelope("req-1", "sess-1"))]
 
     frames = asyncio.run(run())
     assert frames == ["frame-1", "frame-2"]
@@ -541,7 +541,7 @@ def test_instrument_agent_records_error_status_and_reraises(tracer_exporter, met
     async def run():
         out = []
         try:
-            async for f in _BoomAgent().run_stream(_FakeEnvelope()):
+            async for f in _BoomAgent().run(_FakeEnvelope()):
                 out.append(f)
         except RuntimeError:
             return out
@@ -566,7 +566,7 @@ def test_instrument_agent_marks_failed_on_e2a_error_frame(tracer_exporter, meter
     # MAX_STEPS -> agent loop yields e2a.error and returns normally (no exception);
     # the span must reflect the real outcome (failed), not be mislabeled "succeeded".
     class _FakeAgent:
-        async def run_stream(self, envelope):
+        async def run(self, request):
             yield _E2AFrame("e2a.error", "failed")
 
     tracer, exp = tracer_exporter
@@ -575,7 +575,7 @@ def test_instrument_agent_marks_failed_on_e2a_error_frame(tracer_exporter, meter
     instrument_agent(tracer, metrics, _Cfg(), agent_cls=_FakeAgent)
 
     async def run():
-        return [f async for f in _FakeAgent().run_stream(_FakeEnvelope())]
+        return [f async for f in _FakeAgent().run(_FakeEnvelope())]
 
     frames = asyncio.run(run())
     assert len(frames) == 1
@@ -586,7 +586,7 @@ def test_instrument_agent_marks_failed_on_e2a_error_frame(tracer_exporter, meter
 
 def test_instrument_agent_marks_succeeded_on_e2a_complete_frame(tracer_exporter, meter_metricreader):
     class _FakeAgent:
-        async def run_stream(self, envelope):
+        async def run(self, request):
             yield _E2AFrame("e2a.complete", "succeeded")
 
     tracer, exp = tracer_exporter
@@ -595,7 +595,7 @@ def test_instrument_agent_marks_succeeded_on_e2a_complete_frame(tracer_exporter,
     instrument_agent(tracer, metrics, _Cfg(), agent_cls=_FakeAgent)
 
     async def run():
-        return [f async for f in _FakeAgent().run_stream(_FakeEnvelope())]
+        return [f async for f in _FakeAgent().run(_FakeEnvelope())]
 
     asyncio.run(run())
     span = exp.spans[0]
@@ -664,7 +664,7 @@ class _IntegAgent:
         self._llm = llm
         self._tools = tools
 
-    async def run_stream(self, envelope):
+    async def run(self, request):
         async for ev in self._llm.stream([], []):
             yield ev
         await self._tools.execute("web_fetch", {"url": "x"})
@@ -691,7 +691,7 @@ def test_full_trace_tree(tracer_exporter, meter_metricreader):
     agent = _IntegAgent(_IntegLLM(), _IntegTool())
 
     async def run():
-        return [f async for f in agent.run_stream(_IntegEnvelope())]
+        return [f async for f in agent.run(_IntegEnvelope())]
 
     asyncio.run(run())
 
@@ -749,7 +749,7 @@ class _RecurAgent:
         self._llm = llm
         self._tools = tools
 
-    async def run_stream(self, envelope):
+    async def run(self, request):
         async for ev in self._llm.stream([], []):
             yield ev
         if self._tools is not None:
@@ -757,7 +757,7 @@ class _RecurAgent:
 
 
 class _SpawnTool:
-    """Mimics spawn_subagent: execute runs a nested agent's run_stream in a child
+    """Mimics spawn_subagent: execute runs a nested agent's run in a child
     task. asyncio.create_task copies the OTel context, so the nested invoke span's
     parent = whatever was current at create_task time."""
 
@@ -769,7 +769,7 @@ class _SpawnTool:
             return "ok"
 
         async def _drain():
-            async for _ in self._child.run_stream(_IntegEnvelope()):
+            async for _ in self._child.run(_IntegEnvelope()):
                 pass
 
         await asyncio.create_task(_drain())
@@ -792,7 +792,7 @@ def test_subagent_invoke_span_nests_under_tool_span(tracer_exporter, meter_metri
     outer = _RecurAgent(_SubLLM(), tools=tool)         # outer: streams + calls tool
 
     async def run():
-        return [f async for f in outer.run_stream(_IntegEnvelope())]
+        return [f async for f in outer.run(_IntegEnvelope())]
 
     asyncio.run(run())
 

@@ -1,7 +1,7 @@
 """Subagent package — SubagentExecutor + spawn_subagent tool + models.
 
 Lives under tools/builtin/ (sub-package, not a flat module, because subagent
-spans an executor + models + a tool). Subagent is always on; build_agent_loop
+spans an executor + models + a tool). Subagent is always on; create_agent
 builds the executor + registers spawn_subagent + auto-wires SubagentContextHook
 (which holds the executor, mirroring jiuwenswarm binding the executor onto its
 stream rail). SubagentContextHook itself lives in hooks/builtin/.

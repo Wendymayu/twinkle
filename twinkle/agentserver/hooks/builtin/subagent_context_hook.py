@@ -1,6 +1,6 @@
 """SubagentContextHook — sets the subagent ContextVar bridge at run_stream entry.
 
-Auto-wired by build_agent_loop (which builds the executor and passes it here —
+Auto-wired by create_agent (which builds the executor and passes it here —
 mirroring jiuwenswarm's adapter binding the executor onto its stream rail).
 before_invoke fires once per run_stream (same entry point where run_stream
 itself sets PLAN_TODO_SESSION_ID etc.) and sets the executor + parent

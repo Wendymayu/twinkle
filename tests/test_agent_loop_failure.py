@@ -15,18 +15,17 @@ import asyncio
 
 import httpx
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import ReActAgent as AgentLoop
 from twinkle.agentserver.hooks.builtin.retry_hook import RetryHook
 from twinkle.agentserver.llm_client import Finish, TextDelta
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
-from twinkle.e2a.models import E2AEnvelope
+from twinkle.agentserver.agent import AgentRequest
 
 
 def _env(query, rid="r1", session_id="s1"):
-    return E2AEnvelope(
-        request_id=rid, session_id=session_id, method="chat.send",
-        params={"query": query},
+    return AgentRequest(
+        session_id=session_id, request_id=rid, query=query,
     )
 
 
@@ -83,7 +82,7 @@ def test_tool_non_transient_becomes_tool_error_and_loop_continues(session_store)
     loop.register_hook(RetryHook(delay=0))
 
     async def run():
-        return [f async for f in loop.run_stream(_env("call boom"))]
+        return [f async for f in loop.run(_env("call boom"))]
 
     frames = asyncio.run(run())
 
@@ -114,7 +113,7 @@ def test_tool_transient_retried_once_then_becomes_tool_error(session_store):
     loop.register_hook(RetryHook(delay=0))
 
     async def run():
-        return [f async for f in loop.run_stream(_env("call flaky"))]
+        return [f async for f in loop.run(_env("call flaky"))]
 
     frames = asyncio.run(run())
 
@@ -155,7 +154,7 @@ def test_model_transient_retried_with_backoff_sleep(session_store, monkeypatch):
     loop.register_hook(RetryHook(max_retries=1, delay=0.5))
 
     async def run():
-        return [f async for f in loop.run_stream(_env("hi"))]
+        return [f async for f in loop.run(_env("hi"))]
 
     frames = asyncio.run(run())
 

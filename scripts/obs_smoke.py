@@ -1,6 +1,6 @@
 """Smoke-test the observability pipeline against a local OTLP collector.
 
-Drives a REAL AgentLoop / LLMClient / ToolManager (instrumented via
+Drives a REAL ReActAgent / LLMClient / ToolManager (instrumented via
 apply_instrumentors) with a FAKE openai client — no API key needed — so the
 monkey-patched choke points emit real spans, exported via OTLP/gRPC to
 http://localhost:4317 (e.g. Labubu, UI at http://localhost:8080).
@@ -22,7 +22,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-from twinkle.agentserver.agent_loop import AgentLoop
+from twinkle.agentserver.agent import AgentRequest, ReActAgent
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.tools.decorator import tool
@@ -99,16 +99,6 @@ async def echo(text: str) -> str:
     return f"echo: {text}"
 
 
-class _Env:
-    """Duck-typed envelope (agent_loop reads .request_id/.session_id/.params/.channel)."""
-
-    def __init__(self):
-        self.request_id = "smoke-1"
-        self.session_id = "smoke-sess"
-        self.method = "chat"
-        self.channel = "web"
-        self.params = {"query": "please echo hello"}
-
 
 async def main() -> None:
     cfg = load_config()
@@ -140,10 +130,12 @@ async def main() -> None:
     llm._client = _FakeClient(scripts)  # scripted fake (no real OpenAI call) — smoke-only injection
     tools = ToolManager()
     tools.register(echo)
-    loop = AgentLoop(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools)
+    loop = ReActAgent(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools)
 
     print(f"twinkle obs smoke -> OTLP/gRPC {ENDPOINT}")
-    async for frame in loop.run_stream(_Env()):
+    request = AgentRequest(session_id="smoke-sess", request_id="smoke-1",
+                           query="please echo hello")
+    async for frame in loop.run(request):
         print(f"  frame: {frame.response_kind} status={frame.status}")
 
     tp.force_flush(6000)
