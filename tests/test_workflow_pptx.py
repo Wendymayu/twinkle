@@ -12,7 +12,7 @@ async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
     import json as _json
     import re as _re
 
-    if "判断用户是否想要生成PPT" in prompt:
+    if "提取PPT演示主题" in prompt:
         if "人工智能" in prompt:
             return '{"intent": "ppt", "topic": "人工智能技术与应用", "has_documents": false}'
         if "Python" in prompt:
@@ -126,3 +126,68 @@ def test_pptx_workflow_extract_json():
     assert isinstance(result, dict)
     assert result.get("status") == "ok"
     print(f"Workflow result: {json.dumps(result, ensure_ascii=False, default=str)[:500]}")
+
+
+def test_pptx_workflow_spec_mode():
+    """Spec-mode: agent passes structured inputs (topic/audience/page_count/outline)
+    with NO 'text' key. Workflow must honor them, skip LLM extraction, and produce
+    a non-empty topic + a real (non-dotfile) pptx filename.
+
+    Regression for the empty-topic / '.pptx' hidden-dotfile bug.
+    """
+    plan_code = _load_pptx_workflow()
+    executor = _make_executor()
+    from twinkle.agentserver.tools import tool_manager
+    executor._tools = tool_manager()
+
+    spec_inputs = {
+        "topic": "AI Agent 从入门到精通",
+        "audience": "技术团队",
+        "page_count": 4,
+        "style": "tech-minimal",
+        "outline": [
+            "封面：AI Agent 从入门到精通",
+            "什么是 AI Agent：定义、核心能力、自主性",
+            "Agent 架构：感知-规划-记忆-行动",
+            "问答 Q&A：核心要点回顾",
+        ],
+    }
+    result = asyncio.run(executor.execute_workflow(plan_code, spec_inputs))
+
+    assert result["status"] == "ok"
+    assert result["topic"] == "AI Agent 从入门到精通", f"topic lost: {result.get('topic')!r}"
+    pptx_path = result["pptx_path"]
+    assert pptx_path, "pptx_path missing"
+    # No empty/hidden dotfile basename — must have a real name before .pptx
+    import os as _os
+    basename = _os.path.basename(pptx_path)
+    assert basename not in (".pptx", ""), f"empty/hidden filename: {pptx_path!r}"
+    assert basename.endswith(".pptx")
+    print(f"Spec-mode result: topic={result['topic']!r} pptx_path={pptx_path!r} pages={result.get('page_count')}")
+
+
+def test_pptx_workflow_exported_file_exists():
+    """End-to-end: the .pptx file is actually written to disk and non-empty."""
+    import os as _os
+    plan_code = _load_pptx_workflow()
+    executor = _make_executor()
+    from twinkle.agentserver.tools import tool_manager
+    executor._tools = tool_manager()
+
+    spec_inputs = {
+        "topic": "时间管理",
+        "page_count": 3,
+        "outline": [
+            "封面：时间管理",
+            "核心原则：要事第一",
+            "总结：回顾要点",
+        ],
+    }
+    result = asyncio.run(executor.execute_workflow(plan_code, spec_inputs))
+    assert result["status"] == "ok"
+
+    from twinkle.config import WORKSPACE_DIR
+    abs_path = _os.path.join(WORKSPACE_DIR, result["pptx_path"])
+    assert _os.path.exists(abs_path), f"PPTX not written: {abs_path}"
+    assert _os.path.getsize(abs_path) > 0, f"PPTX empty: {abs_path}"
+    print(f"Exported PPTX verified: {abs_path} ({_os.path.getsize(abs_path)} bytes)")

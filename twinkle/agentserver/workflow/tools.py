@@ -43,15 +43,28 @@ def _scan_workflows() -> dict[str, str]:
         root_py = d / "root.py"
         if not root_py.is_file():
             continue
-        # Extract first non-empty docstring line as description
+        # Extract first non-empty, non-comment line as description
+        # Skips """ lines (module docstring delimiters) but keeps the docstring content
         desc = d.name
         try:
             first_line = ""
             for line in root_py.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
-                if stripped and not stripped.startswith('"""') and not stripped.startswith("#"):
-                    first_line = stripped
+                if not stripped or stripped.startswith("#"):
+                    continue
+                # Skip docstring delimiters (""" or '''), keep content lines
+                if stripped.startswith('"""') or stripped.startswith("'''"):
+                    # Line like """Description text""" — extract the inner text
+                    inner = stripped[3:]
+                    if inner.endswith('"""') or inner.endswith("'''"):
+                        inner = inner[:-3]
+                    inner = inner.strip()
+                    if inner:
+                        first_line = inner
+                    # else: bare opening """ — skip, next line is content
                     break
+                first_line = stripped
+                break
             if first_line:
                 desc = first_line
         except Exception:
@@ -73,11 +86,28 @@ def _build_tool_description() -> str:
     for name, desc in workflows.items():
         lines.append(f"  - {name}: {desc}")
     lines.append("")
-    lines.append("当用户意图匹配上述 workflow 时，优先调用此工具。")
+    lines.append("当用户意图匹配上述 workflow 时，必须调用此工具而非自行回答。")
+    lines.append("workflow_name 必须是上面列出的名称之一。inputs 为 JSON 字符串。")
     return "\n".join(lines)
 
 
-@tool
+@tool(
+    input_params={
+        "type": "object",
+        "properties": {
+            "workflow_name": {
+                "type": "string",
+                "description": "要执行的 workflow 名称，必须是可用列表中的名称之一",
+            },
+            "inputs": {
+                "type": "string",
+                "description": "JSON 格式的输入参数，例如 translate workflow 传入 '{\"text\": \"你好世界\"}'",
+                "default": "{}",
+            },
+        },
+        "required": ["workflow_name"],
+    },
+)
 async def execute_workflow(workflow_name: str, inputs: str = "{}") -> str:
     """Dynamically replaced — see _build_tool_description()."""
     executor = workflow_executor_ctx.get()

@@ -39,6 +39,38 @@ class FallbackLimitExceededError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Infrastructure-error detection
+# ---------------------------------------------------------------------------
+
+# Infrastructure errors (LLM API down / auth / rate-limit / timeout) cannot be
+# salvaged by a subagent fallback — the subagent calls the same LLM API and will
+# fail the same way, burning tokens for nothing. Matched against the exception's
+# class-hierarchy names (NOT the message) to avoid false positives on node-logic
+# errors that merely mention "connection" in their text.
+_INFRA_KEYWORDS: tuple[str, ...] = (
+    "Connection",
+    "Auth",
+    "Unauthorized",
+    "RateLimit",
+    "Timeout",
+    "Transport",
+)
+
+
+def _is_infrastructure_error(exc: BaseException) -> bool:
+    """True if ``exc`` is an infra-class error (network/auth/rate-limit/timeout).
+
+    Walks ``type(exc).__mro__`` so subclasses of openai/httpx/asyncio errors
+    (e.g. ``openai.APIConnectionError``) are recognized without importing
+    those SDKs — keeps the workflow layer decoupled from any LLM SDK.
+    """
+    for cls in type(exc).__mro__:
+        if any(keyword in cls.__name__ for keyword in _INFRA_KEYWORDS):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # WorkflowExecutor
 # ---------------------------------------------------------------------------
 
@@ -166,6 +198,13 @@ class WorkflowExecutor:
     ) -> Any:
         """Delegate to SubagentExecutor, track count."""
         if not self._config.enable_fallback:
+            raise exc
+
+        # Infrastructure errors (LLM API connection/auth/rate-limit/timeout)
+        # can't be salvaged by a subagent — it calls the same API and fails the
+        # same way. Re-raise so the error reaches the main agent loop (ReAct),
+        # which can retry the whole workflow after the infra recovers.
+        if _is_infrastructure_error(exc):
             raise exc
 
         self._fallback_count += 1

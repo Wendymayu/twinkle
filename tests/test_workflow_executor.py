@@ -132,3 +132,69 @@ root = InterruptNode(plan_name="hitl", instruction="interrupt test")
         asyncio.run(executor.execute_workflow(plan_code, {}))
     # Fallback should NOT have been called
     mock_subagent.execute_subagent.assert_not_called()
+
+
+def test_fallback_skips_infrastructure_errors():
+    """Infrastructure errors (connection/auth/rate-limit/timeout) bypass
+    subagent fallback and propagate to the caller — a subagent calls the same
+    LLM API and would fail identically, so retrying via subagent is pure waste.
+
+    Regression: a workflow node raising APIConnectionError used to spawn a
+    subagent at every PlanNode tree level (2 levels = 2 subagents), all failing
+    against the same down API. The error should reach the main agent loop
+    (ReAct) to retry the whole workflow after infra recovers.
+    """
+    plan_code = '''
+class APIConnectionError(Exception):
+    pass
+
+class FailNode(PlanNode):
+    async def _execute(self, inputs):
+        raise APIConnectionError("Connection error.")
+
+root = FailNode(plan_name="fail", instruction="will fail")
+'''
+    mock_subagent = AsyncMock()
+    config = WorkflowConfig(enable_fallback=True, max_fallback_count=3)
+    executor = WorkflowExecutor(
+        llm=None,
+        tools=None,
+        subagent_executor=mock_subagent,
+        config=config,
+    )
+    # Infra error must propagate, NOT be swallowed into a subagent retry
+    with pytest.raises(Exception, match="Connection error"):
+        asyncio.run(executor.execute_workflow(plan_code, {}))
+    mock_subagent.execute_subagent.assert_not_called()
+
+
+def test_fallback_skips_timeout_errors():
+    """A timeout-class error bypasses fallback and propagates.
+
+    Uses a sandbox-defined infra-named exception because the sandbox's
+    restricted asyncio proxy blocks ``asyncio.TimeoutError`` directly —
+    the matching logic walks class-hierarchy names, so any class whose name
+    contains an infra keyword (here "RequestTimeout" → "Timeout") is treated
+    as infrastructure, same as the real asyncio.TimeoutError / openai.APITimeoutError.
+    """
+    plan_code = '''
+class RequestTimeout(Exception):
+    pass
+
+class TimeoutNode(PlanNode):
+    async def _execute(self, inputs):
+        raise RequestTimeout("LLM call timed out")
+
+root = TimeoutNode(plan_name="timeout", instruction="will time out")
+'''
+    mock_subagent = AsyncMock()
+    config = WorkflowConfig(enable_fallback=True, max_fallback_count=3)
+    executor = WorkflowExecutor(
+        llm=None,
+        tools=None,
+        subagent_executor=mock_subagent,
+        config=config,
+    )
+    with pytest.raises(Exception, match="LLM call timed out"):
+        asyncio.run(executor.execute_workflow(plan_code, {}))
+    mock_subagent.execute_subagent.assert_not_called()

@@ -17,7 +17,7 @@ async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
     if "西班牙语" in prompt and "翻译成" in prompt:
         return "Hola mundo"
     if "审校" in prompt:
-        # For review: return the original translation (quality is good)
+        # Review node: always return the best translation (never "通过")
         if "法语" in prompt:
             return "Bonjour le monde"
         if "西班牙语" in prompt:
