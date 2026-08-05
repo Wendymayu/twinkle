@@ -156,6 +156,56 @@ def test_download_skill_missing_skill_md_raises(tmp_path):
         asyncio.run(c.download_skill("https://github.com/zjunlp/SkillNet/tree/main/skills/foo"))
 
 
+def test_download_skill_follows_redirect(tmp_path):
+    # SkillNet skill_url may point at a renamed/moved GitHub repo; the Contents
+    # API then 301-redirects to the new owner/repo. Without follow_redirects,
+    # _get raises "HTTP 301", download_skill fails, and the skill never lands
+    # in ~/.twinkle/skills (issue #15). Client MUST follow the redirect.
+    contents = {"skills/foo/SKILL.md": "---\nname: foo\ndescription: foo\n---\nbody"}
+
+    def handler(request):
+        u = str(request.url)
+        # renamed repo: old owner/repo -> 301 to new owner/repo
+        if "/repos/old/oldrepo/contents/skills/foo?ref=main" in u:
+            loc = "https://api.github.com/repos/new/newrepo/contents/skills/foo?ref=main"
+            return httpx.Response(301, headers={"Location": loc})
+        if "/repos/new/newrepo/contents/skills/foo?ref=main" in u:
+            return httpx.Response(200, json=[
+                {"type": "file", "path": "skills/foo/SKILL.md",
+                 "download_url": "https://raw.githubusercontent.com/new/newrepo/main/skills/foo/SKILL.md"},
+            ])
+        if u.endswith("/main/skills/foo/SKILL.md"):
+            return httpx.Response(200, text=contents["skills/foo/SKILL.md"])
+        return httpx.Response(404)
+
+    c = _client(handler)
+    name, skill_dir, temp_root = asyncio.run(c.download_skill(
+        "https://github.com/old/oldrepo/tree/main/skills/foo"))
+    try:
+        assert name == "foo"
+        assert (skill_dir / "SKILL.md").read_text(encoding="utf-8").startswith("---")
+    finally:
+        import shutil as _s
+        _s.rmtree(temp_root, ignore_errors=True)
+
+
+def test_search_remote_skills_follows_redirect():
+    # SkillNet API itself may 301 (host/path move); search must follow, not raise.
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(301, headers={
+                "Location": "http://api-skillnet.openkg.cn/v1/search?q=x&mode=keyword&limit=20&page=1"})
+        return _search_resp([{"skill_name": "foo", "skill_description": "d", "skill_url": "u"}])
+
+    c = _client(handler)
+    skills = asyncio.run(c.search_remote_skills("x"))
+    assert [s.name for s in skills] == ["foo"]
+    assert calls["n"] >= 2  # followed the redirect
+
+
 def test_get_skillnet_client_singleton_and_reset():
     from twinkle.agentserver.skills import get_skillnet_client, _set_skillnet_client
     fake = SkillNetClient(skillnet_api_url="http://x")

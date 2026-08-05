@@ -105,7 +105,8 @@ class SkillNetClient:
 
     async def _get(self, client: httpx.AsyncClient, url: str,
                    params: dict | None = None) -> httpx.Response:
-        """GET + 重试。限流/404 即时致命;5xx/网络错误重试 max_retries 次。"""
+        """GET + 重试。限流/404 即时致命;5xx/网络错误重试 max_retries 次。
+        客户端开 follow_redirects,故改名/迁径仓库的 301/302 自动跟随(issue #15)。"""
         for attempt in range(self._max_retries + 1):
             try:
                 r = await client.get(url, headers=self._headers(), params=params, timeout=self._timeout)
@@ -132,7 +133,7 @@ class SkillNetClient:
         cached = self._query_cache.get(key)
         if cached is not None and not force_refresh and (time.monotonic() - cached[1]) < self._ttl:
             return cached[0]
-        async with httpx.AsyncClient(transport=self._transport) as client:
+        async with httpx.AsyncClient(transport=self._transport, follow_redirects=True) as client:
             url = f"{self._api_url}/v1/search"
             params = {"q": q, "mode": "keyword", "limit": limit, "page": page}
             resp = await self._get(client, url, params=params)
@@ -159,7 +160,7 @@ class SkillNetClient:
         owner, repo, ref, path = parse_github_url(skill_url)
         temp_root = Path(tempfile.mkdtemp(prefix="twinkle_skillnet_"))
         try:
-            async with httpx.AsyncClient(transport=self._transport) as client:
+            async with httpx.AsyncClient(transport=self._transport, follow_redirects=True) as client:
                 await self._download_tree(client, owner, repo, ref, path, temp_root)
             skill_dir = _locate_skill_dir(temp_root)
             if skill_dir is None:

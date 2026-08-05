@@ -28,9 +28,12 @@ def ensure_workspace_dir() -> str:
     """
     os.makedirs(_cfg.WORKSPACE_DIR, exist_ok=True)
     os.makedirs(_cfg.SKILLS_DIR, exist_ok=True)
+    workflows_dir = os.path.join(_cfg.WORKSPACE_DIR, "workflows")
+    os.makedirs(workflows_dir, exist_ok=True)
     os.makedirs(_cfg.MEMORY_DIR, exist_ok=True)
     os.makedirs(os.path.join(_cfg.MEMORY_DIR, "daily_memory"), exist_ok=True)
     _seed_example_skills(_cfg.SKILLS_DIR)
+    _seed_bundled_workflows(workflows_dir)
     return _cfg.WORKSPACE_DIR
 
 
@@ -48,3 +51,21 @@ def _seed_example_skills(skills_dir: str) -> None:
         if dst.exists():
             continue  # 用户已有(可能改过),不覆盖
         shutil.copytree(skill_dir, dst)
+
+
+def _seed_bundled_workflows(workflows_dir: str) -> None:
+    """First-start: copy bundled workflows (twinkle/agentserver/workflow/<name>/root.py)
+    to <WORKSPACE>/workflows/<name>/. Skip if target exists (preserve user edits).
+    A bundled workflow is a subdir of the engine package containing root.py; this
+    keeps bundled workflows inside the twinkle package (closer to packaged installs)
+    rather than a loose repo-root workflow/ dir. Mirrors _seed_example_skills."""
+    src_root = Path(__file__).resolve().parent / "agentserver" / "workflow"
+    if not src_root.is_dir():
+        return
+    for wf_dir in src_root.iterdir():
+        if not wf_dir.is_dir() or not (wf_dir / "root.py").is_file():
+            continue
+        dst = Path(workflows_dir) / wf_dir.name
+        if dst.exists():
+            continue  # 用户已有(可能改过),不覆盖
+        shutil.copytree(wf_dir, dst)

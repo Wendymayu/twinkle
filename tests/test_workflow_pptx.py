@@ -1,8 +1,17 @@
-"""Integration test: pptx-craft workflow with mock LLM."""
+"""Integration test: ppt workflow with mock LLM."""
 import asyncio
 import json
 import pytest
 from pathlib import Path
+
+
+# Bundled workflow lives inside the engine package at
+# twinkle/agentserver/workflow/ppt/root.py (seeded into
+# <WORKSPACE>/workflows/ppt/root.py by ensure_workspace_dir at startup).
+_BUNDLED_ROOT_PY = (
+    Path(__file__).resolve().parent.parent
+    / "twinkle" / "agentserver" / "workflow" / "ppt" / "root.py"
+)
 
 
 # --- Mock LLM that returns context-aware responses ---
@@ -66,15 +75,40 @@ def _make_executor():
 
 
 def _load_pptx_workflow():
-    """Load the pptx-craft root.py from the workflows directory."""
-    root_path = Path.home() / ".twinkle" / "workflows" / "pptx-craft" / "root.py"
-    if not root_path.exists():
-        pytest.skip("pptx-craft workflow not installed")
-    return root_path.read_text(encoding="utf-8")
+    """Load the ppt root.py from the bundled package location
+    (twinkle/agentserver/workflow/ppt/root.py). Seeded into
+    <WORKSPACE>/workflows/ppt/root.py at startup; tests read the bundled source
+    directly so they run on a fresh machine / CI without install."""
+    assert _BUNDLED_ROOT_PY.is_file(), f"bundled workflow missing: {_BUNDLED_ROOT_PY}"
+    return _BUNDLED_ROOT_PY.read_text(encoding="utf-8")
+
+
+def test_seed_bundled_workflows_copies_ppt(tmp_path):
+    """ensure_workspace_dir's workflow seeder copies the bundled ppt workflow
+    (twinkle/agentserver/workflow/ppt/) -> <ws>/workflows/ppt/."""
+    from twinkle.workspace import _seed_bundled_workflows
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    # Fresh target: ppt is copied from the bundled package workflow/ppt/.
+    _seed_bundled_workflows(str(workflows_dir))
+    seeded = workflows_dir / "ppt" / "root.py"
+    assert seeded.is_file()
+    assert seeded.read_text(encoding="utf-8") == _BUNDLED_ROOT_PY.read_text(encoding="utf-8")
+
+
+def test_seed_bundled_workflows_skips_existing(tmp_path):
+    """If <ws>/workflows/ppt/ already exists, seeder must NOT overwrite (preserve user edits)."""
+    from twinkle.workspace import _seed_bundled_workflows
+    workflows_dir = tmp_path / "workflows"
+    (workflows_dir / "ppt").mkdir(parents=True)
+    user_edit = "# my custom workflow\n"
+    (workflows_dir / "ppt" / "root.py").write_text(user_edit, encoding="utf-8")
+    _seed_bundled_workflows(str(workflows_dir))
+    assert (workflows_dir / "ppt" / "root.py").read_text(encoding="utf-8") == user_edit
 
 
 def test_pptx_workflow_validates():
-    """The pptx-craft root.py should pass AST validation."""
+    """The ppt root.py should pass AST validation."""
     from twinkle.agentserver.workflow.validator import PlanCodeValidator
     plan_code = _load_pptx_workflow()
     errors = PlanCodeValidator().validate(plan_code)
@@ -82,7 +116,7 @@ def test_pptx_workflow_validates():
 
 
 def test_pptx_workflow_sandbox_loads():
-    """The pptx-craft root.py should load in the sandbox namespace."""
+    """The ppt root.py should load in the sandbox namespace."""
     from twinkle.agentserver.workflow.sandbox import build_namespace
     plan_code = _load_pptx_workflow()
     namespace = build_namespace()
@@ -92,7 +126,7 @@ def test_pptx_workflow_sandbox_loads():
     assert root is not None
     from twinkle.agentserver.workflow.node import PlanNode
     assert isinstance(root, PlanNode)
-    assert root.plan_name == "pptx-craft"
+    assert root.plan_name == "ppt"
     assert len(root.sub_plans) == 7
 
 
