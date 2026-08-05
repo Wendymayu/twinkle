@@ -95,3 +95,19 @@ REPEAT_TOOL_PINGPONG_WARN = settings.repeat_tool_detection.pingpong_warn
 REPEAT_TOOL_LOOP_BLOCK = settings.repeat_tool_detection.loop_block
 REPEAT_TOOL_GLOBAL_STOP = settings.repeat_tool_detection.global_stop
 REPEAT_TOOL_REMEDIATION_MAX_PER_MINUTE = settings.repeat_tool_detection.remediation_max_per_minute
+
+# --- skill evolution (Phase 10) ---
+EVOLUTION_ENABLED = settings.evolution.enabled
+EVOLUTION_TRIGGER = settings.evolution.trigger
+EVOLUTION_AUTO_SAVE = settings.evolution.auto_save
+EVOLUTION_MAX_TEXT_RECORDS = settings.evolution.max_text_records
+EVOLUTION_MAX_SCRIPT_RECORDS = settings.evolution.max_script_records
+EVOLUTION_SCORING_W_E = settings.evolution.scoring.w_effectiveness
+EVOLUTION_SCORING_W_U = settings.evolution.scoring.w_utilization
+EVOLUTION_SCORING_W_F = settings.evolution.scoring.w_freshness
+EVOLUTION_FRESHNESS_HALF_LIFE = settings.evolution.scoring.freshness_half_life_days
+EVOLUTION_STALE_VERSION_PENALTY = settings.evolution.scoring.stale_version_penalty
+EVOLUTION_DISTILL_MIN_SCORE = settings.evolution.distill.min_score
+EVOLUTION_SIGNAL_FAILURE = settings.evolution.signals.execution_failure
+EVOLUTION_SIGNAL_SCRIPT = settings.evolution.signals.script_artifact
+EVOLUTION_SIGNAL_USER_INTENT = settings.evolution.signals.user_intent
