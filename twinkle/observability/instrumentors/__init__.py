@@ -11,16 +11,22 @@ import logging
 log = logging.getLogger("twinkle.observability")
 
 
-def apply_instrumentors(tracer, metrics, cfg, *, agent_cls=None, llm_cls=None, tool_cls=None):
+def apply_instrumentors(tracer, metrics, cfg, *, agent_cls=None, llm_cls=None,
+                        tool_cls=None, compression_mod=None,
+                        orchestrator_cls=None):
     from twinkle.observability.instrumentors.agent import instrument_agent
     from twinkle.observability.instrumentors.llm import instrument_llm
     from twinkle.observability.instrumentors.tool import instrument_tool
+    from twinkle.observability.instrumentors.compression import instrument_compression
+    from twinkle.observability.instrumentors.evolution import instrument_evolution
 
     results = {}
     for label, fn in (
         ("agent", lambda: instrument_agent(tracer, metrics, cfg, agent_cls=agent_cls)),
         ("llm", lambda: instrument_llm(tracer, metrics, cfg, llm_cls=llm_cls)),
         ("tool", lambda: instrument_tool(tracer, metrics, cfg, tool_cls=tool_cls)),
+        ("compression", lambda: instrument_compression(tracer, metrics, cfg, compression_mod=compression_mod)),
+        ("evolution", lambda: instrument_evolution(tracer, metrics, cfg, orchestrator_cls=orchestrator_cls)),
     ):
         try:
             results[label] = fn()

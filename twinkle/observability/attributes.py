@@ -9,6 +9,8 @@ never hardcode string keys.
 SPAN_AGENT_INVOKE = "twinkle.agent.invoke"
 SPAN_GEN_AI_CHAT = "gen_ai.chat"
 SPAN_GEN_AI_TOOL = "gen_ai.tool"
+SPAN_COMPRESSION = "twinkle.compression"
+SPAN_SKILL_EVOLUTION = "twinkle.skill.evolution"
 
 # --- gen_ai.* (OTel GenAI semconv) ---
 GEN_AI_SYSTEM = "gen_ai.system"
@@ -33,6 +35,16 @@ TWINKLE_REQUEST_ID = "twinkle.request.id"
 TWINKLE_SESSION_ID = "twinkle.session.id"
 TWINKLE_AGENT_ITERATIONS = "twinkle.agent.iterations"
 TWINKLE_AGENT_STATUS = "twinkle.agent.status"
+# --- compression ---
+TWINKLE_COMPRESSION_TOKENS_BEFORE = "twinkle.compression.tokens_before"
+TWINKLE_COMPRESSION_TOKENS_AFTER = "twinkle.compression.tokens_after"
+TWINKLE_COMPRESSION_COMPRESSED = "twinkle.compression.compressed"
+TWINKLE_COMPRESSION_HAS_SUMMARY = "twinkle.compression.has_summary"
+TWINKLE_COMPRESSION_STRATEGY = "twinkle.compression.strategy"
+# --- skill / evolution ---
+TWINKLE_SKILL_NAME = "twinkle.skill.name"
+TWINKLE_EVOLUTION_STATUS = "twinkle.evolution.status"
+TWINKLE_EVOLUTION_MESSAGE = "twinkle.evolution.message"
 
 # --- metric names ---
 METRIC_TOKEN_USAGE = "gen_ai.client.token.usage"

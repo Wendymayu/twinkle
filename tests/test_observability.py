@@ -65,9 +65,21 @@ def test_attribute_constants_are_strings():
     assert A.GEN_AI_USAGE_INPUT_TOKENS == "gen_ai.usage.input_tokens"
     assert A.METRIC_TOKEN_USAGE == "gen_ai.client.token.usage"
     assert A.TOOL_ERROR_PREFIX == "[tool error]"
+    # --- new: compression + evolution ---
+    assert A.SPAN_COMPRESSION == "twinkle.compression"
+    assert A.SPAN_SKILL_EVOLUTION == "twinkle.skill.evolution"
+    assert A.TWINKLE_COMPRESSION_TOKENS_BEFORE == "twinkle.compression.tokens_before"
+    assert A.TWINKLE_COMPRESSION_TOKENS_AFTER == "twinkle.compression.tokens_after"
+    assert A.TWINKLE_COMPRESSION_COMPRESSED == "twinkle.compression.compressed"
+    assert A.TWINKLE_COMPRESSION_HAS_SUMMARY == "twinkle.compression.has_summary"
+    assert A.TWINKLE_COMPRESSION_STRATEGY == "twinkle.compression.strategy"
+    assert A.TWINKLE_SKILL_NAME == "twinkle.skill.name"
+    assert A.TWINKLE_EVOLUTION_STATUS == "twinkle.evolution.status"
+    assert A.TWINKLE_EVOLUTION_MESSAGE == "twinkle.evolution.message"
 
 
 import asyncio
+import types
 
 from twinkle.observability.wrap import patch_method
 
@@ -677,6 +689,29 @@ class _IntegEnvelope:
         self.params = {}
 
 
+def _fresh_fake_compression_mod():
+    """Fresh module-like object so apply_instrumentors' compression entry
+    patches an isolated target. The real compression module is a singleton
+    shared across tests; patch_method's idempotency guard returns False on the
+    2nd patch, which would make results["compression"] False in later tests.
+    """
+    mod = types.ModuleType("fake_compression_obs")
+
+    async def do_compress(msgs, llm, *, keep_recent_pairs, summary_system_prompt):
+        return list(msgs)
+
+    mod.do_compress = do_compress
+    mod.estimate_tokens = lambda msgs: 0
+    return mod
+
+
+class _FakeEvoNoop:
+    """Noop orchestrator for apply_instrumentors isolation (fresh class per
+    test avoids the idempotency guard on a shared real orchestrator)."""
+    async def evolve(self, skill_name, conversation_messages, *a, **k):
+        return None
+
+
 def test_full_trace_tree(tracer_exporter, meter_metricreader):
     tracer, exp = tracer_exporter
     meter, _ = meter_metricreader
@@ -685,8 +720,13 @@ def test_full_trace_tree(tracer_exporter, meter_metricreader):
     results = apply_instrumentors(
         tracer, metrics, cfg,
         agent_cls=_IntegAgent, llm_cls=_IntegLLM, tool_cls=_IntegTool,
+        compression_mod=_fresh_fake_compression_mod(), orchestrator_cls=_FakeEvoNoop,
     )
-    assert results == {"agent": True, "llm": True, "tool": True}
+    assert results["agent"] is True
+    assert results["llm"] is True
+    assert results["tool"] is True
+    assert results["compression"] is True
+    assert results["evolution"] is True
 
     agent = _IntegAgent(_IntegLLM(), _IntegTool())
 
@@ -781,11 +821,21 @@ def test_subagent_invoke_span_nests_under_tool_span(tracer_exporter, meter_metri
     meter, _ = meter_metricreader
     metrics = Metrics(meter)
     cfg = _Cfg()
+
+    class _FakeEvoLocal:
+        async def evolve(self, skill_name, conversation_messages, *a, **k):
+            return None
+
     results = apply_instrumentors(
         tracer, metrics, cfg,
         agent_cls=_RecurAgent, llm_cls=_SubLLM, tool_cls=_SpawnTool,
+        compression_mod=_fresh_fake_compression_mod(), orchestrator_cls=_FakeEvoLocal,
     )
-    assert results == {"agent": True, "llm": True, "tool": True}
+    assert results["agent"] is True
+    assert results["llm"] is True
+    assert results["tool"] is True
+    assert results["compression"] is True
+    assert results["evolution"] is True
 
     child_agent = _RecurAgent(_SubLLM(), tools=None)   # nested: streams only
     tool = _SpawnTool(child_agent)

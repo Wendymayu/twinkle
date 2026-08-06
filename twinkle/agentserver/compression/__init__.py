@@ -86,29 +86,51 @@ async def _summarize(llm: LLMClient, summary_system_prompt: str, middle_text: st
     return "".join(parts) or "(无摘要产出)"
 
 
-async def compress_messages(
-    msgs: list[dict],
-    llm: LLMClient,
-    *,
-    token_threshold: int,
-    keep_recent_pairs: int,
-    summary_system_prompt: str,
-) -> list[dict]:
-    """If estimated tokens exceed threshold, replace the middle with an LLM
-    summary; keep head (system) + recent tail (tool pairs intact). Returns a
-    new list; never mutates input. No-op (copy) when under threshold or when
-    there is no middle to summarize."""
+def should_compress(msgs: list[dict], *, token_threshold: int,
+                    keep_recent_pairs: int) -> bool:
+    """两道闸:token 闸 + middle 闸。True 表示确实要压缩。
+
+    抽成独立谓词供 compress_messages 委派、也供 instrumentor 判定是否产 span
+    (避免 patch 执行函数时产生假阳性 span)。
+    """
     if estimate_tokens(msgs) <= token_threshold:
-        return list(msgs)
+        return False
+    _head, middle, _tail = _split_keep_tool_pairs(msgs, tail_count=keep_recent_pairs * 2)
+    return bool(middle)
+
+
+async def do_compress(msgs: list[dict], llm: "LLMClient", *,
+                      keep_recent_pairs: int,
+                      summary_system_prompt: str) -> list[dict]:
+    """真正执行压缩。假设 should_compress 已为 True(仍保留 `if not middle`
+    兜底以防被直接调用)。含 _summarize 的 LLM 调用。返回新 list,不改输入。"""
     head, middle, tail = _split_keep_tool_pairs(msgs, tail_count=keep_recent_pairs * 2)
     if not middle:
         return list(msgs)
     try:
         summary = await _summarize(llm, summary_system_prompt, _render_messages_text(middle))
     except Exception:
-        # Summary is an optimization, not load-bearing — degrade to a
-        # summary-less sliding window (head + tail, middle dropped) instead
-        # of failing the whole agent turn on a transient LLM error.
+        # 摘要是优化非承重——降级为无摘要滑窗(head+tail,丢 middle)
         return head + tail
     summary_msg = {"role": "system", "content": f"[prior context summary] {summary}"}
     return head + [summary_msg] + tail
+
+
+async def compress_messages(
+    msgs: list[dict],
+    llm: "LLMClient",
+    *,
+    token_threshold: int,
+    keep_recent_pairs: int,
+    summary_system_prompt: str,
+) -> list[dict]:
+    """薄壳:判定 → 委派。公开 API,行为与重构前完全一致。
+
+    No-op(copy) 当 should_compress 为 False。do_compress 经模块 globals 解析,
+    被 instrumentor patch 后,本函数的调用会到达 wrapper(同模块解析,非 import 绑定)。
+    """
+    if not should_compress(msgs, token_threshold=token_threshold,
+                           keep_recent_pairs=keep_recent_pairs):
+        return list(msgs)
+    return await do_compress(msgs, llm, keep_recent_pairs=keep_recent_pairs,
+                             summary_system_prompt=summary_system_prompt)

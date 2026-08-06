@@ -5,7 +5,9 @@ from twinkle.agentserver.compression import (
     _split_keep_tool_pairs,
     _summarize,
     compress_messages,
+    do_compress,
     estimate_tokens,
+    should_compress,
 )
 from twinkle.agentserver.llm_client import Finish, TextDelta
 
@@ -173,3 +175,41 @@ def test_compress_degrades_when_summary_fails():
     assert out[0]["role"] == "system"
     assert not any("[prior context summary]" in m.get("content", "") for m in out)
     assert estimate_tokens(out) < estimate_tokens(msgs)  # still shrunk (middle dropped)
+
+
+# --- should_compress ---
+def test_should_compress_false_under_threshold():
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
+    assert should_compress(msgs, token_threshold=10_000, keep_recent_pairs=6) is False
+
+
+def test_should_compress_false_when_tail_eats_all_middle():
+    # tail_count (12) >= len(rest) (1) -> no middle even though over threshold
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+    assert should_compress(msgs, token_threshold=1, keep_recent_pairs=6) is False
+
+
+def test_should_compress_true_over_threshold_with_middle():
+    msgs = [{"role": "system", "content": "s"}]
+    msgs += [{"role": "user", "content": f"u{i} " + "x" * 30} for i in range(20)]
+    assert should_compress(msgs, token_threshold=10, keep_recent_pairs=3) is True
+
+
+# --- do_compress ---
+def test_do_compress_summarizes_when_called_directly():
+    msgs = [{"role": "system", "content": "s"}]
+    msgs += [{"role": "user", "content": f"u{i} " + "x" * 30} for i in range(20)]
+    out = asyncio.run(do_compress(
+        msgs, FakeLLM(summary_text="摘要含 FACTKEY_5"),
+        keep_recent_pairs=3, summary_system_prompt="p"))
+    assert any("[prior context summary]" in m.get("content", "") for m in out)
+    assert estimate_tokens(out) < estimate_tokens(msgs)
+
+
+def test_do_compress_degrades_when_summary_fails():
+    msgs = [{"role": "system", "content": "s"}]
+    msgs += [{"role": "user", "content": f"u{i} " + "x" * 30} for i in range(20)]
+    out = asyncio.run(do_compress(
+        msgs, _RaisingLLM(), keep_recent_pairs=3, summary_system_prompt="p"))
+    assert not any("[prior context summary]" in m.get("content", "") for m in out)
+    assert estimate_tokens(out) < estimate_tokens(msgs)  # middle dropped
