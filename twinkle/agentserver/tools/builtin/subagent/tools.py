@@ -52,12 +52,12 @@ async def spawn_subagent(objective: str, prompt: str = "") -> str:
     tool_result — summarize it to the user; do not re-delegate the same task.
     """
     executor = get_subagent_executor()
-    parent_sid = get_subagent_parent_session_id()
-    if executor is None or parent_sid is None:
+    parent_session_id = get_subagent_parent_session_id()
+    if executor is None or parent_session_id is None:
         return "[subagent unavailable] executor not initialized on this loop"
-    parent_rid = get_subagent_parent_request_id() or parent_sid
+    parent_request_id = get_subagent_parent_request_id() or parent_session_id
     task = SubagentTaskSpec(objective=objective, prompt=prompt)
     result = await executor.execute_subagent(
-        task, parent_session_id=parent_sid, parent_request_id=parent_rid
+        task, parent_session_id=parent_session_id, parent_request_id=parent_request_id
     )
     return _wrap(result)

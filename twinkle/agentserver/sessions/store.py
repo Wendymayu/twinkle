@@ -6,7 +6,7 @@ Per-session layout under ``sessions_dir``::
         metadata.json   # {session_id, title, created_at, last_message_at, ...}
         history.json    # JSONL, one record per appended message
 
-Two layers: an in-memory cache (``dict[sid -> list[OpenAI msg]]``) for the
+Two layers: an in-memory cache (``dict[session_id -> list[OpenAI msg]]``) for the
 AgentLoop's hot reads, plus on-disk JSON for persistence across restarts.
 ``get_messages`` cold-hydrates from ``history.json`` on a cache miss so a ReAct
 turn can resume with full prior context (system prompt, tool_calls, tool results).
@@ -125,8 +125,8 @@ class SessionStore:
         for sdir in self._root.iterdir():
             if not sdir.is_dir():
                 continue
-            sid = sdir.name
-            if not include_subagents and "__sub_" in sid:
+            session_id = sdir.name
+            if not include_subagents and "__sub_" in session_id:
                 continue
             mpath = sdir / "metadata.json"
             try:
@@ -134,19 +134,19 @@ class SessionStore:
             except Exception:
                 st = sdir.stat()
                 meta = {
-                    "session_id": sid,
+                    "session_id": session_id,
                     "title": "(无标题)",
                     "created_at": st.st_ctime,
                     "last_message_at": st.st_mtime,
                     "message_count": 0,
                     "channel_id": "web",
                 }
-            meta.setdefault("session_id", sid)
+            meta.setdefault("session_id", session_id)
             # Derive the visible count from history.json (non-system records)
             # so legacy sessions whose stored count was inflated by the system
             # prompt display correctly; falls back to the stored value when
             # history is missing/unreadable. See issue #5.
-            history = self.get_history(sid)
+            history = self.get_history(session_id)
             if history:
                 meta["message_count"] = sum(
                     1 for r in history if r.get("role") != "system"

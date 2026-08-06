@@ -41,51 +41,51 @@ class MessageHandler:
 
     async def _process_stream(self, envelope: E2AEnvelope, msg: Message) -> None:
         try:
-            async for resp in self._agent_client.send_request_stream(envelope):
-                if resp.response_kind == "e2a.todo_update":
-                    out = Message(
+            async for response in self._agent_client.send_request_stream(envelope):
+                if response.response_kind == "e2a.todo_update":
+                    outbound_msg = Message(
                         id=msg.id,
                         type="event",
                         channel_id=msg.channel_id,
                         session_id=msg.session_id,
                         event_type=EventType.TODO_UPDATE,
-                        payload=dict(resp.body),
+                        payload=dict(response.body),
                         content="",
                     )
-                elif resp.response_kind == "e2a.ask":
-                    out = Message(
+                elif response.response_kind == "e2a.ask":
+                    outbound_msg = Message(
                         id=msg.id,
                         type="event",
                         channel_id=msg.channel_id,
                         session_id=msg.session_id,
                         event_type=EventType.APPROVAL_ASK,
-                        payload=dict(resp.body),
+                        payload=dict(response.body),
                         content="",
                     )
-                elif resp.response_kind == "e2a.result":
-                    out = Message(
+                elif response.response_kind == "e2a.result":
+                    outbound_msg = Message(
                         id=msg.id,
                         type="event",
                         channel_id=msg.channel_id,
                         session_id=msg.session_id,
                         event_type=EventType.RESULT,
-                        payload=dict(resp.body),
+                        payload=dict(response.body),
                         content="",
                     )
-                elif resp.response_kind == "e2a.error":
-                    out = Message(
+                elif response.response_kind == "e2a.error":
+                    outbound_msg = Message(
                         id=msg.id,
                         type="event",
                         channel_id=msg.channel_id,
                         session_id=msg.session_id,
                         event_type=EventType.CHAT_FINAL,
-                        content=f"[error] {resp.body.get('error', '')}",
-                        payload=dict(resp.body),
+                        content=f"[error] {response.body.get('error', '')}",
+                        payload=dict(response.body),
                     )
                 else:
-                    content = (resp.body.get("result") or {}).get("content", "")
-                    event_type = EventType.CHAT_FINAL if resp.is_final else EventType.CHAT_DELTA
-                    out = Message(
+                    content = (response.body.get("result") or {}).get("content", "")
+                    event_type = EventType.CHAT_FINAL if response.is_final else EventType.CHAT_DELTA
+                    outbound_msg = Message(
                         id=msg.id,
                         type="event",
                         channel_id=msg.channel_id,
@@ -93,10 +93,10 @@ class MessageHandler:
                         event_type=event_type,
                         content=content,
                     )
-                await self.enqueue_outbound(out)
+                await self.enqueue_outbound(outbound_msg)
         except Exception as exc:
             log.exception("process_stream failed for %s: %s", msg.id, exc)
-            err = Message(
+            error_message = Message(
                 id=msg.id,
                 type="event",
                 channel_id=msg.channel_id,
@@ -104,7 +104,7 @@ class MessageHandler:
                 event_type=EventType.CHAT_FINAL,
                 content=f"[error] {exc}",
             )
-            await self.enqueue_outbound(err)
+            await self.enqueue_outbound(error_message)
 
     # --- outbound Queue (consumed by ChannelManager) ---
     # outbound = Agent responses flowing toward the browser.

@@ -11,8 +11,8 @@ from twinkle.agentserver.skills.rpc import (
 from twinkle.e2a.models import E2AEnvelope
 
 
-def _env(method, rid="r1", params=None):
-    return E2AEnvelope(request_id=rid, session_id="s1", method=method, params=params or {})
+def _env(method, request_id="r1", params=None):
+    return E2AEnvelope(request_id=request_id, session_id="s1", method=method, params=params or {})
 
 
 def _run(coro):

@@ -84,15 +84,15 @@ class RepeatToolCallDetectorHook(AgentHook):
 
     def _get_state(self, ctx: HookContext) -> _SessionState:
         """Get or create per-session state."""
-        sid = ctx.session_id or "_default"
-        if sid not in self._states:
-            self._states[sid] = _SessionState(
+        session_id = ctx.session_id or "_default"
+        if session_id not in self._states:
+            self._states[session_id] = _SessionState(
                 history=deque(maxlen=self._history_size or _get_history_size()),
                 pending_call_key=None,
                 fired_severity=None,
                 remediation_timestamps=[],
             )
-        return self._states[sid]
+        return self._states[session_id]
 
     async def before_tool_call(self, ctx: HookContext) -> None:
         state = self._get_state(ctx)
@@ -174,7 +174,7 @@ class RepeatToolCallDetectorHook(AgentHook):
             return Severity.MEDIUM
 
         # LOW: same call_key repeated in window
-        repeats = sum(1 for ck, _ in state.history if ck == call_key)
+        repeats = sum(1 for history_key, _ in state.history if history_key == call_key)
         if repeats >= repeat_warn:
             return Severity.LOW
 

@@ -163,9 +163,9 @@ class OnlineEvolutionOrchestrator:
 
         eval_results = await self._scorer.evaluate(skill_name, presented, conversation_snippet)
         for eval_r in eval_results:
-            rid = eval_r.get("record_id")
+            record_id = eval_r.get("record_id")
             for rec in all_records.entries:
-                if rec.id == rid:
+                if rec.id == record_id:
                     self._scorer.update_score(rec, eval_r)
                     break
 

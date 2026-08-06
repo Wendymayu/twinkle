@@ -197,8 +197,8 @@ class SkillExperienceOptimizer:
     def _format_existing(records: list[dict]) -> str:
         lines: list[str] = []
         for r in records[-10:]:  # 最多展示最近 10 条
-            rid = r.get("id", "?")
+            record_id = r.get("id", "?")
             summary = r.get("summary", "") or r.get("change", {}).get("summary", "") or "N/A"
             section = r.get("change", {}).get("section", "?")
-            lines.append(f"- [{rid}] section={section} summary={summary}")
+            lines.append(f"- [{record_id}] section={section} summary={summary}")
         return "\n".join(lines)

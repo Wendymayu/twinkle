@@ -51,9 +51,9 @@ def hook(
             await hook_manager.execute(before, ctx)
 
             # 2. Check force_finish — skip method body if set
-            ff = ctx.consume_force_finish_request()
-            if ff is not None:
-                return ff.result
+            force_finish = ctx.consume_force_finish_request()
+            if force_finish is not None:
+                return force_finish.result
 
             # 3. Execute method body (with retry support)
             for attempt in range(_MAX_RETRY_ATTEMPTS + 1):
@@ -76,10 +76,10 @@ def hook(
                         # 5. Trigger on_exception event
                         await hook_manager.execute(on_exception, ctx)
                         # Check retry request
-                        retry = ctx.consume_retry_request()
-                        if retry is not None and attempt < _MAX_RETRY_ATTEMPTS:
-                            if retry.delay > 0:
-                                await asyncio.sleep(retry.delay)
+                        retry_request = ctx.consume_retry_request()
+                        if retry_request is not None and attempt < _MAX_RETRY_ATTEMPTS:
+                            if retry_request.delay > 0:
+                                await asyncio.sleep(retry_request.delay)
                             continue  # retry the method body
                     raise  # no retry or max attempts exceeded
 

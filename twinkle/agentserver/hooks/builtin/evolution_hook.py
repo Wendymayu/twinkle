@@ -44,17 +44,17 @@ class SkillEvolutionHook(AgentHook):
                 continue
             if not top:
                 continue
-            self._presented[skill.name] = [r.id for r in top]
+            self._presented[skill.name] = [record.id for record in top]
             experience_lines.append(f"### {skill.name} 的进化经验")
-            for r in top:
+            for record in top:
                 # times_presented += 1（由注入层维护，非 scorer）
-                if r.usage_stats:
-                    r.usage_stats.times_presented += 1
+                if record.usage_stats:
+                    record.usage_stats.times_presented += 1
                     from datetime import datetime, timezone
-                    r.usage_stats.last_presented_at = datetime.now(timezone.utc).isoformat()
-                summary = r.summary or r.change.summary or "no summary"
-                content_preview = (r.change.content or "")[:150]
-                experience_lines.append(f"- [{r.id}] ({r.change.section}, score={r.score:.2f}) {summary}")
+                    record.usage_stats.last_presented_at = datetime.now(timezone.utc).isoformat()
+                summary = record.summary or record.change.summary or "no summary"
+                content_preview = (record.change.content or "")[:150]
+                experience_lines.append(f"- [{record.id}] ({record.change.section}, score={record.score:.2f}) {summary}")
                 if content_preview:
                     experience_lines.append(f"  {content_preview}")
 

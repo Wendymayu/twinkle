@@ -11,10 +11,10 @@ class _Store:
     def __init__(self, msgs):
         self._msgs = list(msgs)
 
-    def get_messages(self, sid):
+    def get_messages(self, session_id):
         return list(self._msgs)
 
-    async def append(self, sid, message, request_id=None, event_type=None):
+    async def append(self, session_id, message, request_id=None, event_type=None):
         self._msgs.append(dict(message))
 
 

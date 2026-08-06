@@ -88,9 +88,9 @@ def _clip(text: str, max_chars: int) -> str:
 
 
 def _html_to_text(html: str) -> str:
-    p = _TextExtractor()
-    p.feed(html)
-    return p.text()
+    parser = _TextExtractor()
+    parser.feed(html)
+    return parser.text()
 
 
 async def _http_request(

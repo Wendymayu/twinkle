@@ -53,12 +53,12 @@ class WebChannel:
             return
         if frame.get("type") != "req":
             return
-        rid = frame.get("id")
+        request_id = frame.get("id")
         method = frame.get("method", "chat.send")
         params = frame.get("params") or {}
         session_id = params.get("session_id")
         msg = Message(
-            id=rid,
+            id=request_id,
             type="req",
             channel_id=self.channel_id,
             session_id=session_id,
@@ -66,7 +66,7 @@ class WebChannel:
             params=params,
         )
         # immediate acceptance, like jiuwenclaw app_web_handlers _chat_send ACK
-        await self._send_response(ws, rid, {"accepted": True, "session_id": session_id})
+        await self._send_response(ws, request_id, {"accepted": True, "session_id": session_id})
         if self._on_message is not None:
             await self._on_message(msg)
 
@@ -88,8 +88,8 @@ class WebChannel:
                 *(c.send(blob) for c in self._clients), return_exceptions=True
             )
 
-    async def _send_response(self, ws, rid: str, payload: dict, ok: bool = True) -> None:
-        frame = {"type": "res", "id": rid, "ok": ok, "payload": payload}
+    async def _send_response(self, ws, request_id: str, payload: dict, ok: bool = True) -> None:
+        frame = {"type": "res", "id": request_id, "ok": ok, "payload": payload}
         await ws.send(json.dumps(frame, ensure_ascii=False))
 
     async def _send_event(self, ws, event: EventType, payload: dict) -> None:

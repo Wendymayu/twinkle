@@ -146,15 +146,15 @@ def test_contextvar_isolation_parent_plan_todo_unchanged(session_store):
     from twinkle.agentserver.todo import PLAN_TODO_SESSION_ID
     from twinkle.agentserver.tools.builtin.subagent import SubagentTaskSpec
     from twinkle.agentserver.llm_client import Finish, TextDelta
-    tok = PLAN_TODO_SESSION_ID.set("parent-sid")
+    tok = PLAN_TODO_SESSION_ID.set("parent-session-id")
     try:
         ex = _executor_with_scripted_child(session_store, [
             [TextDelta("ok"), Finish("stop", {"role": "assistant", "content": "ok", "tool_calls": None})],
         ])
         asyncio.run(ex.execute_subagent(
-            SubagentTaskSpec(objective="o"), parent_session_id="parent-sid",
+            SubagentTaskSpec(objective="o"), parent_session_id="parent-session-id",
             parent_request_id="r1"))
-        assert PLAN_TODO_SESSION_ID.get() == "parent-sid"
+        assert PLAN_TODO_SESSION_ID.get() == "parent-session-id"
     finally:
         PLAN_TODO_SESSION_ID.reset(tok)
 

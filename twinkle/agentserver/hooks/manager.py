@@ -68,8 +68,8 @@ class HookManager:
             func = method.__func__
             self_obj = method.__self__
             self._callbacks[event] = [
-                (pri, cb) for pri, cb in entries
-                if cb.__func__ is not func or cb.__self__ is not self_obj
+                (priority, callback) for priority, callback in entries
+                if callback.__func__ is not func or callback.__self__ is not self_obj
             ]
             # Clean up empty lists so has_callbacks_for returns False
             if not self._callbacks[event]:
@@ -88,7 +88,7 @@ class HookManager:
         """
         ctx.event = event
         entries = self._callbacks.get(event, [])
-        for _pri, method in entries:
+        for _priority, method in entries:
             try:
                 await method(ctx)
             except HookInterrupt:

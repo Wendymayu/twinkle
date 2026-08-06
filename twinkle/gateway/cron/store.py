@@ -51,9 +51,9 @@ class CronJobStore:
 
     def _write_unlocked(self, data: dict) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self._path)
+        temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(temp_path, self._path)
 
     # --- CRUD ---
     async def list_jobs(self) -> list[CronJob]:

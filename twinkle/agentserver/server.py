@@ -190,8 +190,8 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                         skill_tasks.add(task)
                         task.add_done_callback(skill_tasks.discard)
                     continue
-                sid = envelope.session_id or envelope.request_id
-                cur = active.get(sid)
+                session_id = envelope.session_id or envelope.request_id
+                cur = active.get(session_id)
                 if cur is not None and not cur.done():
                     await send(E2AResponse(
                         request_id=envelope.request_id, is_final=True, status="failed",
@@ -199,8 +199,8 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                         body={"error": "a request is already in progress for this session"}))
                     continue
                 task = asyncio.create_task(run_task(envelope))
-                active[sid] = task
-                task.add_done_callback(lambda t, sid=sid: active.pop(sid, None) if active.get(sid) is t else None)
+                active[session_id] = task
+                task.add_done_callback(lambda t, session_id=session_id: active.pop(session_id, None) if active.get(session_id) is t else None)
         finally:
             for t in list(active.values()):
                 t.cancel()

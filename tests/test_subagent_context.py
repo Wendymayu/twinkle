@@ -16,12 +16,12 @@ def test_defaults_are_none():
 
 def test_set_and_get_round_trip():
     tok_e = SUBAGENT_EXECUTOR.set("exec-x")
-    tok_s = SUBAGENT_PARENT_SESSION_ID.set("parent-sid")
-    tok_r = SUBAGENT_PARENT_REQUEST_ID.set("parent-rid")
+    tok_s = SUBAGENT_PARENT_SESSION_ID.set("parent-session-id")
+    tok_r = SUBAGENT_PARENT_REQUEST_ID.set("parent-request-id")
     try:
         assert get_subagent_executor() == "exec-x"
-        assert get_subagent_parent_session_id() == "parent-sid"
-        assert get_subagent_parent_request_id() == "parent-rid"
+        assert get_subagent_parent_session_id() == "parent-session-id"
+        assert get_subagent_parent_request_id() == "parent-request-id"
     finally:
         SUBAGENT_EXECUTOR.reset(tok_e)
         SUBAGENT_PARENT_SESSION_ID.reset(tok_s)

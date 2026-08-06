@@ -39,11 +39,11 @@ class ChannelManager:
     async def _dispatch_loop(self) -> None:
         while True:
             msg = await self._message_handler.dequeue_outbound()
-            ch = self._channels.get(msg.channel_id)
-            if ch is None:
+            channel = self._channels.get(msg.channel_id)
+            if channel is None:
                 continue
             try:
-                await ch.send(msg)
+                await channel.send(msg)
             except Exception as exc:
                 log.exception("dispatch error on %s: %s", msg.channel_id, exc)
 

@@ -48,12 +48,12 @@ async def cron_list_jobs() -> str:
     if not jobs:
         return "暂无定时任务。"
     lines = [f"## 定时任务 ({len(jobs)} 条)"]
-    for j in jobs:
-        state = "启用" if j.enabled else "禁用"
-        if j.expired:
+    for job in jobs:
+        state = "启用" if job.enabled else "禁用"
+        if job.expired:
             state = "已过期"
-        lines.append(f"- [{j.id}] {j.name} | cron={j.cron_expr} tz={j.timezone} "
-                     f"| {state} | next={_next_run_iso(j)} | {j.description or '无描述'}")
+        lines.append(f"- [{job.id}] {job.name} | cron={job.cron_expr} tz={job.timezone} "
+                     f"| {state} | next={_next_run_iso(job)} | {job.description or '无描述'}")
     return "\n".join(lines)
 
 

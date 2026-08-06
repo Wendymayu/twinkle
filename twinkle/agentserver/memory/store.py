@@ -232,7 +232,7 @@ class MemoryManager:
             now = _now_iso()
             model = self._provider.model if self._provider else ""
             for chunk, emb in zip(chunks, embeddings):
-                cid = f"{rel}:{chunk.start}:{chunk.end}"
+                chunk_id = f"{rel}:{chunk.start}:{chunk.end}"
                 # _embed_chunks already returns serialized blobs (it calls
                 # _serialize on the float list). Don't double-serialize — that
                 # treats the blob's bytes as a float list and inflates dims
@@ -241,7 +241,7 @@ class MemoryManager:
                 cur = self._db.execute(
                     "INSERT INTO chunks(id,path,source,start_line,end_line,hash,model,"
                     "text,embedding,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (cid, rel, "memory", chunk.start, chunk.end, file_hash, model,
+                    (chunk_id, rel, "memory", chunk.start, chunk.end, file_hash, model,
                      chunk.text, blob, now))
                 rowid = cur.lastrowid
                 self._db.execute("INSERT INTO chunks_fts(rowid, text) VALUES(?, ?)",
@@ -383,19 +383,19 @@ class MemoryManager:
         vec: dict[int, float] = self._vec_search(query, candidates)
         fts_bm = {r["rowid"]: r for r in fts}  # rowid -> fts row (carries bm)
         chunk_map = dict(fts_bm)
-        for rid in vec:
-            if rid not in chunk_map:
+        for row_id in vec:
+            if row_id not in chunk_map:
                 cr = self._db.execute(
                     "SELECT rowid, path, text, start_line, end_line "
-                    "FROM chunks WHERE rowid=?", (rid,)).fetchone()
+                    "FROM chunks WHERE rowid=?", (row_id,)).fetchone()
                 if cr:
-                    chunk_map[rid] = cr
+                    chunk_map[row_id] = cr
         fused: list[tuple] = []
-        for rid, chunk in chunk_map.items():
+        for row_id, chunk in chunk_map.items():
             if chunk is None:
                 continue
-            t = self._text_sim(fts_bm[rid]["bm"]) if rid in fts_bm else 0.0
-            v = vec.get(rid, 0.0)
+            t = self._text_sim(fts_bm[row_id]["bm"]) if row_id in fts_bm else 0.0
+            v = vec.get(row_id, 0.0)
             fused.append((chunk, self._vector_weight * v + self._text_weight * t))
         fused.sort(key=lambda x: x[1], reverse=True)
         fused = fused[:max_results]

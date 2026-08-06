@@ -23,9 +23,9 @@ from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.agentserver.agent import AgentRequest
 
 
-def _env(query, rid="r1", session_id="s1"):
+def _env(query, request_id="r1", session_id="s1"):
     return AgentRequest(
-        session_id=session_id, request_id=rid, query=query,
+        session_id=session_id, request_id=request_id, query=query,
     )
 
 

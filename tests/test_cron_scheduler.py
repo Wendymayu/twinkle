@@ -34,8 +34,8 @@ class FakeAgentClient:
 
     async def send_request_stream(self, envelope):
         from twinkle.e2a.models import E2AResponse
-        rid = envelope.request_id
-        for r in self._scripts.get(rid, []):
+        request_id = envelope.request_id
+        for r in self._scripts.get(request_id, []):
             yield r
 
 
@@ -118,15 +118,15 @@ def test_mtime_change_triggers_reload(tmp_path):
 
 # ---- Task 5: wake / push / push_update / approval ----
 
-def _e2a_complete(rid, content):
+def _e2a_complete(request_id, content):
     from twinkle.e2a.models import E2AResponse
-    return E2AResponse(request_id=rid, is_final=True, status="succeeded",
+    return E2AResponse(request_id=request_id, is_final=True, status="succeeded",
                       response_kind="e2a.complete",
                       body={"result": {"content": content}})
 
-def _e2a_ask(rid, approval_id, tool="dangerous_tool"):
+def _e2a_ask(request_id, approval_id, tool="dangerous_tool"):
     from twinkle.e2a.models import E2AResponse
-    return E2AResponse(request_id=rid, is_final=False, status="in_progress",
+    return E2AResponse(request_id=request_id, is_final=False, status="in_progress",
                       response_kind="e2a.ask",
                       body={"approval_id": approval_id, "tool": tool,
                             "args": {}, "tool_call_id": "tc1", "reason": "需要审批"})
@@ -226,11 +226,11 @@ def test_run_agent_drains_multiple_asks_then_final_fails(tmp_path):
     state = CronRunState(run_id="j9:2000", job_id="j9",
                          wake_at_iso="...", push_at_iso="...")
     s._runs["j9:2000"] = state
-    rid = "cron-j9:2000"
-    ac.script(rid, [
-        _e2a_ask(rid, "apv1", "tool1"),
-        _e2a_ask(rid, "apv2", "tool2"),
-        _e2a_complete(rid, "不该被采用的结果"),
+    request_id = "cron-j9:2000"
+    ac.script(request_id, [
+        _e2a_ask(request_id, "apv1", "tool1"),
+        _e2a_ask(request_id, "apv2", "tool2"),
+        _e2a_complete(request_id, "不该被采用的结果"),
     ])
     run(s._run_agent(job, state))
     # 两个 approval 都被 deny（drain 不 break）

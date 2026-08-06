@@ -104,17 +104,17 @@ class EvolutionStore:
         json_text = json.dumps(log_data, ensure_ascii=False, indent=2)
         # 原子写：temp file + rename
         import tempfile
-        tmp = tempfile.NamedTemporaryFile(
+        temp_file = tempfile.NamedTemporaryFile(
             mode="w", dir=str(path.parent), delete=False,
             suffix=".tmp", encoding="utf-8",
         )
         try:
-            tmp.write(json_text)
-            tmp.flush()
-            os.fsync(tmp.fileno())
+            temp_file.write(json_text)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
         finally:
-            tmp.close()
-        os.replace(tmp.name, str(path))
+            temp_file.close()
+        os.replace(temp_file.name, str(path))
 
     def append_record(self, skill_name: str, record: EvolutionRecord) -> None:
         """追加/合并一条经验记录到 evolutions.json。

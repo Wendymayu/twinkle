@@ -61,12 +61,12 @@ class AgentClient:
                     data = json.loads(raw)
                 except Exception:
                     continue
-                rid = data.get("request_id")
-                if not rid:
+                request_id = data.get("request_id")
+                if not request_id:
                     continue
-                q = self._queues.get(rid)
-                if q is not None:
-                    await q.put(data)
+                request_queue = self._queues.get(request_id)
+                if request_queue is not None:
+                    await request_queue.put(data)
         except Exception as exc:
             log.warning("recv loop ended: %s", exc)
         finally:
@@ -77,21 +77,21 @@ class AgentClient:
         a suspended send_request_stream unblocks instead of hanging forever when
         the recv loop ends (AgentServer disconnected)."""
         err = ConnectionError(reason)
-        for q in list(self._queues.values()):
-            q.put_nowait(err)
+        for request_queue in list(self._queues.values()):
+            request_queue.put_nowait(err)
 
     async def _send(self, envelope: E2AEnvelope) -> None:
         async with self._send_lock:
             await self._ws.send(envelope.model_dump_json())
 
     async def send_request_stream(self, envelope: E2AEnvelope) -> AsyncIterator[E2AResponse]:
-        rid = envelope.request_id
-        q: asyncio.Queue = asyncio.Queue()
-        self._queues[rid] = q
+        request_id = envelope.request_id
+        request_queue: asyncio.Queue = asyncio.Queue()
+        self._queues[request_id] = request_queue
         await self._send(envelope)
         try:
             while True:
-                data = await q.get()
+                data = await request_queue.get()
                 if isinstance(data, BaseException):
                     raise data  # recv loop ended — fail fast instead of hanging
                 resp = E2AResponse.model_validate(data)
@@ -99,7 +99,7 @@ class AgentClient:
                 if resp.is_final:
                     break
         finally:
-            self._queues.pop(rid, None)
+            self._queues.pop(request_id, None)
 
     async def close(self) -> None:
         if self._recv_task:

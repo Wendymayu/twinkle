@@ -65,13 +65,13 @@ class ApprovalRegistry:
         """Atomically write pending approvals to disk (.tmp + os.replace)."""
         path = self._pending_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
+        temp_path = path.with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, path)
+            temp_path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
+            os.replace(temp_path, path)
         except Exception:
             log.exception("failed to write .approval_pending.json for session %s", session_id)
-            tmp.unlink(missing_ok=True)
+            temp_path.unlink(missing_ok=True)
 
     def save_pending(self, session_id: str, record: ApprovalPendingRecord) -> None:
         """Append a pending approval record to disk."""

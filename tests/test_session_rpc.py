@@ -6,9 +6,9 @@ from twinkle.agentserver.sessions import dispatch_session_rpc
 from twinkle.e2a.models import E2AEnvelope
 
 
-def _env(method, rid="r1", session_id="s1", params=None):
+def _env(method, request_id="r1", session_id="s1", params=None):
     return E2AEnvelope(
-        request_id=rid, session_id=session_id,
+        request_id=request_id, session_id=session_id,
         method=method, params=params or {},
     )
 

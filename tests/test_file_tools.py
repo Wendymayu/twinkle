@@ -10,8 +10,8 @@ from twinkle.agentserver.tools.builtin import file_tools
 def ws(monkeypatch, tmp_path):
     """Point file_tools at a tmp workspace with a fixed session id."""
     monkeypatch.setattr(file_tools, "WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setattr(file_tools, "get_plan_todo_session_id", lambda: "test-sid")
-    file_tools._registry.clear("test-sid")
+    monkeypatch.setattr(file_tools, "get_plan_todo_session_id", lambda: "test-session-key")
+    file_tools._registry.clear("test-session-key")
     return tmp_path
 
 
@@ -86,7 +86,7 @@ def test_read_file_returns_content_and_marks_registry(ws):
     (ws / "a.txt").write_text("line1\nline2\nline3", encoding="utf-8")
     out = _invoke(file_tools.read_file, file_path="a.txt")
     assert out == "line1\nline2\nline3"
-    assert file_tools._registry.has_read("test-sid", str((ws / "a.txt").resolve())) is True
+    assert file_tools._registry.has_read("test-session-key", str((ws / "a.txt").resolve())) is True
 
 
 def test_read_file_not_found(ws):

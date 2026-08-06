@@ -489,52 +489,52 @@ class ReActAgent:
             ctx.inputs.messages = self._merge_system_messages(ctx.inputs.messages)
 
             # Check force_finish
-            ff = ctx.consume_force_finish_request()
-            if ff is not None:
+            force_finish = ctx.consume_force_finish_request()
+            if force_finish is not None:
                 yield E2AResponse(
                     request_id=request_id,
                     sequence=seq,
                     is_final=True,
                     status="succeeded",
                     response_kind="e2a.complete",
-                    body={"result": {"content": str(ff.result or "")}},
+                    body={"result": {"content": str(force_finish.result or "")}},
                 )
                 return
 
             # -- LLM stream with retry loop -- #
-            _reask = False
+            should_reask = False
             for retry_attempt in range(_MAX_HOOK_RETRIES + 1):
                 ctx.retry_attempt = retry_attempt
                 ctx.exception = None
                 try:
-                    async for ev in self._llm.stream(messages=ctx.inputs.messages, tools=ctx.inputs.tools):
-                        if isinstance(ev, TextDelta):
-                            full_text += ev.content
+                    async for stream_event in self._llm.stream(messages=ctx.inputs.messages, tools=ctx.inputs.tools):
+                        if isinstance(stream_event, TextDelta):
+                            full_text += stream_event.content
                             yield E2AResponse(
                                 request_id=request_id,
                                 sequence=seq,
                                 is_final=False,
                                 status="in_progress",
                                 response_kind="e2a.chunk",
-                                body={"result": {"content": ev.content}},
+                                body={"result": {"content": stream_event.content}},
                             )
                             seq += 1
-                        elif isinstance(ev, Finish):
+                        elif isinstance(stream_event, Finish):
                             await self._session_store.append(
                                 session_id,
-                                ev.assistant_message,
+                                stream_event.assistant_message,
                                 request_id=request_id,
                                 event_type="chat.final",
                             )
-                            tcs = ev.assistant_message.get("tool_calls")
-                            if ev.finish_reason == "tool_calls" and tcs:
-                                if len(tcs) > 1:
+                            tool_calls = stream_event.assistant_message.get("tool_calls")
+                            if stream_event.finish_reason == "tool_calls" and tool_calls:
+                                if len(tool_calls) > 1:
                                     # --- Parallel path ---
                                     try:
-                                        par_results, par_todos = await self._try_parallel_tool_calls(
-                                            tcs, session_id, request_id,
+                                        parallel_results, parallel_todos = await self._try_parallel_tool_calls(
+                                            tool_calls, session_id, request_id,
                                         )
-                                        for snap in par_todos:
+                                        for snap in parallel_todos:
                                             yield E2AResponse(
                                                 request_id=request_id,
                                                 sequence=seq, is_final=False,
@@ -543,47 +543,47 @@ class ReActAgent:
                                                 body=snap,
                                             )
                                             seq += 1
-                                        for tc_id, result in par_results:
+                                        for tool_call_id, result in parallel_results:
                                             await self._session_store.append(
                                                 session_id,
-                                                {"role": "tool", "tool_call_id": tc_id, "content": result},
+                                                {"role": "tool", "tool_call_id": tool_call_id, "content": result},
                                                 request_id=request_id,
                                                 event_type="chat.tool_result",
                                             )
                                         await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
-                                        _reask = True
+                                        should_reask = True
                                         break
                                     except HookInterrupt:
                                         log.info("parallel tool calls fell back to sequential (HookInterrupt)")
-                                if len(tcs) <= 1 or _reask is False:
+                                if len(tool_calls) <= 1 or should_reask is False:
                                     # --- Sequential path ---
-                                    for tc in tcs:
-                                        name = tc["function"]["name"]
+                                    for tool_call in tool_calls:
+                                        name = tool_call["function"]["name"]
                                         try:
-                                            args = json.loads(tc["function"]["arguments"] or "{}")
+                                            args = json.loads(tool_call["function"]["arguments"] or "{}")
                                         except Exception:
                                             args = {}
                                         ctx.inputs = ToolCallInputs(
-                                            name=name, args=args, tool_call_id=tc["id"]
+                                            name=name, args=args, tool_call_id=tool_call["id"]
                                         )
                                         try:
                                             result = await self._tool_call(ctx)
-                                        except HookInterrupt as hi:
-                                            if "approval_id" not in hi.data:
+                                        except HookInterrupt as hook_interrupt:
+                                            if "approval_id" not in hook_interrupt.data:
                                                 yield E2AResponse(
                                                     request_id=request_id, sequence=seq, is_final=True,
                                                     status="failed", response_kind="e2a.error",
                                                     body={"error": "tool execution interrupted"})
                                                 return
                                             # ASK: register Future + yield e2a.ask + suspend
-                                            approval_id = hi.data["approval_id"]
+                                            approval_id = hook_interrupt.data["approval_id"]
                                             future = APPROVAL_REGISTRY.register(approval_id)
                                             APPROVAL_REGISTRY.save_pending(session_id, ApprovalPendingRecord(
                                                 approval_id=approval_id,
-                                                tool=hi.data["tool"],
-                                                args=hi.data["args"],
-                                                tool_call_id=tc["id"],
-                                                reason=hi.data["reason"],
+                                                tool=hook_interrupt.data["tool"],
+                                                args=hook_interrupt.data["args"],
+                                                tool_call_id=tool_call["id"],
+                                                reason=hook_interrupt.data["reason"],
                                                 request_id=request_id,
                                                 session_id=session_id,
                                                 created_at=time.time(),
@@ -591,14 +591,14 @@ class ReActAgent:
                                             yield E2AResponse(
                                                 request_id=request_id, sequence=seq, is_final=False,
                                                 status="in_progress", response_kind="e2a.ask",
-                                                body={"approval_id": approval_id, "tool": hi.data["tool"],
-                                                      "args": hi.data["args"], "tool_call_id": tc["id"],
-                                                      "reason": hi.data["reason"]})
+                                                body={"approval_id": approval_id, "tool": hook_interrupt.data["tool"],
+                                                      "args": hook_interrupt.data["args"], "tool_call_id": tool_call["id"],
+                                                      "reason": hook_interrupt.data["reason"]})
                                             seq += 1
                                             decision = await future  # SUSPEND
                                             if decision in ("allow", "allow_always"):
                                                 ctx.extra["_approval_decision"] = decision
-                                                ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tc["id"])
+                                                ctx.extra.setdefault("_approved_tool_call_ids", set()).add(tool_call["id"])
                                                 try:
                                                     result = await self._tool_call(ctx)
                                                 except HookInterrupt:
@@ -606,8 +606,8 @@ class ReActAgent:
                                                 except Exception as exc:
                                                     result = f"[tool error] {type(exc).__name__}: {exc}"
                                             else:
-                                                result = (f"[tool denied by user: {hi.data['tool']}] "
-                                                          f"{hi.data.get('reason', '')}")
+                                                result = (f"[tool denied by user: {hook_interrupt.data['tool']}] "
+                                                          f"{hook_interrupt.data.get('reason', '')}")
                                         except Exception as exc:
                                             result = f"[tool error] {type(exc).__name__}: {exc}"
                                         for snap in flush_todo_events():
@@ -622,12 +622,12 @@ class ReActAgent:
                                             seq += 1
                                         await self._session_store.append(
                                             session_id,
-                                            {"role": "tool", "tool_call_id": tc["id"], "content": result},
+                                            {"role": "tool", "tool_call_id": tool_call["id"], "content": result},
                                             request_id=request_id,
                                             event_type="chat.tool_result",
                                         )
                                     await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
-                                _reask = True
+                                should_reask = True
                                 break
                             # Final answer
                             yield E2AResponse(
@@ -640,7 +640,7 @@ class ReActAgent:
                             )
                             await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                             return
-                    if _reask:
+                    if should_reask:
                         break
                     await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                     break
@@ -651,26 +651,26 @@ class ReActAgent:
                 except Exception as exc:
                     ctx.exception = exc
                     await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
-                    ff = ctx.consume_force_finish_request()
-                    if ff is not None:
+                    force_finish = ctx.consume_force_finish_request()
+                    if force_finish is not None:
                         yield E2AResponse(
                             request_id=request_id,
                             sequence=seq,
                             is_final=True,
                             status="succeeded",
                             response_kind="e2a.complete",
-                            body={"result": {"content": str(ff.result or "")}},
+                            body={"result": {"content": str(force_finish.result or "")}},
                         )
                         return
-                    retry_req = ctx.consume_retry_request()
-                    if retry_req is not None and retry_attempt < _MAX_HOOK_RETRIES:
-                        if retry_req.delay > 0:
-                            await asyncio.sleep(retry_req.delay)
+                    retry_request = ctx.consume_retry_request()
+                    if retry_request is not None and retry_attempt < _MAX_HOOK_RETRIES:
+                        if retry_request.delay > 0:
+                            await asyncio.sleep(retry_request.delay)
                         log.info("hook requested LLM retry, attempt %d/%d",
                                  retry_attempt + 1, _MAX_HOOK_RETRIES)
                         continue
                     raise
-            if _reask:
+            if should_reask:
                 continue
 
         # exceeded max_steps
@@ -687,7 +687,7 @@ class ReActAgent:
 
     async def _try_parallel_tool_calls(
         self,
-        tcs: list[dict],
+        tool_calls: list[dict],
         session_id: str,
         request_id: str,
     ) -> tuple[list[tuple[str, str]], list[dict]]:
@@ -697,51 +697,51 @@ class ReActAgent:
         its own TODO_EVENTS buffer so concurrent calls don't race on shared
         state.  Results are returned in the same order as *tcs*.
         """
-        per_tc_results: list[tuple[str, str] | None] = [None] * len(tcs)
-        per_tc_todos: list[list[dict]] = [[] for _ in range(len(tcs))]
+        results_per_tool: list[tuple[str, str] | None] = [None] * len(tool_calls)
+        todos_per_tool: list[list[dict]] = [[] for _ in range(len(tool_calls))]
 
-        async def _run_one(idx: int, tc: dict) -> None:
-            name = tc["function"]["name"]
+        async def _execute_one_tool(idx: int, tool_call: dict) -> None:
+            name = tool_call["function"]["name"]
             try:
-                args = json.loads(tc["function"]["arguments"] or "{}")
+                args = json.loads(tool_call["function"]["arguments"] or "{}")
             except Exception:
                 args = {}
 
-            tc_todo_buffer: list[dict] = []
-            TODO_EVENTS.set(tc_todo_buffer)
+            todo_buffer: list[dict] = []
+            TODO_EVENTS.set(todo_buffer)
 
-            tc_ctx = HookContext(
+            tool_call_context = HookContext(
                 agent=self,
                 event=HookEvent.BEFORE_TOOL_CALL,
-                inputs=ToolCallInputs(name=name, args=args, tool_call_id=tc["id"]),
+                inputs=ToolCallInputs(name=name, args=args, tool_call_id=tool_call["id"]),
                 session_id=session_id,
                 request_id=request_id,
                 extra={},
             )
             try:
-                result = await self._tool_call(tc_ctx)
+                result = await self._tool_call(tool_call_context)
             except HookInterrupt:
                 raise
             except Exception as exc:
                 result = f"[tool error] {type(exc).__name__}: {exc}"
 
-            per_tc_results[idx] = (tc["id"], result)
-            per_tc_todos[idx] = list(tc_todo_buffer)
+            results_per_tool[idx] = (tool_call["id"], result)
+            todos_per_tool[idx] = list(todo_buffer)
 
         raw_results = await asyncio.gather(
-            *[asyncio.create_task(_run_one(i, tc)) for i, tc in enumerate(tcs)],
+            *[asyncio.create_task(_execute_one_tool(i, tool_call)) for i, tool_call in enumerate(tool_calls)],
             return_exceptions=True,
         )
 
-        for r in raw_results:
-            if isinstance(r, HookInterrupt):
-                raise r
+        for result_item in raw_results:
+            if isinstance(result_item, HookInterrupt):
+                raise result_item
 
         results: list[tuple[str, str]] = []
-        for r in per_tc_results:
-            if r is not None:
-                results.append(r)
-        all_todos = [snap for tc_todos in per_tc_todos for snap in tc_todos]
+        for result_item in results_per_tool:
+            if result_item is not None:
+                results.append(result_item)
+        all_todos = [snap for todo_list in todos_per_tool for snap in todo_list]
         return results, all_todos
 
     # -- Interrupt snapshot -------------------------------------------------

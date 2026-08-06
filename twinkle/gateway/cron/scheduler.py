@@ -210,7 +210,7 @@ class CronSchedulerService:
                     approval_id = resp.body.get("approval_id")
                     # 发 deny 让 agent loop 解挂（避免挂起泄漏）；drain 不 break，
                     # 否则 agent 若再起需审批的工具会注册新 approval_id 且无人 deny
-                    # → await future 永挂 → 任务泄漏在 active[sid]/APPROVAL_REGISTRY
+                    # → await future 永挂 → 任务泄漏在 active[session_id]/APPROVAL_REGISTRY
                     if approval_id:
                         await self._agent_client._send(E2AEnvelope(  # noqa: SLF001
                             request_id=f"cron-deny-{run_id}", channel="__cron__",

@@ -60,7 +60,7 @@ class LLMClient:
         stream = await self._client.chat.completions.create(**kwargs)
 
         text_parts: list[str] = []
-        tool_acc: dict[int, dict] = {}  # index -> {id, name, arguments}
+        tool_call_accumulator: dict[int, dict] = {}  # index -> {id, name, arguments}
         finish_reason = "stop"
 
         usage: dict | None = None
@@ -69,9 +69,9 @@ class LLMClient:
             # stream_options.include_usage, or dashscope) — some providers
             # attach usage to the last content chunk, others to a trailing
             # usage-only chunk with empty choices. Last non-null wins.
-            _u = getattr(chunk, "usage", None)
-            if _u:
-                usage = _u
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage:
+                usage = chunk_usage
             # OpenAI-compatible streams (dashscope, openai with
             # stream_options.include_usage) end with a usage-only chunk whose
             # ``choices`` list is empty. Skip it — there is no delta to consume.
@@ -82,37 +82,37 @@ class LLMClient:
             if getattr(delta, "content", None):
                 text_parts.append(delta.content)
                 yield TextDelta(delta.content)
-            tcs = getattr(delta, "tool_calls", None)
-            if tcs:
-                for tc in tcs:
-                    idx = tc.index
-                    slot = tool_acc.setdefault(
-                        idx, {"id": None, "name": None, "arguments": ""}
+            tool_call_deltas = getattr(delta, "tool_calls", None)
+            if tool_call_deltas:
+                for tool_call_delta in tool_call_deltas:
+                    index = tool_call_delta.index
+                    call_entry = tool_call_accumulator.setdefault(
+                        index, {"id": None, "name": None, "arguments": ""}
                     )
-                    if getattr(tc, "id", None):
-                        slot["id"] = tc.id
-                    fn = getattr(tc, "function", None)
-                    if fn is not None:
-                        if getattr(fn, "name", None):
-                            slot["name"] = fn.name
-                        if getattr(fn, "arguments", None):
-                            slot["arguments"] += fn.arguments
+                    if getattr(tool_call_delta, "id", None):
+                        call_entry["id"] = tool_call_delta.id
+                    func = getattr(tool_call_delta, "function", None)
+                    if func is not None:
+                        if getattr(func, "name", None):
+                            call_entry["name"] = func.name
+                        if getattr(func, "arguments", None):
+                            call_entry["arguments"] += func.arguments
             if getattr(choice, "finish_reason", None):
                 finish_reason = choice.finish_reason
 
         content = "".join(text_parts) or None
         tool_calls = None
-        if finish_reason == "tool_calls" and tool_acc:
+        if finish_reason == "tool_calls" and tool_call_accumulator:
             tool_calls = [
                 {
-                    "id": tool_acc[i]["id"],
+                    "id": tool_call_accumulator[i]["id"],
                     "type": "function",
                     "function": {
-                        "name": tool_acc[i]["name"],
-                        "arguments": tool_acc[i]["arguments"],
+                        "name": tool_call_accumulator[i]["name"],
+                        "arguments": tool_call_accumulator[i]["arguments"],
                     },
                 }
-                for i in sorted(tool_acc)
+                for i in sorted(tool_call_accumulator)
             ]
         yield Finish(
             finish_reason=finish_reason,

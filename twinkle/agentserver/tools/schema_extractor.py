@@ -28,19 +28,19 @@ _PRIMITIVE = {
 _TYPES_NONE = (type(None),)
 
 
-def _unwrap_optional(tp: Any) -> tuple[Any, bool]:
+def _unwrap_optional(type_: Any) -> tuple[Any, bool]:
     """Return (inner_type, is_optional). Detects Optional[X] / X | None."""
-    origin = get_origin(tp)
+    origin = get_origin(type_)
     if origin is typing.Union or origin is types.UnionType:
-        args = [a for a in get_args(tp) if a not in _TYPES_NONE]
-        is_optional = len(args) < len(get_args(tp))
+        args = [arg for arg in get_args(type_) if arg not in _TYPES_NONE]
+        is_optional = len(args) < len(get_args(type_))
         inner = args[0] if args else str
         return inner, is_optional
-    return tp, False
+    return type_, False
 
 
-def _type_to_schema(tp: Any) -> dict:
-    inner, _ = _unwrap_optional(tp)
+def _type_to_schema(type_: Any) -> dict:
+    inner, _ = _unwrap_optional(type_)
     if inner in _PRIMITIVE:
         return {"type": _PRIMITIVE[inner]}
     origin = get_origin(inner)
@@ -73,22 +73,22 @@ def extract(func: Callable) -> tuple[str, str, dict]:
     sig = inspect.signature(func)
     properties: dict[str, dict] = {}
     required: list[str] = []
-    for pname, param in sig.parameters.items():
+    for param_name, param in sig.parameters.items():
         if param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
         ):
             continue
-        tp = hints.get(pname, str)
-        schema = _type_to_schema(tp)
+        type_ = hints.get(param_name, str)
+        schema = _type_to_schema(type_)
         if param.default is not inspect.Parameter.empty and param.default is not None:
             schema["default"] = param.default
         else:
             # Optional types (Optional[X] with no default) are not required.
-            _, is_optional = _unwrap_optional(tp)
+            _, is_optional = _unwrap_optional(type_)
             if not is_optional:
-                required.append(pname)
-        properties[pname] = schema
+                required.append(param_name)
+        properties[param_name] = schema
 
     parameters = {
         "type": "object",

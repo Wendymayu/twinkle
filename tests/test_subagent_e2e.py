@@ -42,8 +42,8 @@ class _ScriptedLLM:
             yield ev
 
 
-def _env(query, sid="parent", rid="r1"):
-    return AgentRequest(session_id=sid, request_id=rid, query=query)
+def _env(query, session_id="parent", request_id="r1"):
+    return AgentRequest(session_id=session_id, request_id=request_id, query=query)
 
 
 def test_parent_delegates_then_summarizes(session_store):
@@ -122,7 +122,7 @@ def test_concurrent_spawns_do_not_cross_contaminate(session_store):
     loop.register_hook(SubagentContextHook(executor))
 
     async def run():
-        return [f async for f in loop.run(_env("do both", sid="p2"))]
+        return [f async for f in loop.run(_env("do both", session_id="p2"))]
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.complete"

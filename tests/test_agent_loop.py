@@ -19,10 +19,10 @@ class _ScriptedLLM:
             yield ev
 
 
-def _env(query, rid="r1", session_id="s1"):
+def _env(query, request_id="r1", session_id="s1"):
     return AgentRequest(
         session_id=session_id,
-        request_id=rid,
+        request_id=request_id,
         query=query,
     )
 
@@ -118,9 +118,9 @@ def test_cross_turn_remembers_context(session_store) -> None:
     loop = AgentLoop(llm, store, reg)
 
     async def run():
-        async for _ in loop.run(_env("turn1", rid="r1", session_id="s1")):
+        async for _ in loop.run(_env("turn1", request_id="r1", session_id="s1")):
             pass
-        async for _ in loop.run(_env("turn2", rid="r2", session_id="s1")):
+        async for _ in loop.run(_env("turn2", request_id="r2", session_id="s1")):
             pass
 
     asyncio.run(run())

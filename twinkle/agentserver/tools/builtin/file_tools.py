@@ -55,8 +55,8 @@ def _is_binary(path: Path) -> bool:
     if path.suffix.lower() in _BINARY_EXTS:
         return True
     try:
-        with path.open("rb") as fh:
-            chunk = fh.read(8192)
+        with path.open("rb") as file_handle:
+            chunk = file_handle.read(8192)
     except OSError:
         return False  # let the caller surface read errors uniformly
     return b"\x00" in chunk
@@ -74,14 +74,14 @@ class FileReadRegistry:
     def __init__(self) -> None:
         self._read: dict[str, set[str]] = {}
 
-    def mark_read(self, sid: str, path: str) -> None:
-        self._read.setdefault(sid, set()).add(path)
+    def mark_read(self, session_id: str, path: str) -> None:
+        self._read.setdefault(session_id, set()).add(path)
 
-    def has_read(self, sid: str, path: str) -> bool:
-        return path in self._read.get(sid, set())
+    def has_read(self, session_id: str, path: str) -> bool:
+        return path in self._read.get(session_id, set())
 
-    def clear(self, sid: str) -> None:
-        self._read.pop(sid, None)
+    def clear(self, session_id: str) -> None:
+        self._read.pop(session_id, None)
 
 
 _registry = FileReadRegistry()  # module-level singleton; session-routed via ContextVar
@@ -120,8 +120,8 @@ async def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
     except OSError as exc:
         return f"[ERROR]: failed to read file: {exc}"
 
-    sid = get_plan_todo_session_id()
-    _registry.mark_read(sid, str(resolved))
+    session_key = get_plan_todo_session_id()
+    _registry.mark_read(session_key, str(resolved))
     lines = content.splitlines(keepends=True)
     total = len(lines)
     selected = lines[offset:offset + limit]
@@ -148,9 +148,9 @@ async def write_file(file_path: str, content: str) -> str:
     except ValueError:
         return f"[ERROR]: path is outside the project workspace: {file_path}"
 
-    sid = get_plan_todo_session_id()
+    session_key = get_plan_todo_session_id()
     existed = resolved.is_file()
-    if existed and not _registry.has_read(sid, str(resolved)):
+    if existed and not _registry.has_read(session_key, str(resolved)):
         return f"[ERROR]: must read_file before overwriting existing file: {file_path}"
 
     def _write() -> str:
@@ -163,7 +163,7 @@ async def write_file(file_path: str, content: str) -> str:
     except OSError as exc:
         return f"[ERROR]: failed to write file: {exc}"
 
-    _registry.mark_read(sid, str(resolved))
+    _registry.mark_read(session_key, str(resolved))
     return json.dumps(
         {"file_path": file_path, "bytes_written": len(data), "type": kind},
         ensure_ascii=False,
@@ -187,8 +187,8 @@ async def edit_file(file_path: str, old_string: str, new_string: str, replace_al
     if await asyncio.to_thread(_is_binary, resolved):
         return f"[ERROR]: file is binary or unsupported: {file_path}"
 
-    sid = get_plan_todo_session_id()
-    if not _registry.has_read(sid, str(resolved)):
+    session_key = get_plan_todo_session_id()
+    if not _registry.has_read(session_key, str(resolved)):
         return f"[ERROR]: must read_file before editing: {file_path}"
 
     def _read() -> str:
@@ -217,7 +217,7 @@ async def edit_file(file_path: str, old_string: str, new_string: str, replace_al
     except OSError as exc:
         return f"[ERROR]: failed to write file: {exc}"
 
-    _registry.mark_read(sid, str(resolved))
+    _registry.mark_read(session_key, str(resolved))
     return json.dumps({"file_path": file_path, "replacements": n}, ensure_ascii=False)
 
 
