@@ -48,7 +48,7 @@
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 9（溢出恢复 + 循环检测）已落地**：`ContextOverflowRecoveryHook`（413 自动压缩重试 + 熔断）+ `RepeatToolCallDetectorHook`（滑动窗口 + stable hash 循环检测 + 纠偏注入）。对应里程碑 M13 ✅。
 - **Phase 10（HITL 中断/恢复）已落地**：`ApprovalPendingRecord` + `ApprovalRegistry.save_pending/clear_pending/get_pending` + `approval.check_pending` RPC + 前端重连恢复审批卡片。对应里程碑 M14 ✅。
-- **Phase 11–18 为后续规划**：Phase 11（PlanNode 递归执行树）→ Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 14（Skill 自进化）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 18（Team 编排）。参考 jiuwenswarm 对应能力设计。
+- **Phase 11–18 为后续规划**：Phase 11（PlanNode 递归执行树）→ Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 14（Skill 自进化）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 18a（Team 编排 MVP）→ Phase 18b（Team 编排完整版）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -198,7 +198,7 @@
 - **安全沙箱**：`_SAFE_BUILTINS` 白名单 + `PlanCodeValidator` 代码校验，防止 skill 代码执行危险操作。
 - **Fallback 机制**：节点失败自动触发 `fallback_callback`，不默默失败。`AbortError`（HITL 中断）不进 fallback，直接向上抛。
 - **中间状态传递**：`inputs` dict 在节点间显式传递，上一个节点的输出直接成为下一个节点的输入，不依赖 LLM 上下文记忆。
-- **对齐 jiuwenswarm**：`PlanNode`（`jiuwenclaw/agentserver/replan_agent/plan_node.py`）+ `RePlanExecutor`（`executor.py`）+ `PlanCodeValidator`（`validator.py`）。
+- **对齐 jiuwenswarm**：`PlanNode`（`jiuwenclaw/agentserver/skill_turbo/plan_node.py`，enterprise_dev 当前 tip 已删除此文件）+ `RePlanExecutor` + `PlanCodeValidator`。
 
 **范围控制**：先做 PlanNode 基类 + fallback + 安全沙箱 + 执行器；RePlan 的代码生成和验证（LLM 生成 plan code）列为紧随其后的第二步。
 
@@ -308,17 +308,41 @@
 
 ---
 
-### Phase 18 — Team 编排（多 Agent 协作）
-**目标**：多角色 agent 协作，支持团队级任务分配、成员间通信、共享状态、故障恢复。
+### Phase 18a — Team 编排 MVP（多 Agent 协作 · 阶段 A）
+
+**目标**：1 leader + 2-3 角色化 member 并发执行子任务，leader 整合结果输出最终答案。
+
+**设计原则**：Team 不是新执行引擎。ReActAgent step 循环提供多轮迭代，`_try_parallel_tool_calls` 提供并发，SubagentExecutor 是扩展点（加 role 参数 → 按 role 定制 system_prompt + 工具白名单）。Leader 调 `spawn_subagent(role="xxx")` 分派，成员通过共享 workspace 文件交换中间产物。
 
 内容：
-- **TeamManager**：管理 TeamAgent 实例，成员生命周期（UNSTARTED→READY→BUSY→PAUSED→STOPPED→ERROR→RESTARTING→SHUTDOWN）。
-- **MemberSubagents**：基于 `spawn_subagent` 扩展，支持成员间通信和共享资源。
-- **RecoveryManager**：成员崩溃后从持久化状态恢复，不拖垮整个团队。
-- **ReliabilityMonitor**：团队级异常检测（ping-pong 检测、输出长度异常、成员错误率）。
+- **TeamConfig + MemberSpec**：YAML 驱动的成员角色定义（system_prompt + tools 白名单）。LLM 只传 role 名字，system_prompt/tools 由 executor 在服务端查 config。
+- **SubagentExecutor 角色定制**：`execute_subagent` 按 role 查 `TEAM_MEMBERS`，覆盖子 agent 的 system prompt + 过滤 ToolManager。共享 workspace `team/<session>/shared/` 供成员交换文件。
+- **Leader team 意识**：`build_system_prompt()` 条件追加团队协作段（角色清单 + 委派指南 + 共享路径）。
+- **对齐 jiuwenswarm**：`TeamManager.build_agent_customizer()` 的成员特化逻辑（`jiuwenclaw/agentserver/team/team_runtime_inheritance.py`）+ `team_helpers.py` 的流式集成模式（`jiuwenclaw/agentserver/deep_agent/team_helpers.py`）。
+
+**前置依赖**：Phase 8（subagent/spawn）+ Phase 16（多轮外层循环）。**注意**：PlanNode（Phase 11）与 Team 无关（PlanNode 是 skill 代码执行引擎，jiuwenswarm 源码零交叉引用），不作为前置。
+
+**不做**：成员间直接通信、任务队列、Monitor 事件流、前端成员面板、team 级崩溃恢复。
+
+**验收**：用户说 "写一份 AI safety 报告" → leader 并行 spawn researcher + writer → 产出到 team/shared/ → leader 整合输出。researcher 子 agent 调 write_file 被拒绝（不在白名单）。
+
+**设计文档**：`docs/superpowers/specs/2026-08-05-team-collaboration-analysis.md` §4。
+
+---
+
+### Phase 18b — Team 编排完整版（多 Agent 协作 · 阶段 B）
+
+**目标**：对齐 jiuwenswarm Team 六大维度——任务队列、成员通信、Monitor 事件流、崩溃恢复、前端面板。
+
+内容：
+- **TeamTaskStore**：任务队列 + 认领（claim）+ 完成/取消 + 依赖解除（基于 TodoStore 数据模型扩展）
+- **MemberMessageBus**：P2P 消息 + Broadcast（在 ReActAgent 中注入 before_model_call hook 把消息 prepend 到 session）
+- **TeamMonitorHandler**：从 member Event 收集 + 广播 14 种事件类型
+- **新 E2A 帧类型 `e2a.team_event`**：Gateway 映射 + 前端 Team 面板（成员状态 / 任务进度 / 实时活动）
+- **TeamRecoveryManager**：member 崩溃自动重启（Phase 12 中断标记 + per-member 孤儿 tool 清理）
 - **对齐 jiuwenswarm**：`TeamManager`（`jiuwenclaw/agentserver/team/team_manager.py`）+ `RecoveryManager`（`openjiuwen/agent_teams/agent/recovery_manager.py`）+ `ReliabilityMonitor`（`openjiuwen/agent_teams/reliability/monitor.py`）。
 
-**前置依赖**：Phase 11（PlanNode）+ Phase 12（中断恢复）+ Phase 16（DeepAgent Task Loop）。
+**前置依赖**：阶段 A 跑通 + Phase 12（中断恢复）。
 
 **验收**：3 个 agent 组成团队（研究员+写作员+审校员）→ 协作完成报告 → 一个成员崩溃后自动恢复 → 最终报告质量优于单 agent。
 
@@ -382,7 +406,8 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M19 能挂外部工具 | MCP server 工具接入并受策略管控 | |
 | M20 多轮迭代 | DeepAgent 外层循环 + 停止条件链 | |
 | M21 深度研究 | 多步检索→分析→综合→报告 | |
-| M22 多 Agent 协作 | Team 编排 + 成员恢复 + 可靠性监控 | |
+| M22a 多 Agent 协作 MVP | leader + 2-3 角色化 member 并发委派 | |
+| M22b 多 Agent 协作完整 | Team 编排 + 成员恢复 + 可靠性监控 | |
 | M12 可观测 | OTel span 链 + 关键指标 | ✅ |
 
 ---

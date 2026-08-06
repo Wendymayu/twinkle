@@ -114,6 +114,7 @@ class AgentHook:
 class InvokeInputs:
     """Inputs for BEFORE/AFTER_INVOKE events."""
     query: str
+    mode: str = ""  # "" = normal, "team" = team collaboration
     envelope: Any = None  # E2AEnvelope — using Any to avoid circular import; deprecated, prefer AgentRequest
 
 

@@ -8,10 +8,11 @@ from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import Rep
 from twinkle.agentserver.hooks.builtin.retry_hook import RetryHook
 from twinkle.agentserver.hooks.builtin.skill_hook import SkillHook
 from twinkle.agentserver.hooks.builtin.subagent_context_hook import SubagentContextHook
+from twinkle.agentserver.hooks.builtin.team_context_hook import TeamContextHook
 
 __all__ = [
     "ContextCompressionHook", "ContextOverflowRecoveryHook",
     "LoggingHook", "MemoryHook", "PermissionHook",
     "RepeatToolCallDetectorHook", "RetryHook", "SkillHook",
-    "SkillEvolutionHook", "SubagentContextHook",
+    "SkillEvolutionHook", "SubagentContextHook", "TeamContextHook",
 ]

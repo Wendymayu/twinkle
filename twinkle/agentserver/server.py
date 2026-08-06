@@ -26,6 +26,7 @@ from twinkle.agentserver.skills.rpc import dispatch_skill_rpc, handles_skill_rpc
 from twinkle.agentserver.tools import tool_manager
 from twinkle.config import AGENTSERVER_HOST, AGENTSERVER_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT
 from twinkle.config import EVOLUTION_ENABLED as _EVOLUTION_ENABLED
+
 from twinkle.e2a.models import E2AEnvelope, E2AResponse
 from twinkle.schema.message import EventType
 
@@ -100,6 +101,11 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
         from twinkle.agentserver.evolution import get_orchestrator
         from twinkle.agentserver.hooks.builtin import SkillEvolutionHook
         all_hooks.append(SkillEvolutionHook(orchestrator=get_orchestrator()))
+    # Team infrastructure — always wired; activates only when request.mode == "team"
+    from twinkle.agentserver.team.manager import TeamManager
+    from twinkle.agentserver.hooks.builtin import TeamContextHook
+    team_mgr = TeamManager(llm=llm, store=store, parent_tools=tools, config=settings.team)
+    all_hooks.append(TeamContextHook(team_mgr))
     return ReActAgent(llm, store, tools, hooks=tuple(all_hooks))
 
 
@@ -133,11 +139,13 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                     log.debug("send on closed connection, dropping %s", resp.request_id)
 
         async def run_task(envelope: E2AEnvelope) -> None:
+            params = envelope.params or {}
             request = AgentRequest(
                 session_id=envelope.session_id or envelope.request_id,
                 request_id=envelope.request_id,
-                query=(envelope.params or {}).get("query", ""),
+                query=params.get("query", ""),
                 channel=envelope.channel or "web",
+                mode=params.get("mode", ""),
             )
             try:
                 async for frame in agent.run(request):

@@ -204,6 +204,10 @@ class WorkflowConfig(_StrictModel):
     enable_fallback: bool = True
 
 
+class TeamConfig(_StrictModel):
+    enabled: bool = False
+
+
 class TwinkleConfig(_StrictModel):
     agentserver: AgentserverConfig = AgentserverConfig()
     gateway: GatewayConfig = GatewayConfig()
@@ -222,6 +226,7 @@ class TwinkleConfig(_StrictModel):
     repeat_tool_detection: RepeatToolDetectionConfig = RepeatToolDetectionConfig()
     workflow: WorkflowConfig = WorkflowConfig()
     evolution: EvolutionConfig = EvolutionConfig()
+    team: TeamConfig = TeamConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":

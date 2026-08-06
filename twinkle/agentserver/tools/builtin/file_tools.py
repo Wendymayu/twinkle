@@ -32,12 +32,16 @@ _WRITE_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
 
 
 def _resolve_file_path(file_path: str) -> Path:
-    """Resolve `file_path` against WORKSPACE_DIR; reject paths escaping it.
+    """Resolve `file_path` against the active workspace; reject paths escaping it.
 
-    Relative paths are joined under WORKSPACE_DIR; absolute paths are accepted
-    only if they resolve inside it. Raises ValueError on escape.
+    Checks MEMBER_WORKSPACE ContextVar first (set when running team members),
+    falls back to WORKSPACE_DIR. Relative paths are joined under the workspace
+    root; absolute paths are accepted only if they resolve inside it.
+    Raises ValueError on escape.
     """
-    root = Path(WORKSPACE_DIR).resolve()
+    from twinkle.agentserver.team.context import MEMBER_WORKSPACE
+    ws_override = MEMBER_WORKSPACE.get()
+    root = (Path(ws_override) if ws_override else Path(WORKSPACE_DIR)).resolve()
     candidate = Path(file_path)
     if not candidate.is_absolute():
         candidate = root / candidate

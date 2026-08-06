@@ -36,7 +36,9 @@ const todo = ref<TodoState | null>(null)
 const inputDisabled = ref(false)
 
 type NavKey = 'chat' | 'sessions' | 'skills'
+type AgentMode = 'normal' | 'team'
 const activeNav = ref<NavKey>('chat')
+const agentMode = ref<AgentMode>('normal')
 const selectedSessionId = ref<string>('')
 const sessionFiles = ref<{ name: string; is_dir: boolean; size: number }[]>([])
 const previewFile = ref<string | null>(null)
@@ -202,7 +204,7 @@ function sendQuery(q: string) {
   if (!q.trim() || !connected.value) return
   messages.value.push({ role: 'user', content: q })
   busy.value = true
-  client.send('chat.send', { query: q })
+  client.send('chat.send', { query: q, mode: agentMode.value })
 }
 
 function init() {
@@ -302,7 +304,7 @@ export function useSessions() {
     sessions, currentSessionId, messages, connected, busy, loading, todo,
     inputDisabled, markApprovalDecided,
     completedCount, box, fromHistory,
-    activeNav, setNav,
+    activeNav, setNav, agentMode,
     selectedSessionId, sessionFiles, previewFile, previewContent,
     previewLoading, historyAsBubbles,
     searchResults, installedSkills, skillsLoading, skillsError,

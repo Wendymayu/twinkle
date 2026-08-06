@@ -65,6 +65,7 @@ class AgentRequest:
     request_id: str
     query: str
     channel: str = "web"
+    mode: str = ""  # "" = normal, "team" = team collaboration
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ def build_system_prompt() -> str:
             "或 cmd 分步 `mkdir parent && mkdir parent\\child`。"
         )
 
-    return f"""# 身份与行为原则
+    prompt = f"""# 身份与行为原则
 
 对外交流时，不要主动提及内部框架名、目录名或运行细节。
 
@@ -135,13 +136,198 @@ def build_system_prompt() -> str:
 - 非平凡的多步骤请求：先调 todo_create 列出子任务，逐步执行并用 todo_update(task_id, status="completed", result=...) 标记完成，调 todo_list 查看进度，调 todo_get 查看单任务详情。
 - 简单单步请求：直接回答或调工具，不要使用 todo。
 
-## 长期记忆
+"""
 
-你有跨会话记忆工具（memory_search/write_memory/read_memory/edit_memory）。何时搜索/写入的详细规则见系统注入的"长期记忆"段。
+    return prompt
 
-## 技能
 
-你有技能工具（list_skill/read_skill）。可用技能清单见系统注入的"可用技能"段。"""
+def build_agent_runtime_prompt() -> str:
+    """Build a lean runtime-only prompt for team members.
+
+    Members get team identity from build_member_system_prompt(); this
+    supplies only the execution environment they share with every agent:
+    platform, date, command syntax, and tool usage guidance.
+
+    Omits the user-facing identity/behavior section and the global
+    workspace paths — members see team workspace via their team section.
+    """
+    os_type = sys.platform
+    today_date = date.today().isoformat()
+
+    mkdir_warning = ""
+    if os_type.startswith("win"):
+        mkdir_warning = (
+            "\n⚠️ Windows `mkdir` 不支持 `-p`！创建嵌套目录请用 "
+            "PowerShell `New-Item -ItemType Directory -Path \"parent/child\" -Force` "
+            "或 cmd 分步 `mkdir parent && mkdir parent\\child`。"
+        )
+
+    return f"""# 运行环境
+
+当前平台：`{os_type}`
+当前日期：`{today_date}`
+
+**必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
+
+| 操作 | Windows | Linux/macOS |
+|------|---------|-------------|
+| 创建目录 | `mkdir folder` | `mkdir -p folder` |
+| 查看文件 | `type file.txt` | `cat file.txt` |
+| 列出文件 | `dir` | `ls -la` |
+| 删除目录 | `rmdir folder` | `rm -rf folder` |{mkdir_warning}
+
+# 工具使用指南
+
+## Todo（任务规划）
+
+你有 todo 工具来规划和追踪多步骤任务：todo_create、todo_update、todo_list、todo_get。
+- 非平凡的多步骤请求：先调 todo_create 列出子任务，逐步执行并用 todo_update(task_id, status="completed", result=...) 标记完成，调 todo_list 查看进度，调 todo_get 查看单任务详情。
+- 简单单步请求：直接回答或调工具，不要使用 todo。
+
+"""
+
+
+# ── Team leader prompt (injected per-request when mode=team) ──────
+
+def build_leader_system_prompt() -> str:
+    """Build the leader's system prompt for team mode.
+
+    Replaces build_system_prompt() when mode=team. The leader is a
+    coordinator — identity and workflow are team-specific, not the
+    generic user-facing rules in the base prompt.
+
+    Aligned with jiuwenswarm's TeamRail sections:
+      P:11  team_role     — leader_policy (who you are)
+      P:13  team_workflow — leader_workflow (how you work)
+      then   runtime + tool guidance
+    """
+    os_type = sys.platform
+    today_date = date.today().isoformat()
+
+    mkdir_warning = ""
+    if os_type.startswith("win"):
+        mkdir_warning = (
+            "\n⚠️ Windows `mkdir` 不支持 `-p`！创建嵌套目录请用 "
+            "PowerShell `New-Item -ItemType Directory -Path \"parent/child\" -Force` "
+            "或 cmd 分步 `mkdir parent && mkdir parent\\child`。"
+        )
+
+    return f"""# 团队角色
+
+你是 TeamLeader，负责规划、委派和整合。你的价值在于**定义"做什么"和"为什么做"**，而非亲自执行。团队成员是独立 agent，看不到你的对话历史，委派时需提供充分上下文。
+
+## 核心职责
+1. **目标拆解**: 分析用户需求，拆解为可委派的子任务。用 todo 工具规划，用 delegate_to_member 执行
+2. **组建团队**: 通过 persona 参数为每个成员定义角色和专长（如"金融分析师，专长美股财报"），让成员获得匹配能力
+3. **质量把关**: 审查成员返回的结果，必要时追加委派或要求修正
+4. **整合交付**: 将所有成员产出整合为连贯的最终结果
+
+## 决策原则
+- **你只协调，不执行**: 把实质性工作（命令执行、文件写入、数据分析）委派给成员。你只用只读工具来了解上下文
+- **并行优先**: 无依赖的子任务并发委派给多个成员
+- **信任成员**: 成员是领域专家，Leader 定义目标、成员决定方法
+- **委派后不催促**: 成员需要时间执行，等待结果返回后再审查
+
+## 工作流程
+1. 分析需求 → 用 todo_create 规划子任务
+2. 委派任务 → delegate_to_member(persona="角色描述", objective="任务目标", prompt="补充上下文")
+3. 审查结果 → 成员返回后检查质量，不满足则追加委派修正
+4. 整合输出 → 汇总所有结果，向用户交付最终答案
+
+# 运行环境
+
+当前平台：`{os_type}`
+当前日期：`{today_date}`
+
+**必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
+
+| 操作 | Windows | Linux/macOS |
+|------|---------|-------------|
+| 创建目录 | `mkdir folder` | `mkdir -p folder` |
+| 查看文件 | `type file.txt` | `cat file.txt` |
+| 列出文件 | `dir` | `ls -la` |
+| 删除目录 | `rmdir folder` | `rm -rf folder` |{mkdir_warning}
+
+# 工具使用指南
+
+## 核心工具：delegate_to_member
+
+delegate_to_member(persona, objective, prompt) 是你的核心工具。
+- **persona**: 成员角色描述（如"Python 后端工程师，专长 FastAPI 和数据库设计"），越具体成员能力越匹配
+- **objective**: 任务目标，一句话说清要产出什么
+- **prompt**: 可选，补充上下文、约束条件或参考信息
+
+## 你可以直接使用的工具
+
+**协调类**: todo_create、todo_update、todo_list、todo_get — 规划与追踪
+**只读类**: read_file、list_files、glob、web_search、web_fetch — 了解上下文
+**查询类**: memory_search、read_memory、list_skill、read_skill、cron_list_jobs
+
+## Todo（任务规划）
+
+你有 todo 工具来规划和追踪多步骤任务：todo_create、todo_update、todo_list、todo_get。
+- 非平凡的多步骤请求：先调 todo_create 列出子任务，逐步执行并用 todo_update(task_id, status="completed", result=...) 标记完成，调 todo_list 查看进度，调 todo_get 查看单任务详情。
+- 简单单步请求：直接委派或调工具，不要使用 todo。"""
+
+
+# ── Member system prompt (aligned with jiuwenswarm sections) ────
+
+def build_member_system_prompt(*, persona: str, workspace: str) -> str:
+    """Build a member's system prompt with team identity front and center.
+
+    Aligned with jiuwenswarm's section model:
+      P:11  team_role     — role policy + member identity
+      P:15  team_persona  — persona description
+      P:30  team_info     — workspace path
+
+    Followed by a lean runtime prompt (platform, date, tool usage) —
+    NOT the full user-facing build_system_prompt(). Members don't need
+    user-facing identity/behavior rules or global workspace paths.
+    """
+    return f"""# 团队角色
+
+你是 Teammate，{persona}
+
+作为团队成员：
+- Leader 定义"做什么"，你来决定"怎么做"
+- 聚焦任务目标，自主搜索、执行、产出
+- 任务完成后给出清晰总结，让 Leader 能直接整合
+
+# 当前人设
+
+{persona}
+
+# 团队共享工作区
+
+路径: `{workspace}`
+所有文件读写操作在此目录内进行。
+
+---
+
+{build_agent_runtime_prompt()}"""
+
+
+# ── Leader tool whitelist for team mode ──────────────────────────
+# In team mode the leader is a COORDINATOR: plan, delegate, review.
+# Execution tools (command_exec, write_file, edit_file) are reserved
+# for members so delegation is not optional — the leader MUST delegate
+# substantive work. This is the architectural difference from subagent
+# mode: the leader cannot do the work itself.
+
+_TEAM_LEADER_TOOL_WHITELIST: frozenset[str] = frozenset({
+    # Coordination
+    "delegate_to_member",
+    # Planning & tracking
+    "todo_create", "todo_update", "todo_list", "todo_get",
+    # Read-only inspection
+    "read_file", "list_files", "glob",
+    "web_search", "web_fetch",
+    "memory_search", "read_memory",
+    # Skills (read-only)
+    "list_skill", "read_skill",
+    # Cron (read-only management)
+    "cron_list_jobs",
+})
 
 
 _MAX_HOOK_RETRIES = 3
@@ -203,7 +389,7 @@ class ReActAgent:
         ctx = HookContext(
             agent=self,
             event=HookEvent.BEFORE_INVOKE,
-            inputs=InvokeInputs(query=request.query),
+            inputs=InvokeInputs(query=request.query, mode=request.mode),
             session_id=session_id,
             request_id=request_id,
             extra={},
@@ -266,12 +452,17 @@ class ReActAgent:
         set_permission_channel(request.channel)
         await self._fill_missing_tool_results(session_id, request_id)
 
-        # Insert the base system prompt once per session
+        is_team_mode = request.mode == "team"
+
+        # Insert the base system prompt once per session.
+        # Team mode uses a dedicated leader prompt; normal mode uses the
+        # generic user-facing prompt.
         messages = self._session_store.get_messages(session_id)
         if not messages or messages[0].get("role") != "system":
+            system_prompt = build_leader_system_prompt() if is_team_mode else build_system_prompt()
             await self._session_store.append(
                 session_id,
-                {"role": "system", "content": build_system_prompt()},
+                {"role": "system", "content": system_prompt},
                 request_id=request_id,
             )
 
@@ -287,7 +478,11 @@ class ReActAgent:
             msgs = self._session_store.get_messages(session_id)
 
             # -- BEFORE_MODEL_CALL -- #
-            ctx.inputs = ModelCallInputs(messages=msgs, tools=self._tool_manager.schemas())
+            tool_schemas = self._tool_manager.schemas()
+            if is_team_mode:
+                tool_schemas = [t for t in tool_schemas
+                               if t["function"]["name"] in _TEAM_LEADER_TOOL_WHITELIST]
+            ctx.inputs = ModelCallInputs(messages=msgs, tools=tool_schemas)
             await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
 
             # -- Merge leading system messages into one -- #
@@ -652,14 +847,14 @@ class ReActAgent:
         summary_parts: list[str] = []
         other_parts: list[str] = []
 
-        _IDENTITY_PREFIX = "# 身份与行为原则"
+        _IDENTITY_PREFIXES = ("# 身份与行为原则", "# 团队角色")
         _SKILL_PREFIXES = ("## 可用技能", "你有 skills")
         _MEMORY_PREFIX = "## 长期记忆"
         _SUMMARY_PREFIX = "[prior context summary]"
 
         for m in system_msgs:
             content = m.get("content", "")
-            if content.startswith(_IDENTITY_PREFIX):
+            if any(content.startswith(p) for p in _IDENTITY_PREFIXES):
                 identity_parts.append(content)
             elif any(content.startswith(p) for p in _SKILL_PREFIXES):
                 skill_parts.append(content)

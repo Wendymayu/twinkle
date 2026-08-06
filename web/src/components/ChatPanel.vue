@@ -3,9 +3,13 @@ import { ref, nextTick } from 'vue'
 import { useSessions } from '../composables/useSessions'
 import ApprovalCard from './ApprovalCard.vue'
 
-const { messages, connected, busy, loading, sendQuery, createSession, inputDisabled } = useSessions()
+const { messages, connected, busy, loading, sendQuery, createSession, inputDisabled, agentMode } = useSessions()
 const input = ref('')
 const logEl = ref<HTMLUListElement | null>(null)
+
+function toggleMode() {
+  agentMode.value = agentMode.value === 'team' ? 'normal' : 'team'
+}
 
 function scrollDown() {
   nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
@@ -39,6 +43,10 @@ function send() {
       <li v-if="loading" class="row assistant"><div class="bubble processing">加载历史…</div></li>
     </ul>
     <footer>
+      <button class="mode-btn" :class="{ team: agentMode === 'team' }" @click="toggleMode"
+        :disabled="!connected" :title="agentMode === 'team' ? '团队模式' : '普通模式'">
+        {{ agentMode === 'team' ? '👥' : '👤' }}
+      </button>
       <input v-model="input" @keyup.enter="send" :disabled="!connected || inputDisabled" placeholder="说点什么…" />
       <button class="new-btn" @click="createSession" :disabled="!connected" title="新会话">➕</button>
       <button @click="send" :disabled="!connected || inputDisabled">发送</button>
@@ -65,6 +73,12 @@ input:focus { border-color: #4f46d5; }
 button { padding: .6rem 1.2rem; border: 0; border-radius: 12px; background: #4f46d5; color: #fff; font-size: .95rem; cursor: pointer; }
 button:hover:not(:disabled) { background: #4338ca; }
 button:disabled { background: #cbd5e1; cursor: not-allowed; }
+.mode-btn {
+  padding: .6rem .7rem; border: 0; border-radius: 12px; background: #fff;
+  border: 1px solid #cbd5e1; font-size: 1rem; cursor: pointer; line-height: 1;
+}
+.mode-btn:hover:not(:disabled) { background: #f1f5f9; }
+.mode-btn.team { background: #eef2ff; border-color: #4f46d5; }
 .new-btn {
   padding: .6rem 1rem; border: 0; border-radius: 12px; background: #fff;
   border: 1px solid #cbd5e1; color: #4f46e5; font-size: 1rem; cursor: pointer;

@@ -112,3 +112,6 @@ EVOLUTION_DISTILL_MIN_SCORE = settings.evolution.distill.min_score
 EVOLUTION_SIGNAL_FAILURE = settings.evolution.signals.execution_failure
 EVOLUTION_SIGNAL_SCRIPT = settings.evolution.signals.script_artifact
 EVOLUTION_SIGNAL_USER_INTENT = settings.evolution.signals.user_intent
+
+# --- team (Phase 18a) ---
+TEAM_ENABLED = settings.team.enabled
