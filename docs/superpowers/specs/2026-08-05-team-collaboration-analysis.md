@@ -5,11 +5,67 @@
 
 ---
 
+## 0. 多智能体协作：概念与要解决的问题
+
+> 本节是认知铺垫，先建立「multi-agent 是什么、要解决什么」，再看 §1+ 的具体设计为什么长这样。术语只是给大白话起的工程名，别被吓到。
+
+### 0.1 什么是多智能体协作
+
+- **单 agent**：一个 ReActAgent 跑 `think→tool→think` 循环，独自做完整个任务。
+- **多 agent**：多个独立 ReActAgent（各有角色/persona）协同完成单 agent 难以胜任的复杂任务。典型形态是 **1 个 leader（协调者）+ N 个 member（执行者）**：
+  - leader 不亲手干活，负责把大任务拆成小任务、分给 member、整合结果
+  - member 各有角色（如「金融分析师」「报告撰写人」），领活干活
+- 类比人类团队：leader = 项目经理，member = 各工种组员。
+
+### 0.2 为什么需要多 agent（单 agent 的局限）
+
+- **上下文有限**：复杂任务信息量大，全塞一个 context 会膨胀、易遗忘
+- **单角色瓶颈**：一个 agent 难同时精通「调研 + 写作 + 编码」，分角色更准
+- **串行**：单 agent 只能一步步做，多 agent 可并行做无依赖的子任务
+- **难聚焦**：长任务里单 agent 容易跑偏，多 agent 各自聚焦子任务更稳
+
+### 0.3 协作要解决的核心问题
+
+| 问题 | 大白话 | 术语/机制 | 18a | 后续阶段 |
+|---|---|---|---|---|
+| **分工** | 队长把大活拆成小活分给队员 | 任务分解、`create_task` | 部分（LLM 自决策拆） | 18b task queue |
+| **协调/依赖** | 子活有先后（B 等 A 做完） | 依赖图、`blocked_by`、环检测、依赖解除 | ❌ | 18b |
+| **通信** | 队员/队长之间怎么传话 | mailbox、P2P/Broadcast、steer | ❌（靠共享 workspace） | 18b leader→member steer；member 间 defer |
+| **状态管理** | 任务有生命周期（待干/在做/做完），防两人抢同一活 | 状态机、claim 独占、退出释放认领 | ❌ | 18b |
+| **身份** | 队员怎么被叫到、被认领 | `member_name`、persona | 部分（persona hash，不可读） | 18b `member_name` |
+| **容错** | 队员死了/卡住怎么办 | 超时、释放认领、Recovery | 部分（`_drive_member` 超时） | 18b +释放认领；Recovery defer |
+
+**不解决的后果举例**：分工没 task queue → leader 只能口头委派，任务结果没法跨 member 流转；依赖没依赖图 → member 乱序做，B 在 A 没好时开干白费；通信没机制 → member 只能靠共享文件间接协作；状态没 claim 独占 → 两 member 抢同一活；身份没 `member_name` → 消息和任务没法寻址到具体 member。
+
+### 0.4 steer（消息怎么送到正在干活的 agent）
+
+这是通信里最绕的点，单独讲清。member 正在跑（`think→tool` 循环中），leader 想给它递条子「方向变了，加一节」，怎么递？
+
+**steer（打断递条式）**：member 的 run 循环**每跑一步先查信箱**，有新消息立刻作为一条临时输入注入当前轮，member 马上看到、据此调整。消息**不进对话历史**，跑完这轮就消失，不累积膨胀——所以下次 member 被唤醒时是干净状态。
+
+jiuwenswarm 用 steer。Twinkle 18b 对齐 steer（单进程下更简单，不需 jiuwenswarm 的 supervisor 串行化）。
+
+> **18a 的定位**：只解决「分工（简化版，靠 delegate）+ 身份（persona hash）+ 容错（超时）」的最低限度，依赖/通信/状态管理全留给后续阶段（见 §9 已知限制）。
+
+---
+
 ## 1. 目标
 
 1 leader + 2-3 角色化 member 并发执行子任务，leader 整合结果输出最终答案。
 
 **不做**：成员间直接通信、任务队列、Monitor 事件流、前端成员面板、team 级崩溃恢复。
+
+```mermaid
+flowchart TD
+    U[用户请求] --> L[leader ReActAgent]
+    L -->|delegate_to_member persona1| M1[member1 金融分析师]
+    L -->|delegate_to_member persona2| M2[member2 报告撰写人]
+    M1 -->|run 到收敛 返回结果| L
+    M2 -->|run 到收敛 返回结果| L
+    L -->|整合结果 输出最终答案| U
+```
+
+leader 用 `asyncio.gather` 并发委派；member1/member2 **平级**、各自独立跑到收敛返回；**member 间无协作、无直接通信**（仅共享 workspace 目录，不构成协作）。
 
 ---
 

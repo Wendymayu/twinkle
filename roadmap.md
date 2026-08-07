@@ -12,13 +12,13 @@
 ### 明确保留（核心，已落地）
 - gateway↔agentserver 两进程 + 双向 ws
 - agent loop 核心闭环（ReAct：think → 选工具 → 执行 → 结果回灌 → 再决策）
-- 工具系统（四层 ToolManager + `@tool` + 24 个 builtin 工具：web_fetch/web_search/command_exec/file_ops(5)/todo(4)/skill(2)/memory(4)/cron(5)/subagent(1)）
-- Hook 系统（7 个 builtin hook：Permission/Skill/Memory/Compression/Retry/Logging/SubagentContext）
+- 工具系统（四层 ToolManager + `@tool` + 26 个 builtin 工具：web_fetch/web_search/command_exec/file_ops(5)/todo(4)/skill(2)/memory(4)/cron(5)/subagent(1)/workflow(1)/team(1)）
+- Hook 系统（11 个 builtin hook + `WorkflowContextHook`：Permission/Skill/Memory/Compression/Retry/Logging/SubagentContext/OverflowRecovery/RepeatDetection/SkillEvolution/TeamContext/Workflow）
 - 短期记忆（SessionStore 多轮对话记录）
 - 长期记忆（MemoryManager SQLite 混合检索 + 4 个 memory 工具）
 - 长会话上下文压缩（ContextCompressionHook 自动压缩）
 - 单 web channel（+ channel 扩展点）
-- **OTel 遥测切面**（`observability/` 包：`setup()` 在 `agentserver/__main__` 启动时接入，monkey-patch `AgentLoop.run_stream` / `LLMClient.stream` / `ToolManager.execute` 三个 choke point 造 span，OTLP gRPC / console / none 导出 + 指标；`OTEL_ENABLED` 默认 false 为零成本 no-op）
+- **OTel 遥测切面**（`observability/` 包：`setup()` 在 `agentserver/__main__` 启动时接入，monkey-patch `ReActAgent.run` / `LLMClient.stream` / `ToolManager.execute` 三个 choke point 造 span，OTLP gRPC / console / none 导出 + 指标；`OTEL_ENABLED` 默认 false 为零成本 no-op）
 
 ### 明确超出范围（学习型项目不做）
 这些要么偏企业 SaaS、要么强依赖 `openjiuwen` 外部生态、要么与"单机学习型重写"定位不符。需要时参考对应模块实现，**不进当前路线**：
@@ -48,7 +48,10 @@
 - **OTel 遥测已落地**（`observability/` 包，启动接入，默认 off 零成本）：对应里程碑 M12 ✅。
 - **Phase 9（溢出恢复 + 循环检测）已落地**：`ContextOverflowRecoveryHook`（413 自动压缩重试 + 熔断）+ `RepeatToolCallDetectorHook`（滑动窗口 + stable hash 循环检测 + 纠偏注入）。对应里程碑 M13 ✅。
 - **Phase 10（HITL 中断/恢复）已落地**：`ApprovalPendingRecord` + `ApprovalRegistry.save_pending/clear_pending/get_pending` + `approval.check_pending` RPC + 前端重连恢复审批卡片。对应里程碑 M14 ✅。
-- **Phase 11–18 为后续规划**：Phase 11（PlanNode 递归执行树）→ Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 14（Skill 自进化）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 18a（Team 编排 MVP）→ Phase 18b（Team 编排完整版）。参考 jiuwenswarm 对应能力设计。
+- **Phase 11（Workflow 引擎 = PlanNode 递归执行树）已落地**：`workflow/` 包（`PlanNode` ABC + `WorkflowExecutor` + `_SAFE_BUILTINS` + `PlanCodeValidator` + `_fallback_wrapper`→SubagentExecutor + HookInterrupt 透传）+ `execute_workflow` 工具 + `WorkflowContextHook` + 内置 `pptx-craft` 7 节点流水线 + seed 机制。对应里程碑 M15 ✅。
+- **Phase 14（Skill 自进化 v1）已落地**：`evolution/` 包（`ConversationSignalDetector`/`SkillExperienceOptimizer`/`OnlineEvolutionOrchestrator`/`EvolutionStore`/`ExperienceScorer`）+ `SkillEvolutionHook`（条件注册）+ 6 个 RPC + E/U/F 打分 + 反馈环 + 蒸馏。对应里程碑 M18 ✅。
+- **Phase 18a（Team 编排 MVP）已落地**：`team/` 包（`TeamManager` + `Team`）+ `delegate_to_member` 工具 + `TeamContextHook` + Leader/Member 双白名单 + 共享 workspace。对应里程碑 M22a ✅。
+- **Phase 12–13、15–17、18b 为后续规划**：Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 18b（Team 编排完整版）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -95,22 +98,22 @@
 ### Phase 3 — 长会话上下文压缩  `[已完成]`
 **目标**：长对话不爆 token、不丢关键上下文。
 
-**已落地**：`twinkle/agentserver/compression/` 算法包（滑窗 + LLM 摘要，**不写回 SessionStore**——history 无损，只塑形 LLM 输入）+ `hooks/builtin/context_compression_hook.py`（`ContextCompressionHook` priority 95，`before_model_call` 自动触发：token 估算超阈值时压缩 middle，保 head + 最近 tail，tool 配对不破；summary 失败降级为 head+tail）。`build_agent_loop` 自动织入（与 SubagentContextHook 同款，无需 caller 传参）。spec `docs/superpowers/specs/2026-08-01-context-compression-hook-design.md`。
+**已落地**：`twinkle/agentserver/compression/` 算法包（滑窗 + LLM 摘要，**不写回 SessionStore**——history 无损，只塑形 LLM 输入）+ `hooks/builtin/context_compression_hook.py`（`ContextCompressionHook` priority 95，`before_model_call` 自动触发：token 估算超阈值时压缩 middle，保 head + 最近 tail，tool 配对不破；summary 失败降级为 head+tail）。`create_agent` 自动织入（与 SubagentContextHook 同款，无需 caller 传参）。spec `docs/superpowers/specs/2026-08-01-context-compression-hook-design.md`。
 
 **验收**：单会话 100 轮对话不爆 token、关键事实不丢。 ✅
 
-**后续优化方向（对齐 jiuwenswarm）**——参考 `docs/en/ContextCompression.md` + `jiuwenclaw/agentserver/deep_agent/rails/context_overflow_recovery_rail.py`（`enterprise_dev` 分支，`git show enterprise_dev:<path>` 读取）：
-- **413 反应救火重试**：LLM 抛 413 / `context_length_exceeded` 时解析 token 数（Anthropic / OpenAI / 华为三种格式），强压 + `request_retry()` 重试 + 连续失败熔断。初版只赌主动压缩能防住，赌错则请求直接挂。
-- **触发条件多维度**：现仅 `estimate_tokens` 单阈值；加 message 计数维度、`large_message_threshold`（优先压大消息）、`offload_message_type`（可只压 tool 输出保对话）等旋钮。
-- **窗口预算**：现固定阈值 60000；改为按模型窗口动态算（jiuwenswarm `threshold_override = 窗口 × 0.85`，预留 15% 给输出），随模型切换自适应。
-- **异常降级增强**：现 summary 失败→丢 middle 保 head+tail；可加 offload 归档 + `[[OFFLOAD:...]]` 索引可检索召回（非丢弃），长会话早期被压事实能拉回。
+**后续优化方向（对齐 jiuwenswarm，部分已在 Phase 9 落地）**——参考 `docs/en/ContextCompression.md` + `jiuwenclaw/agentserver/deep_agent/rails/context_overflow_recovery_rail.py`（`enterprise_dev` 分支，`git show enterprise_dev:<path>` 读取）：
+- **413 反应救火重试**（✅ 已在 Phase 9 落地 `ContextOverflowRecoveryHook`）：413 / `context_length_exceeded` 解析 token 数（Anthropic / OpenAI 格式），激进压缩（`keep_recent_pairs` 减半 + `threshold_override = limit × 0.85`）+ `request_retry()` 重试 + 连续 3 次失败熔断注入 `[CONTEXT_OVERFLOW]`。
+- **触发条件多维度**（仍 deferred）：现仅 `estimate_tokens` 单阈值；加 message 计数维度、`large_message_threshold`（优先压大消息）、`offload_message_type`（可只压 tool 输出保对话）等旋钮。
+- **窗口预算**（仍 deferred）：现固定阈值 60000；改为按模型窗口动态算（jiuwenswarm `threshold_override = 窗口 × 0.85`，预留 15% 给输出），随模型切换自适应。
+- **异常降级增强**（仍 deferred）：现 summary 失败→丢 middle 保 head+tail；可加 offload 归档 + `[[OFFLOAD:...]]` 索引可检索召回（非丢弃），长会话早期被压事实能拉回。
 
 ---
 
 ### Phase 4 — 工具权限 / 审批 + 命令安全  `[已完成]`
 **目标**：从"裸跑工具"升级到"工具可被策略管控，危险操作需审批"。
 
-**已落地**：`twinkle/agentserver/permissions/` 包（models / builtin_rules / policy / audit / approval_registry / engine）+ `permission_context.py` ContextVar + `PermissionHook`（before_tool_call：ALLOW no-op / DENY force_finish / ASK raise HookInterrupt）。ASK 挂起/恢复用进程内 `ApprovalRegistry`（approval_id → asyncio.Future 单例）：`agent_loop` 的 `except HookInterrupt` 注册 Future + yield `e2a.ask`（is_final=false）后 `await future` 挂起；`ws_handler` 内联路由 `approval.respond`（在 active-run guard 之前）→ resolve Future + 回 e2a.result ack（R2）；挂起的 run_stream 在**原 request_id**（R）上恢复 → 执行工具（allow）或注入 deny 消息回灌 → 再查模型。command_exec 的 blocklist 上提为 `builtin_rules.py` 单一真源（8 + 9 = 17 条），command_exec 与 PermissionPolicy 共读，disabled 模式下 command_exec 仍走它做 defense-in-depth。`TWINKLE_PERMISSIONS` 单 JSON env（对齐 OTEL opt-in），`enabled=false` 默认 = 系统关（全 ALLOW、无审计、无 ASK）。**精简范围仍 deferred**：shell AST 解析、三轴文件路径判定。spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md`。
+**已落地**：`twinkle/agentserver/permissions/` 包（models / builtin_rules / policy / audit / approval_registry / engine）+ `permission_context.py` ContextVar + `PermissionHook`（before_tool_call：ALLOW no-op / DENY force_finish / ASK raise HookInterrupt）。ASK 挂起/恢复用进程内 `ApprovalRegistry`（approval_id → asyncio.Future 单例）：`ReActAgent` 的 `except HookInterrupt` 注册 Future + yield `e2a.ask`（is_final=false）后 `await future` 挂起；`ws_handler` 内联路由 `approval.respond`（在 active-run guard 之前）→ resolve Future + 回 e2a.result ack（R2）；挂起的 `run()` 在**原 request_id**（R）上恢复 → 执行工具（allow）或注入 deny 消息回灌 → 再查模型。command_exec 的 blocklist 上提为 `builtin_rules.py` 单一真源（8 + 9 = 17 条），command_exec 与 PermissionPolicy 共读，disabled 模式下 command_exec 仍走它做 defense-in-depth。`TWINKLE_PERMISSIONS` 单 JSON env（对齐 OTEL opt-in），`enabled=false` 默认 = 系统关（全 ALLOW、无审计、无 ASK）。**精简范围仍 deferred**：shell AST 解析、三轴文件路径判定。spec `docs/superpowers/specs/2026-07-24-phase4-permissions-design.md`。
 
 **验收**：危险工具调用前必须过策略；`require-approval` 工具触发用户审批卡；拒绝带 `[PERMISSION_DENIED]` 消息回灌；审计日志可查。 ✅
 
@@ -139,22 +142,22 @@
 ### Phase 7 — Skill 系统  `[已完成]`
 **目标**：从"调原子工具"升级到"调用打包的知识+指令束（skill）"，支撑一类多步任务。
 
-**已落地**：`twinkle/agentserver/skills/` 包（`Skill` + `SkillManager` 扫描/mtime 热重载/白名单 + `get_skill_manager` 单例）+ `tools/builtin/skill_tools.py`（`list_skill`/`read_skill` @tool）+ `hooks/builtin/skill_hook.py`（`SkillHook` priority 90，`before_model_call` 按 `TWINKLE_SKILL_MODE` 注入：`all`=每步注入清单 / `auto_list`=注入一句提示，默认 all）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录约定 + 示例 skill `doc-audit`（首次启动 seed）。`trigger` frontmatter 解析后丢弃（模型靠 description 自选，不做关键词自动匹配）。**SkillNet 一键下载/安装已落地**：前端「🧩 技能」页搜索 SkillNet 公开目录(api-skillnet.openkg.cn)并安装到 `<WORKSPACE>/skills`；搜索走 SkillNet 公开 API、下载走 GitHub Contents/raw API，自实现不依赖 skillnet-ai。spec `docs/superpowers/specs/2026-07-27-skill-design.md` + `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`。
+**已落地**：`twinkle/agentserver/skills/` 包（`Skill` + `SkillManager` 扫描/mtime 热重载/白名单 + `get_skill_manager` 单例）+ `tools/builtin/skill_tools.py`（`list_skill`/`read_skill` @tool）+ `hooks/builtin/skill_hook.py`（`SkillHook` priority 90，`before_model_call` 按 `TWINKLE_SKILL_MODE` 注入：`all`=每步注入清单 / `auto_list`=注入一句提示，默认 all）+ `<WORKSPACE>/skills/<name>/SKILL.md` 目录约定 + 示例 skill `doc-audit`（首次启动 seed）。`trigger` frontmatter 解析后丢弃（模型靠 description 自选，不做关键词自动匹配）。**SkillHub / SkillNet 双源下载安装已落地**：前端「🧩 技能」页支持两个公开 skill 源——SkillNet（`api-skillnet.openkg.cn`，搜索走公开 API、下载走 GitHub Contents/raw API）与 SkillHub（`api.skillhub.cn`，列表/搜索/zip 下载，SKILL.md 在 zip 根目录，与安装流程直接兼容），可切换源；安装到 `<WORKSPACE>/skills`，并支持 `skills.uninstall` 卸载。自实现不依赖 skillnet-ai。spec `docs/superpowers/specs/2026-07-27-skill-design.md` + `docs/superpowers/specs/2026-07-30-skillnet-download-design.md`。
 
 **验收**：一个打包 skill 能被 agent 选中并读入上下文指导多步任务执行；skill 与 builtin tool 协同。 ✅
 
-**仍 deferred**：`skill_turbo` planner/executor、skill 进化（Phase 9）、marketplace/symphony（企业级）。
+**仍 deferred**：`skill_turbo` planner/executor、marketplace/symphony（企业级）。skill 自进化见 Phase 14（已落地 v1）。
 
 ---
 
 ### Phase 8 — 子 Agent（subagent）  `[已完成]`
 **目标**：从"单 agent 串行 ReAct"升级到"主 agent 可委派子 agent 并行/隔离执行子任务"，结果回灌由主 agent 整合。
 
-**已落地**：`twinkle/agentserver/tools/builtin/subagent/` 包（`tools.py` 的 `spawn_subagent` @tool + `executor.py` 的 `SubagentExecutor` + `models.py` 的 `SubagentTaskSpec`/`SubagentResult`/`EXCLUDED_TOOLS` + `context.py` 的 ContextVar 隔离）+ `hooks/builtin/subagent_context_hook.py`（`SubagentContextHook` priority 50，`before_invoke` 设 executor + parent session/request id 到 ContextVar）。子 agent 即另开一个 `AgentLoop` 实例（复用 `LLMClient`/`SessionStore`，子 `ToolManager` 裁剪掉 `spawn_subagent`/`write_memory`/`edit_memory`），跑同一 `run_stream` 闭环，收敛后取 `e2a.complete` body 作 tool result。硬超时（300s）+ 软超时（120s 无流式响应）兜底；结果包 `[SYSTEM]` 停止提示防主 agent 重复委派；子 agent `max_steps=50`（更紧上限）。`build_agent_loop` 自动构建 `SubagentExecutor` + 织入 `SubagentContextHook`。spec `docs/superpowers/specs/2026-07-28-subagent-design.md`。
+**已落地**：`twinkle/agentserver/tools/builtin/subagent/` 包（`tools.py` 的 `spawn_subagent` @tool + `executor.py` 的 `SubagentExecutor` + `models.py` 的 `SubagentTaskSpec`/`SubagentResult`/`EXCLUDED_TOOLS` + `context.py` 的 ContextVar 隔离）+ `hooks/builtin/subagent_context_hook.py`（`SubagentContextHook` priority 50，`before_invoke` 设 executor + parent session/request id 到 ContextVar）。子 agent 即另开一个 `ReActAgent` 实例（复用 `LLMClient`/`SessionStore`，子 `ToolManager` 裁剪掉 `spawn_subagent`/`write_memory`/`edit_memory`），跑同一 `run()` 闭环，收敛后取 `e2a.complete` body 作 tool result。硬超时（300s）+ 软超时（120s 无流式响应）兜底；结果包 `[SYSTEM]` 停止提示防主 agent 重复委派；子 agent `max_steps=50`（更紧上限）。`create_agent` 自动构建 `SubagentExecutor` + 织入 `SubagentContextHook`。spec `docs/superpowers/specs/2026-07-28-subagent-design.md`。
 
 **验收**：主 agent 调 `spawn_subagent` 委派子任务 → 子 agent 独立跑完 ReAct 收敛 → 结果回灌 → 主 agent 总结给用户；超时/异常有兜底不挂死主循环。 ✅
 
-**仍 deferred**：`fork_agent`（消息前缀继承）、流式转发（事件转发到父流）、skill 声明角色（`SubagentConfig` frontmatter）、多级嵌套与 team 编排。
+**仍 deferred**：`fork_agent`（消息前缀继承）、流式转发（事件转发到父流）、skill 声明角色（`SubagentConfig` frontmatter）、多级嵌套。team 编排见 Phase 18a（已落地 MVP）。
 
 ---
 
@@ -172,7 +175,7 @@
 
 **已落地**：`twinkle/agentserver/hooks/builtin/context_overflow_recovery_hook.py`（`ContextOverflowRecoveryHook` priority 60，`on_model_exception` 检测 413/`context_length_exceeded`，3 层判定 + Anthropic/OpenAI 格式 token 解析，强制激进压缩（`keep_recent_pairs` 减半 + `threshold_override = limit_tokens × 0.85`）+ `request_retry()`，连续 3 次失败熔断注入 `[CONTEXT_OVERFLOW]` 消息）+ `twinkle/agentserver/hooks/builtin/repeat_tool_call_detector_hook.py`（`RepeatToolCallDetectorHook` priority 88，`before_tool_call`/`after_tool_call`/`on_tool_exception` 记录 `(call_key, outcome_key)` 到 `deque(maxlen=30)` 滑动窗口，stable hash（SHA-256）+ 4 级分类（LOW: 同 call_key ≥ 10 → MEDIUM: A-B-A-B ≥ 10 → HIGH: 尾部连续相同 ≥ 20 → CRITICAL: ≥ 30），edge-triggered 只升不降，MEDIUM+ 自动注入 `[DETECTION]` 纠偏 system 消息，限频 5 次/分钟）+ `decorator.py` 改动（`ctx.extra["_tool_result"] = result` 传递 tool result 给 after-event hook）+ `config/schema.py` 新增 `OverflowRecoveryConfig` + `RepeatToolDetectionConfig`。spec `docs/superpowers/specs/2026-08-02-phase9-overflow-recovery-repeat-detection-design.md`。
 
-**验收**：LLM 抛 413 时自动压缩重试成功；agent 连续 3 次调用相同工具时自动注入纠偏消息跳出循环。 ✅
+**验收**：LLM 抛 413 时自动压缩重试成功；agent 重复调用相同工具触发循环检测（LOW ≥10 / HIGH ≥20）时自动注入纠偏消息跳出循环。 ✅
 
 ---
 
@@ -189,20 +192,24 @@
 
 ---
 
-### Phase 11 — PlanNode 递归执行树 + Fallback
-**目标**：从"LLM 自驱的灵活规划"升级到"引擎驱动的可靠编排"，支撑固定流程的复杂任务（如 PPT 生成、深度研究报告）。
+### Phase 11 — Workflow 引擎（PlanNode 递归执行树 + Fallback）  `[已完成]`
+**目标**：从"LLM 自驱的灵活规划"升级到"引擎驱动的可靠编排"，支撑固定流程的复杂任务（如 PPT 生成）。
 
-内容：
-- **PlanNode 基类**：ABC，子类实现 `async _execute(inputs) -> Any`，`run()` 是模板方法（不可覆盖），自带 fallback。节点有 `plan_name` + `instruction` + `sub_plans`（递归树）。
-- **能力注入**：节点通过回调访问 `call_tool` / `call_llm` / `stream_llm` / `extract_json`，不直接 import 系统模块。
-- **安全沙箱**：`_SAFE_BUILTINS` 白名单 + `PlanCodeValidator` 代码校验，防止 skill 代码执行危险操作。
-- **Fallback 机制**：节点失败自动触发 `fallback_callback`，不默默失败。`AbortError`（HITL 中断）不进 fallback，直接向上抛。
-- **中间状态传递**：`inputs` dict 在节点间显式传递，上一个节点的输出直接成为下一个节点的输入，不依赖 LLM 上下文记忆。
-- **对齐 jiuwenswarm**：`PlanNode`（`jiuwenclaw/agentserver/skill_turbo/plan_node.py`，enterprise_dev 当前 tip 已删除此文件）+ `RePlanExecutor` + `PlanCodeValidator`。
+**已落地**：`twinkle/agentserver/workflow/` 包——
+- **`PlanNode` 基类**（`node.py`）：ABC，子类实现 `async _execute(inputs) -> Any`，`run()` 模板方法不可覆盖，自带 fallback。节点 `plan_name`/`instruction`/`sub_plans`（递归树）；能力经回调注入 `call_tool`/`call_llm`/`extract_json`（`set_runtime_callbacks` 递归传播），不 import 系统模块；`HookInterrupt` 透传不走 fallback（= roadmap 原 AbortError 语义）。
+- **`WorkflowExecutor`**（`executor.py`）：`execute_workflow(plan_code, inputs)` → validate → 沙箱 exec plan_code 提取 `root` PlanNode → 绑回调 → `root.run(inputs)` 带 `asyncio.wait_for` 超时。
+- **安全沙箱**（`sandbox.py`）：`_SAFE_BUILTINS` 白名单（无 `open/exec/eval/getattr/type`）+ `_FORBIDDEN_MODULES`（禁 os/sys/subprocess/socket/urllib）+ `_ALLOWED_IMPORT_PREFIXES=("twinkle.agentserver.workflow",)` + `_SafeAsyncio`（禁 create_subprocess）。
+- **`PlanCodeValidator`**（`validator.py`）：AST 级校验——禁裸 import/相对 import、import 前缀限白名单、禁 exec/eval/compile/open/getattr/type/__import__、禁 dunder 逃逸属性（`__globals__/__code__/__subclasses__` 等）。
+- **Fallback**（`_fallback_wrapper`）：节点失败 → 计数 → 超 `max_fallback_count` 抛 `FallbackLimitExceededError`；基础设施错误（Connection/Auth/RateLimit/Timeout 类）短路重抛（subagent 调同 LLM 同样会失败、免烧 token）；否则委派 `SubagentExecutor` 兜底执行 `node.instruction`。
+- **工具**：`execute_workflow(workflow_name, inputs)` @tool（`workflow/tools.py`），从 `<WORKSPACE>/workflows/<name>/root.py` 读 plan_code + 路径遍历防护；**动态工具描述**扫描 workflows 目录拼可用清单，LLM 据此自选。
+- **Hook**：`WorkflowContextHook`（priority 50，`before_invoke` 设 `workflow_executor_ctx` ContextVar）；`WorkflowExecutor` 始终在 `create_agent` 织入。
+- **内置 workflow**：`pptx-craft`（`workflow/ppt/root.py`，7 节点流水线：IntentClassify→…→PPTExport→Delivery，python-pptx 导出 .pptx，支持 spec-mode），`workspace.py` `_seed_bundled_workflows` 启动 seed 到 `<WORKSPACE>/workflows/`。
 
-**范围控制**：先做 PlanNode 基类 + fallback + 安全沙箱 + 执行器；RePlan 的代码生成和验证（LLM 生成 plan code）列为紧随其后的第二步。
+spec `docs/superpowers/specs/2026-08-03-phase11a-workflow-engine.md` + `2026-08-03-phase11b-ppt-generation.md`。
 
-**验收**：定义一个 3 层 PlanNode 树，执行到中间节点失败时自动 fallback；节点间 inputs 正确传递；沙箱拒绝 import os/subprocess。
+**验收**：3 层 PlanNode 树中间节点失败自动 fallback；节点间 inputs 显式传递；沙箱拒绝 import os/subprocess；fallback 超限抛错；HookInterrupt 透传。 ✅（测试 `tests/test_workflow_e2e.py`/`test_plan_sandbox.py`/`test_plan_node.py`/`test_workflow_pptx.py`）
+
+**仍 deferred**：RePlan 第二步——LLM 自动生成 plan_code（当前 root.py 全手写）。
 
 ---
 
@@ -212,13 +219,13 @@
 **设计理念**：对齐 Claude Code 的中断恢复模式——**对话历史就是状态**，不需要额外的 `DeepAgentState` 或 `Checkpointer`。LLM 读到中断标记就能理解发生了什么、从哪里继续。与 jiuwenswarm 的 `DeepAgentState` + `save_state/load_state`（为外层循环的循环变量设计）不同，Twinkle 当前是单轮 ReAct 架构，所有「状态」都在对话历史 + TodoStore + 审批文件中，不需要额外的状态持久化机制。
 
 内容：
-- **中断标记写入**：`run_stream` 的 `finally` 块中，如果请求不是正常完成（模型报错、异常中断、用户停止等），往 session 写一条 assistant 标记消息，包含中断原因和当前上下文。这样不管用户下次说什么，LLM 都能看到中断信息。
+- **中断标记写入**：`run()` 的 `finally` 块中，如果请求不是正常完成（模型报错、异常中断、用户停止等），往 session 写一条 assistant 标记消息，包含中断原因和当前上下文。这样不管用户下次说什么，LLM 都能看到中断信息。
 - **`_sanitize_orphan_tool_calls` 升级**：从 session 历史推导更丰富的中断上下文——不仅注入 `[interrupted]`，还包含：被中断的工具名和参数、当前 Todo 进度（从 TodoStore 读）、审批中断的 reason（从 `.approval_pending.json` 读）。
 - **审批中断恢复**：进程崩溃后 `.approval_pending.json` 中的审批记录无法恢复 `asyncio.Future`。改为在 `_sanitize_orphan_tool_calls` 中读取审批记录，注入 `[interrupted: approval was pending (reason: ...)]`，让 LLM 重新决策（重新请求审批或换方案），而非尝试恢复 Future。
 - **模型失败标记**：模型 API 报错/超时后，session 里只有 user 消息没有 assistant 回复。在 `except Exception` 的 `raise` 前往 session append 一条 assistant 标记 `[SYSTEM] 模型调用失败（...）`，避免 LLM 看到连续两条 user 消息而困惑。
 
 **两条恢复路径**：
-- **路径 A（正常中断）**：`run_stream` 的 `finally` 块能执行 → 实时写入中断标记。覆盖：模型报错、用户停止、Gateway 断连、审批中断。
+- **路径 A（正常中断）**：`run()` 的 `finally` 块能执行 → 实时写入中断标记。覆盖：模型报错、用户停止、Gateway 断连、审批中断。
 - **路径 B（进程崩溃）**：`finally` 块来不及执行 → 下次请求时 `_sanitize_orphan_tool_calls` 从历史 + TodoStore + 审批文件推导上下文补写。覆盖：进程崩溃、kill -9、断电。
 
 **用户行为无关性**：中断标记是 assistant 消息，不强制用户继续。用户说「继续」→ LLM 恢复任务；用户说别的 → LLM 回答新问题，不主动提旧任务。与 Claude Code 的 Ctrl+C → 换话题行为一致。
@@ -252,18 +259,25 @@
 
 ---
 
-### Phase 14 — Skill 自进化
+### Phase 14 — Skill 自进化 v1  `[已完成]`
 **目标**：skill 定义能根据运行反馈自动改进。
 
-内容：
-- **轨迹 / 信号记录**：工具结果里的失败信号（`error|exception|失败|超时`）、用户纠正信号（`不对|应该`）；从读 `SKILL.md` 的 tool_call 反推当前活跃 skill。
-- **evolve 闭环**：`detect → dedup → generate`（LLM 产 ≤2 条演进经验，带去重 + 优先级筛选）`→ approve → persist`（每个 skill 一个 `evolutions.json`）。
-- **触发**：手动 `/evolve <skill>` 命令 + 每轮对话后自动 `run_auto_evolution`；`solidify` 把 pending 经验固化回 `SKILL.md` 本体。
-- **前置依赖**：Phase 7 skill 系统 + Phase 5 长期记忆（经验库）。
-- **范围控制**：复杂度高，先做信号检测 + 经验生成 + 手动审批；批量自动固化可后置。
-- **对齐 jiuwenswarm**：`EvolutionRail`（`openjiuwen/harness/rails/evolution/evolution_rail.py`）+ `SkillEvolver`（`jiuwenclaw/evolution/evolver.py`）+ `SignalDetector`（`jiuwenclaw/evolution/signal_detector.py`）。
+**已落地**：`twinkle/agentserver/evolution/` 包——命名自定，不用 jiuwenswarm 的 EvolutionRail/SkillEvolver/SignalDetector。
+- **信号检测**（`signal_detector.py` `ConversationSignalDetector`）：纯正则+路径匹配，不调 LLM。`execution_failure`（扫 tool result 命中 `error/exception/failed/timeout/traceback/...`，默认开）、`script_artifact`（command_exec 等成功且内容>20 字，默认开）、`user_intent`（纠正词 `不对/应该是/...`，默认关）。从 tool_call 参数反推活跃 skill（SKILL.md 路径正则 + skill_name + 内容 fallback）。
+- **经验生成**（`optimizer.py` `SkillExperienceOptimizer`）：LLM 产 JSON draft，硬上限 text≤2/script≤1；去重+优先级筛选委托 prompt（priority「导致失败 > 低效但成功；高频 > 偶发」），`merge_target` 改写已有记录。
+- **打分**（`scorer.py` `ExperienceScorer`）：E(贝叶斯效能)+U(利用率)+F(90 天半衰期新鲜度)+版本不匹配惩罚。
+- **审批**（`orchestrator.py` `OnlineEvolutionOrchestrator`）：手动 pending（内存 dict，**v1 不持久化**）+ `evolve_pending`/`evolve_approve`/`evolve_reject` RPC；`auto_save=true` 走自动落盘（见 deferred——当前单例硬编码 false）。
+- **持久化**（`store.py` `EvolutionStore`）：`<skills>/<name>/evolutions.json` 原子写（temp+fsync+replace）；`render_evolution_markdown` 往 `SKILL.md` 注 `<!-- evolution-index-start -->…end -->` 索引块 + 正文写 `evolution/<section>.md` sidecar + 脚本工件写 `evolution/scripts/`。经验**外挂**，不 merge 进 SKILL.md 正文（`read_pristine_skill_content` 可剥索引块供分享）。
+- **反馈环**：`run_feedback_loop` 注入后对话片段送 LLM 判 used/positive/negative → 回写 UsageStats → 重算分。
+- **蒸馏**：`orchestrator.simplify()` LLM 给 DELETE/MERGE/REFINE/KEEP，分<min_score 且零调用规则前置直接 DELETE。
+- **Hook**：`SkillEvolutionHook`（priority 80，`before_model_call` 注入 top-3 高分经验 + `after_invoke` 遍历所有 skill 跑 evolve）；`server.py` `if EVOLUTION_ENABLED` 条件注册（`evolution.enabled` 默认 false = opt-in）。
+- **暴露**：6 个 E2A RPC（`skills.evolve`/`evolve_list`/`evolve_simplify`/`evolve_pending`/`evolve_approve`/`evolve_reject`），**非 `@tool`**，LLM 不能自主触发。
 
-**验收**：跑失败的任务能产出 skill 演进经验，经审批固化回 `SKILL.md`，后续同类任务成功率提升。
+落地 commit `f89fcb5`。测试 37 个（`tests/test_evolution_{types,signal,store,scorer}.py`，覆盖纯函数部分）。
+
+**验收**：跑失败的任务产出 skill 演进经验，经审批持久化到 sidecar + 索引块，`before_model_call` 注入高分经验。 ✅
+
+**仍 deferred**：① `config.evolution.trigger` 四档挂点切换（声明 but hook 只实现 after_invoke，**死配置**）；② `auto_save`/`max_*`/`scoring.*` 旋钮接通（单例不读 config，**死配置**）；③ pending 持久化跨进程恢复；④ `solidify` 经验回融 SKILL.md 本体（当前外挂）；⑤ `/evolve` 斜杠命令（当前是 RPC 形态）；⑥ optimizer/orchestrator/hook 集成测试；⑦ 成功率回归埋点。
 
 ---
 
@@ -272,7 +286,7 @@
 
 内容：
 - 从 config 读 `mcp.servers`，转 `McpServerConfig`（stdio / sse transport）。
-- 把 MCP server 暴露的工具注册进 `ToolManager`（复用现有 `schemas()` / `execute()` 面，agent_loop 零改动）。
+- 把 MCP server 暴露的工具注册进 `ToolManager`（复用现有 `schemas()` / `execute()` 面，`ReActAgent` 零改动）。
 - MCP 工具受 Phase 4 权限策略统一管控。
 - **为何后置**：MCP 是纯扩展性 nice-to-have（builtin 工具已覆盖读写/搜索/执行），优先级低于让 agent 自主跑起来的能力。
 
@@ -284,7 +298,7 @@
 **目标**：从"单轮 ReAct"升级到"多轮迭代直到任务完成"，支持复杂多步任务的可靠执行。
 
 内容：
-- **DeepAgent 外层循环**：包装现有 `AgentLoop`，在单次 `run_stream` 收敛后判断是否需要继续迭代。`LoopCoordinator` 跟踪迭代计数、token 预算、wall-clock 时间。
+- **DeepAgent 外层循环**：包装现有 `ReActAgent`，在单次 `run()` 收敛后判断是否需要继续迭代。`LoopCoordinator` 跟踪迭代计数、token 预算、wall-clock 时间。
 - **TaskCompletionRail + StopConditionEvaluator**：可组合的停止条件链（OR 语义）：`MaxRoundsEvaluator`（最大轮数）、`TimeoutEvaluator`（超时）、`TokenBudgetEvaluator`（token 预算）、`CompletionPromiseEvaluator`（LLM 主动输出 `<promise>TASK_DONE</promise>` 信号完成）。
 - **TaskPlan 集成**：与 Phase 8a 的 Todo 系统集成，每轮迭代后同步 todo 状态。
 - **对齐 jiuwenswarm**：`DeepAgent`（`openjiuwen/harness/deep_agent.py`）+ `LoopCoordinator`（`openjiuwen/harness/task_loop/loop_coordinator.py`）+ `TaskCompletionRail`（`openjiuwen/harness/rails/task_completion_rail.py`）。
@@ -308,25 +322,29 @@
 
 ---
 
-### Phase 18a — Team 编排 MVP（多 Agent 协作 · 阶段 A）
+### Phase 18a — Team 编排 MVP（多 Agent 协作 · 阶段 A）  `[已完成]`
 
-**目标**：1 leader + 2-3 角色化 member 并发执行子任务，leader 整合结果输出最终答案。
+**目标**：1 leader + 动态角色化 member 并发执行子任务，leader 整合结果输出最终答案。
 
-**设计原则**：Team 不是新执行引擎。ReActAgent step 循环提供多轮迭代，`_try_parallel_tool_calls` 提供并发，SubagentExecutor 是扩展点（加 role 参数 → 按 role 定制 system_prompt + 工具白名单）。Leader 调 `spawn_subagent(role="xxx")` 分派，成员通过共享 workspace 文件交换中间产物。
+**已落地**（commit `f7fcb6a`）：独立 Team 子系统，**不复用 SubagentExecutor**——`twinkle/agentserver/team/` 包：
+- **`TeamManager`**（`manager.py`）：全局单例注册表 session_id→Team，`server.py` 启动 always wired，只在 `request.mode=="team"` 激活。
+- **`Team`**（`manager.py`）：per-session，管理成员 `ReActAgent` + 委派；`_member_key` blake2b 哈希 persona 做跨进程确定性 key，member session id=`{sid}__team_{key}`。
+- **`delegate_to_member(persona, objective, prompt)` @tool**（`team_tools.py`）：thin wrapper 从 `CURRENT_TEAM` ContextVar 读 Team → `Team.delegate()` → `_drive_member()`（复刻 SubagentExecutor 的 child-task ContextVar 隔离 + queue drain + soft/hard/abort timeout + 结果截断，**自己实现不调 SubagentExecutor**）。**persona 由 LLM 动态发明**（自由文本），非预定义 role 名。
+- **ContextVar 桥**（`context.py`）：`CURRENT_TEAM`（`TeamContextHook` priority 45，`before_invoke` 按 mode set）+ `MEMBER_WORKSPACE`（`_drive_member` 在 child task set，file_tools 据此把成员写操作重定向到 team 目录）。
+- **共享 workspace**（`workspace.py`）：`<WORKSPACE>/team/<session_id>/shared/`，`ensure_team_workspace` 幂等创建。
+- **Leader = 纯协调者**（`agent.py`）：`build_leader_system_prompt()`（角色/职责/决策原则/工作流程）+ `_TEAM_LEADER_TOOL_WHITELIST`（仅 delegate_to_member + todo + 只读工具，**刻意排除 command_exec/write_file/edit_file** → leader 必须委派）。
+- **Member**（`agent.py`）：`build_member_system_prompt(persona, workspace)`（团队角色+persona+共享工作区）+ `build_agent_runtime_prompt()`（lean 运行环境，不含用户面身份规则/全局工作区路径）+ `MEMBER_TOOL_WHITELIST`（共享同一套，含执行工具，排除 write_memory/edit_memory、spawn_subagent、delegate_to_member、execute_workflow 防递归）。`is_team_mode` 检测 → 切 leader prompt + 过滤工具白名单。
+- **`_merge_system_messages`**：识别 `# 团队角色` 为身份前缀（与 `# 身份与行为原则` 同列）。
+- **`TeamConfig`**（`config/schema.py`）：仅 `enabled: bool`（**无 MemberSpec YAML**，persona 动态、白名单硬编码 frozenset）。
+- **前端**：`ChatPanel.vue` session header team mode 选择器。
 
-内容：
-- **TeamConfig + MemberSpec**：YAML 驱动的成员角色定义（system_prompt + tools 白名单）。LLM 只传 role 名字，system_prompt/tools 由 executor 在服务端查 config。
-- **SubagentExecutor 角色定制**：`execute_subagent` 按 role 查 `TEAM_MEMBERS`，覆盖子 agent 的 system prompt + 过滤 ToolManager。共享 workspace `team/<session>/shared/` 供成员交换文件。
-- **Leader team 意识**：`build_system_prompt()` 条件追加团队协作段（角色清单 + 委派指南 + 共享路径）。
-- **对齐 jiuwenswarm**：`TeamManager.build_agent_customizer()` 的成员特化逻辑（`jiuwenclaw/agentserver/team/team_runtime_inheritance.py`）+ `team_helpers.py` 的流式集成模式（`jiuwenclaw/agentserver/deep_agent/team_helpers.py`）。
+spec `docs/superpowers/specs/2026-08-05-team-collaboration-analysis.md`。测试 28 个（`tests/test_team.py`：TeamManager 生命周期/成员构建/委派/leader-member prompt/双白名单/ContextVar）。
 
-**前置依赖**：Phase 8（subagent/spawn）+ Phase 16（多轮外层循环）。**注意**：PlanNode（Phase 11）与 Team 无关（PlanNode 是 skill 代码执行引擎，jiuwenswarm 源码零交叉引用），不作为前置。
+**与原规划偏差**：原计划复用 SubagentExecutor + `spawn_subagent(role)` + MemberSpec YAML（role 名→服务端查 config）；实际走独立 Team 子系统 + 动态 persona + 硬编码白名单。前置依赖也变：**不依赖 Phase 16**（Team 直接用 ReActAgent step 循环）。
 
-**不做**：成员间直接通信、任务队列、Monitor 事件流、前端成员面板、team 级崩溃恢复。
+**验收**：用户说"写一份 AI safety 报告" → leader 委派 researcher + writer（各为独立 member agent）→ 产出到 team/shared/ → leader 整合输出。member 调 `delegate_to_member`/`spawn_subagent` 被拒（白名单排除，防递归）。 ✅
 
-**验收**：用户说 "写一份 AI safety 报告" → leader 并行 spawn researcher + writer → 产出到 team/shared/ → leader 整合输出。researcher 子 agent 调 write_file 被拒绝（不在白名单）。
-
-**设计文档**：`docs/superpowers/specs/2026-08-05-team-collaboration-analysis.md` §4。
+**仍 deferred**（Phase 18b）：任务队列+认领、成员间直接通信、Monitor 事件流（14 种事件）、`e2a.team_event` 新帧类型+Gateway 映射、`TeamRecoveryManager` 成员崩溃恢复、前端 Team 面板。
 
 ---
 
@@ -355,23 +373,26 @@
 ### Hook 系统  `[已落地]`
 Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 - **`twinkle/agentserver/hooks/`** 包（`base.py` 的 `AgentHook` 基类 + `manager.py` 的 `HookManager` 优先级排序 + `decorator.py` 的 `@hook` 装饰器）
-- **9 个 builtin hook**：
+- **11 个 builtin hook + `WorkflowContextHook`**（运行时共 12 个，按 priority 降序）：
   - `PermissionHook`（priority 100，before_tool_call 权限拦截）
   - `ContextCompressionHook`（priority 95，before_model_call 自动压缩）
   - `SkillHook`（priority 90，before_model_call skill 注入）
   - `RepeatToolCallDetectorHook`（priority 88，before/after_tool_call 循环检测 + before_model_call 纠偏注入）
+  - `SkillEvolutionHook`（priority 80，before_model_call 注入高分经验 + after_invoke 跑进化；`if EVOLUTION_ENABLED` 条件注册）
   - `MemoryHook`（priority 80，before_model_call 记忆策略注入）
   - `ContextOverflowRecoveryHook`（priority 60，on_model_exception 溢出恢复 + after_model_call 计数重置）
   - `SubagentContextHook`（priority 50，before_invoke ContextVar 桥接）
-  - `LoggingHook`（priority 10，LLM/tool 调用日志）
+  - `WorkflowContextHook`（priority 50，before_invoke 设 `workflow_executor_ctx`；在 `workflow/tools.py`，always wired）
   - `RetryHook`（priority 50，transient 异常自动重试）
+  - `TeamContextHook`（priority 45，before_invoke 按 mode 设 `CURRENT_TEAM` ContextVar；always wired）
+  - `LoggingHook`（priority 10，LLM/tool 调用日志）
 - **事件**：`before_invoke`/`after_invoke`/`before_model_call`/`after_model_call`/`on_model_exception`/`before_tool_call`/`after_tool_call`/`on_tool_exception`
 - **中断机制**：`HookInterrupt`（PermissionHook ASK 挂起/恢复）
 
 ### YAML 配置系统  `[已落地]`
 - **`twinkle/config/`** 包（`schema.py` 的 pydantic 严格模型 + `loader.py` 的 YAML/env 加载）
 - **优先级**：环境变量 > `.env` 文件 > `config.yaml` 默认值
-- **配置块**：agentserver / gateway / workspace / logging / sessions / todos / llm / agent / context_compression / skills / memory / permissions / subagent
+- **配置块**：agentserver / gateway / workspace / logging / sessions / todos / llm / agent / context_compression / skills / memory / permissions / subagent / overflow_recovery / repeat_tool_detection / workflow / evolution / team
 - spec `docs/superpowers/specs/2026-07-27-yaml-config-design.md`
 
 ### Web 工具  `[已落地]`
@@ -379,7 +400,7 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 - **`web_search`**：Tavily 主力 + DDG fallback（无 key 时自动降级）+ max_results 控制
 
 ### 并行工具执行  `[已落地]`
-- `agent_loop.py` 在同一 `tool_calls` 内多个工具调用时使用 `asyncio.gather` 并行执行，不串行等待
+- `agent.py` 的 `ReActAgent` 在同一 `tool_calls` 内多个工具调用时使用 `asyncio.gather` 并行执行，不串行等待
 
 ---
 
@@ -399,14 +420,14 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M9a Todo 增强 | 结构化任务追踪 + 依赖 + 归属 | ✅ |
 | M13 溢出恢复 + 循环检测 | 413 自动重试 + 重复调用纠偏 | ✅ |
 | M14 中断可恢复 | 审批中断后关闭浏览器回来能继续 | ✅ |
-| M15 引擎驱动编排 | PlanNode 树 + fallback + 沙箱 | |
+| M15 引擎驱动编排 | PlanNode 树 + fallback + 沙箱 | ✅ |
 | M16 中断可恢复 | 中断标记 + `_sanitize_orphan_tool_calls` 升级 + 审批中断恢复 | |
 | M17 文件可撤销 | 文件快照 + undo_file + file_history | |
-| M18 skill 会进化 | 失败/纠正信号 → 经验固化回 SKILL.md | |
+| M18 skill 会进化 | 信号检测→经验生成→审批→sidecar 持久化（v1） | ✅ |
 | M19 能挂外部工具 | MCP server 工具接入并受策略管控 | |
 | M20 多轮迭代 | DeepAgent 外层循环 + 停止条件链 | |
 | M21 深度研究 | 多步检索→分析→综合→报告 | |
-| M22a 多 Agent 协作 MVP | leader + 2-3 角色化 member 并发委派 | |
+| M22a 多 Agent 协作 MVP | leader + 动态 persona member 并发委派 | ✅ |
 | M22b 多 Agent 协作完整 | Team 编排 + 成员恢复 + 可靠性监控 | |
 | M12 可观测 | OTel span 链 + 关键指标 | ✅ |
 
