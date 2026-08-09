@@ -1,6 +1,6 @@
 """TeamManager + Team — session-scoped team lifecycle + member delegation.
 
-Phase A alignment with jiuwenswarm:
+Phase 18 alignment with jiuwenswarm:
 - TeamManager: global registry, session_id → Team (cf. TeamManager._team_agents)
 - Team: per-session, manages member ReActAgents (cf. TeamAgent + build_agent_customizer)
 - MEMBER_TOOL_WHITELIST: hardcoded frozenset, all members share (cf. TOOL_WHITELIST)
@@ -9,7 +9,6 @@ Phase A alignment with jiuwenswarm:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import uuid
 from pathlib import Path
@@ -17,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, RetryHook, SkillHook
 from twinkle.agentserver.team.context import CURRENT_TEAM
+from twinkle.agentserver.team.message_box import MessageBox
+from twinkle.agentserver.team.task_store import TeamTaskStore
 from twinkle.agentserver.team.workspace import ensure_team_workspace, team_workspace_dir
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.config import (
@@ -48,6 +49,7 @@ MEMBER_TOOL_WHITELIST: frozenset[str] = frozenset({
     "command_exec",
     "memory_search", "read_memory",
     "todo_create", "todo_update", "todo_list", "todo_get",
+    "claim_task", "complete_task", "list_tasks", "get_task",   # NEW: member 执行 team task
     "list_skill", "read_skill",
     "cron_list_jobs", "cron_create_job", "cron_update_job",
     "cron_delete_job", "cron_run_now",
@@ -58,7 +60,7 @@ class Team:
     """Per-session team instance — manages member ReActAgents and delegation.
 
     Aligns with jiuwenswarm TeamAgent: holds members, handles delegation,
-    maintains shared workspace. Phase A omits: task queue, event bus,
+    maintains shared workspace. Phase 18 omits: task queue, event bus,
     member state machine, Monitor events, SQLite shared state.
     """
 
@@ -76,30 +78,36 @@ class Team:
         self._session_id = session_id
         self._config = config
         self._members: dict[str, "ReActAgent"] = {}
+        self._inboxes: dict[str, MessageBox] = {}    # member_name → MessageBox
+        self._personas: dict[str, str] = {}         # member_name → persona (同名冲突校验)
         self.workspace = ensure_team_workspace(session_id)
+        self.task_store = TeamTaskStore(f"team:{session_id}")
 
     # ── member key ──────────────────────────────────────────
 
     @staticmethod
-    def _member_key(persona: str) -> str:
-        """Stable, cross-process deterministic key from persona string."""
-        return hashlib.blake2b(persona.encode(), digest_size=8).hexdigest()
+    def _member_key(member_name: str) -> str:
+        """member_name 即 key(spec §3.1:稳定可读,替代 persona hash)。"""
+        return member_name
 
-    def _member_session_id(self, persona: str) -> str:
-        return f"{self._session_id}__team_{self._member_key(persona)}"
+    def _member_session_id(self, member_name: str) -> str:
+        return f"{self._session_id}__team_{member_name}"
 
     # ── member lifecycle ────────────────────────────────────
 
-    async def _get_or_create_member(self, persona: str) -> "ReActAgent":
-        key = self._member_key(persona)
-        if key in self._members:
-            return self._members[key]
+    async def _ensure_member(self, member_name: str, persona: str) -> "ReActAgent":
+        if member_name in self._members:
+            if self._personas[member_name] != persona:
+                raise ValueError(
+                    f"member_name '{member_name}' already used for a different persona")
+            return self._members[member_name]
 
-        member = await self._build_member(persona)
-        self._members[key] = member
+        member = await self._build_member(member_name, persona)
+        self._members[member_name] = member
+        self._personas[member_name] = persona
         return member
 
-    async def _build_member(self, persona: str) -> "ReActAgent":
+    async def _build_member(self, member_name: str, persona: str) -> "ReActAgent":
         """Build a ReActAgent customized for the given persona.
 
         Equivalent to jiuwenswarm build_agent_customizer():
@@ -116,29 +124,36 @@ class Team:
 
         # 2. Pre-seed session with structured team system prompt
         #    Sections: team_role → persona → workspace → base prompt
-        member_sid = self._member_session_id(persona)
+        member_sid = self._member_session_id(member_name)
         await self._store.create_session(member_sid)
         system_prompt = build_member_system_prompt(
             persona=persona,
             workspace=str(self.workspace),
+            member_name=member_name,
         )
         await self._store.append(member_sid, {"role": "system", "content": system_prompt})
 
-        # 3. Build ReActAgent
+        # 3. Build ReActAgent — inbox wired via constructor so send_member
+        #    (writes to self._inboxes[member_name]) and the run-loop drain
+        #    (reads agent._inbox) see the same MessageBox.
+        if member_name not in self._inboxes:
+            self._inboxes[member_name] = MessageBox()
+        inbox = self._inboxes[member_name]
         hooks = [SkillHook(), MemoryHook(), LoggingHook(), RetryHook()]
         return ReActAgent(
             self._llm, self._store, tm,
             hooks=tuple(hooks),
             max_steps=SUBAGENT_MAX_STEPS,
+            inbox=inbox,
         )
 
     # ── delegation ──────────────────────────────────────────
 
-    async def delegate(self, persona: str, objective: str,
-                       prompt: str = "") -> str:
-        """Delegate a task to a member, run to convergence, return final content."""
-        member = await self._get_or_create_member(persona)
-        member_sid = self._member_session_id(persona)
+    async def delegate(self, member_name: str, persona: str,
+                       objective: str, prompt: str = "") -> str:
+        """Delegate to a member by name; builds+starts if first time. Run to convergence."""
+        member = await self._ensure_member(member_name, persona)
+        member_sid = self._member_session_id(member_name)
         query = f"{objective}\n\n{prompt}" if prompt else objective
 
         from twinkle.agentserver.agent import AgentRequest
@@ -147,10 +162,21 @@ class Team:
             request_id=f"{self._session_id}__team_{uuid.uuid4().hex[:8]}",
             query=query,
         )
-        return await self._drive_member(member, request)
+        return await self._drive_member(member, request, member_name)
+
+    async def send_member(self, member_name: str, content: str) -> str:
+        """Leader → member 单向 steer:投递到 member 信箱,不阻塞。
+
+        member 跑时 run 循环每步 drain;idle 时滞留信箱,下次 delegate 启动时 drain(无害)。
+        """
+        if member_name not in self._inboxes:
+            raise KeyError(f"unknown member: {member_name}")
+        self._inboxes[member_name].put(content)
+        return f"sent to {member_name}"
 
     async def _drive_member(self, member: "ReActAgent",
-                            request: "AgentRequest") -> str:
+                            request: "AgentRequest",
+                            member_name: str = "") -> str:
         """Run member agent to convergence; return final content.
 
         Same pattern as SubagentExecutor._drive_child: child task for
@@ -159,8 +185,11 @@ class Team:
         queue: asyncio.Queue = asyncio.Queue()
 
         async def _run():
-            from twinkle.agentserver.team.context import MEMBER_WORKSPACE
+            from twinkle.agentserver.team.context import (
+                MEMBER_WORKSPACE, CURRENT_MEMBER_NAME)
             MEMBER_WORKSPACE.set(self.workspace)
+            if member_name:
+                CURRENT_MEMBER_NAME.set(member_name)
             try:
                 async for frame in member.run(request):
                     await queue.put(frame)
@@ -197,6 +226,16 @@ class Team:
                 await asyncio.wait_for(runner, timeout=SUBAGENT_ABORT_TIMEOUT)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
+            # member run 结束,释放其 claim 但未 complete 的 task(spec §7)
+            if member_name:
+                try:
+                    released = await self.task_store.release_claims(member_name)
+                    if released:
+                        log.info("released %d claimed task(s) of member %s",
+                                 released, member_name)
+                except Exception as exc:
+                    log.warning("release_claims failed for %s: %s",
+                                member_name, exc)
 
     def cleanup(self) -> None:
         self._members.clear()
@@ -206,7 +245,7 @@ class TeamManager:
     """Global singleton registry: session_id → Team.
 
     Aligns with jiuwenswarm TeamManager._team_agents: dict[session_id, TeamAgent].
-    Phase A omits: monitors, stream tasks, evolution rails, distributed runtime.
+    Phase 18 omits: monitors, stream tasks, evolution rails, distributed runtime.
     """
 
     def __init__(
@@ -222,7 +261,7 @@ class TeamManager:
         self._config = config
         self._teams: dict[str, Team] = {}
 
-    def get_or_create_team(self, session_id: str) -> Team:
+    def ensure_team(self, session_id: str) -> Team:
         """Get or create the Team instance for a session."""
         if session_id not in self._teams:
             self._teams[session_id] = Team(

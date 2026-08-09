@@ -50,8 +50,8 @@
 - **Phase 10（HITL 中断/恢复）已落地**：`ApprovalPendingRecord` + `ApprovalRegistry.save_pending/clear_pending/get_pending` + `approval.check_pending` RPC + 前端重连恢复审批卡片。对应里程碑 M14 ✅。
 - **Phase 11（Workflow 引擎 = PlanNode 递归执行树）已落地**：`workflow/` 包（`PlanNode` ABC + `WorkflowExecutor` + `_SAFE_BUILTINS` + `PlanCodeValidator` + `_fallback_wrapper`→SubagentExecutor + HookInterrupt 透传）+ `execute_workflow` 工具 + `WorkflowContextHook` + 内置 `pptx-craft` 7 节点流水线 + seed 机制。对应里程碑 M15 ✅。
 - **Phase 14（Skill 自进化 v1）已落地**：`evolution/` 包（`ConversationSignalDetector`/`SkillExperienceOptimizer`/`OnlineEvolutionOrchestrator`/`EvolutionStore`/`ExperienceScorer`）+ `SkillEvolutionHook`（条件注册）+ 6 个 RPC + E/U/F 打分 + 反馈环 + 蒸馏。对应里程碑 M18 ✅。
-- **Phase 18a（Team 编排 MVP）已落地**：`team/` 包（`TeamManager` + `Team`）+ `delegate_to_member` 工具 + `TeamContextHook` + Leader/Member 双白名单 + 共享 workspace。对应里程碑 M22a ✅。
-- **Phase 12–13、15–17、18b 为后续规划**：Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 18b（Team 编排完整版）。参考 jiuwenswarm 对应能力设计。
+- **Phase 18（Team 编排 MVP）已落地**：`team/` 包（`TeamManager` + `Team`）+ `delegate_to_member` 工具 + `TeamContextHook` + Leader/Member 双白名单 + 共享 workspace。对应里程碑 M22 ✅。
+- **Phase 12–13、15–17、19 为后续规划**：Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 19（Team 协作核心）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -157,7 +157,7 @@
 
 **验收**：主 agent 调 `spawn_subagent` 委派子任务 → 子 agent 独立跑完 ReAct 收敛 → 结果回灌 → 主 agent 总结给用户；超时/异常有兜底不挂死主循环。 ✅
 
-**仍 deferred**：`fork_agent`（消息前缀继承）、流式转发（事件转发到父流）、skill 声明角色（`SubagentConfig` frontmatter）、多级嵌套。team 编排见 Phase 18a（已落地 MVP）。
+**仍 deferred**：`fork_agent`（消息前缀继承）、流式转发（事件转发到父流）、skill 声明角色（`SubagentConfig` frontmatter）、多级嵌套。team 编排见 Phase 18（已落地 MVP）。
 
 ---
 
@@ -322,7 +322,7 @@ spec `docs/superpowers/specs/2026-08-03-phase11a-workflow-engine.md` + `2026-08-
 
 ---
 
-### Phase 18a — Team 编排 MVP（多 Agent 协作 · 阶段 A）  `[已完成]`
+### Phase 18 — Team 编排 MVP（多 Agent 协作）  `[已完成]`
 
 **目标**：1 leader + 动态角色化 member 并发执行子任务，leader 整合结果输出最终答案。
 
@@ -344,25 +344,29 @@ spec `docs/superpowers/specs/2026-08-05-team-collaboration-analysis.md`。测试
 
 **验收**：用户说"写一份 AI safety 报告" → leader 委派 researcher + writer（各为独立 member agent）→ 产出到 team/shared/ → leader 整合输出。member 调 `delegate_to_member`/`spawn_subagent` 被拒（白名单排除，防递归）。 ✅
 
-**仍 deferred**（Phase 18b）：任务队列+认领、成员间直接通信、Monitor 事件流（14 种事件）、`e2a.team_event` 新帧类型+Gateway 映射、`TeamRecoveryManager` 成员崩溃恢复、前端 Team 面板。
+**仍 deferred**：任务队列+认领+member 身份+leader→member steer（Phase 19 做，见下）、成员间直接通信、Monitor 事件流（14 种事件）、`e2a.team_event` 新帧类型+Gateway 映射、`TeamRecoveryManager` 成员崩溃恢复、前端 Team 面板（均更后 defer）。
 
 ---
 
-### Phase 18b — Team 编排完整版（多 Agent 协作 · 阶段 B）
+### Phase 19 — Team 协作核心（多 Agent 协作）
 
-**目标**：对齐 jiuwenswarm Team 六大维度——任务队列、成员通信、Monitor 事件流、崩溃恢复、前端面板。
+**目标**：在 Phase 18 同步委派之上加任务队列编排 + leader→member steer 注入 + member 身份，跑通单进程内任务驱动型多 agent 协作核心机制（任务分解/认领/依赖/状态流转/运行时动态注入/寻址）。**显式 defer** 成员间 P2P/Broadcast、Monitor 事件流、崩溃恢复、前端面板——需 member 常驻/并发或属可观测/可靠性/前端范畴，另阶段补。
 
-内容：
-- **TeamTaskStore**：任务队列 + 认领（claim）+ 完成/取消 + 依赖解除（基于 TodoStore 数据模型扩展）
-- **MemberMessageBus**：P2P 消息 + Broadcast（在 ReActAgent 中注入 before_model_call hook 把消息 prepend 到 session）
-- **TeamMonitorHandler**：从 member Event 收集 + 广播 14 种事件类型
-- **新 E2A 帧类型 `e2a.team_event`**：Gateway 映射 + 前端 Team 面板（成员状态 / 任务进度 / 实时活动）
-- **TeamRecoveryManager**：member 崩溃自动重启（Phase 12 中断标记 + per-member 孤儿 tool 清理）
-- **对齐 jiuwenswarm**：`TeamManager`（`jiuwenclaw/agentserver/team/team_manager.py`）+ `RecoveryManager`（`openjiuwen/agent_teams/agent/recovery_manager.py`）+ `ReliabilityMonitor`（`openjiuwen/agent_teams/reliability/monitor.py`）。
+内容（spec `docs/superpowers/specs/2026-08-07-phase19-team-collaboration-core-design.md`）：
+- **TeamTaskStore**（`team/task_store.py`）：复用 TodoStore 单例（按 team `session_id` 存），加编排层——claim 独占校验、依赖解除、依赖图环检测（DFS）。复用 4 态（pending/in_progress/completed/cancelled）+ blocked 派生态，不新增状态。
+- **member 身份**：`member_name`（leader 显式命名，稳定可读）替代 persona hash 作 member_key/寻址；persona 降为 prompt 个性化。`_member_key`/`_member_session_id`/`delegate`/`delegate_to_member` 签名加 `member_name`。
+- **member inbox + steer 注入**：每 member 一个 `asyncio.Queue`；`ReActAgent.__init__` 加可选 `inbox`，run 循环每步 drain，新消息作 user input 注入当前 round **不进 session store**（不污染历史/不膨胀）。leader `send_message(to=member_name, content)` 投递。
+- **leader 不收消息通道**：复用 Phase 18 同步 delegate；member→leader 全走 task list——求助=标 blocked+原因+主动结束 run → delegate 返回 → leader `list_tasks` 处理。
+- **team task 工具**（`team_tools.py`）：`create_task`/`claim_task`/`complete_task`/`cancel_task`/`list_tasks`/`get_task`/`send_message`，按 Leader/Member 双白名单配置（leader 只协调不 claim/complete，member 不能 create/cancel）。
+- **member 退出释放认领**：member run 结束（正常/超时/错误）→ Team 自动释放其 claim 未 complete 的 task（owner 清空、回 pending）。
 
-**前置依赖**：阶段 A 跑通 + Phase 12（中断恢复）。
+**仍 deferred**（spec §10）：member 间 P2P/Broadcast（需 member 常驻/并发）、plan mode、stale sweep、Monitor 事件流（14 种）+ `e2a.team_event` 新帧+Gateway 映射、TeamRecoveryManager 成员崩溃恢复、前端 Team 面板、team 记忆只读优化（给 Leader 加 `write_memory`）。
 
-**验收**：3 个 agent 组成团队（研究员+写作员+审校员）→ 协作完成报告 → 一个成员崩溃后自动恢复 → 最终报告质量优于单 agent。
+**演进方向**（spec §11）：Phase 19 是向 jiuwenswarm 收敛的第一步；后续补编排能力统一做成独立组件（SpawnManager/RecoveryManager/CoordinationKernel/StreamController/SessionManager/EventBus），Team 保持纯容器不养厚（不养成「没继承 BaseAgent 的伪 TeamAgent」）。当前 Team 不继承 agent 的「干净」部分是能力不足副产品（不 invoke Team 故无 LSP 张力），不是设计胜利。追上 jiuwenswarm 的标志：team 整体可 invoke/stream + member 自治 + 崩溃恢复 + 事件可观测。
+
+**前置依赖**：Phase 18 跑通（复用 delegate 通路 + Team/TodoStore 基建；不依赖 Phase 12，崩溃恢复另阶段补）。
+
+**验收**：用户要 team「调研 X 并写报告」→ leader `create_task`(T1 调研, T2 写报告 `blocked_by=[T1]`) + `create_member`(researcher/writer) → researcher claim T1→complete（触发 T2 依赖解除）→ 结束 run → leader `list_tasks` → delegate writer → writer claim T2→`get_task(T1)` 拿结果→写报告→complete → 全完成→leader 综合回答。测试覆盖状态机/claim 独占/环检测/依赖解除/退出释放/steer 不进 session/求助流转/超时（spec §8，8 类）。
 
 ---
 
@@ -427,8 +431,8 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M19 能挂外部工具 | MCP server 工具接入并受策略管控 | |
 | M20 多轮迭代 | DeepAgent 外层循环 + 停止条件链 | |
 | M21 深度研究 | 多步检索→分析→综合→报告 | |
-| M22a 多 Agent 协作 MVP | leader + 动态 persona member 并发委派 | ✅ |
-| M22b 多 Agent 协作完整 | Team 编排 + 成员恢复 + 可靠性监控 | |
+| M22 多 Agent 协作 MVP | leader + 动态 persona member 并发委派 | ✅ |
+| M23 多 Agent 协作核心 | Team 任务队列 + 成员通信 + 认领/依赖 | |
 | M12 可观测 | OTel span 链 + 关键指标 | ✅ |
 
 ---

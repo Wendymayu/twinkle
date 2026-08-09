@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import AsyncIterator
+from typing import AsyncIterator, Protocol
 
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
 from twinkle.agentserver.sessions import SessionStore
@@ -66,6 +66,14 @@ class AgentRequest:
     query: str
     channel: str = "web"
     mode: str = ""  # "" = normal, "team" = team collaboration
+
+
+class _Inbox(Protocol):
+    """信箱协议:member 信箱有 drain()→list[str]。MessageBox 实现。
+
+    agent.py 不 import team 包(避免循环);leader 传 None,member 传 MessageBox。
+    """
+    def drain(self) -> list[str]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -229,10 +237,12 @@ def build_leader_system_prompt() -> str:
 - **委派后不催促**: 成员需要时间执行，等待结果返回后再审查
 
 ## 工作流程
-1. 分析需求 → 用 todo_create 规划子任务
-2. 委派任务 → delegate_to_member(persona="角色描述", objective="任务目标", prompt="补充上下文")
-3. 审查结果 → 成员返回后检查质量，不满足则追加委派修正
-4. 整合输出 → 汇总所有结果，向用户交付最终答案
+1. 分析需求 → 用 create_task 拆解子任务入队(可设 blocked_by 依赖)
+2. 委派成员 → delegate_to_member(member_name="成员名", persona="角色", objective="认领并执行 queue 中你能做的 task") 启动成员
+3. 监控进度 → list_tasks 查队列状态,get_task 看单个 task 详情(含 help_reason 求助标记)
+4. 调整方向 → send_member(member_name, message) 向运行中成员发 steer(非阻塞,只调方向不派任务)
+5. 审查结果 → 成员返回后检查质量,不满足则追加委派或 cancel_task 重派
+6. 整合输出 → 汇总所有结果,向用户交付最终答案
 
 # 运行环境
 
@@ -250,16 +260,22 @@ def build_leader_system_prompt() -> str:
 
 # 工具使用指南
 
-## 核心工具：delegate_to_member
+## 核心工具
 
-delegate_to_member(persona, objective, prompt) 是你的核心工具。
-- **persona**: 成员角色描述（如"Python 后端工程师，专长 FastAPI 和数据库设计"），越具体成员能力越匹配
-- **objective**: 任务目标，一句话说清要产出什么
-- **prompt**: 可选，补充上下文、约束条件或参考信息
+delegate_to_member(member_name, persona, objective, prompt) 启动一个团队成员执行任务。第一次委派某 member_name 会创建该成员。
+- **member_name**: 成员名(简短英文,如 researcher),稳定可读,用于 task owner/消息寻址
+- **persona**: 成员角色描述,越具体成员能力越匹配
+- **objective**: 任务目标,一句话说清要产出什么。主路径用"认领并执行 queue 中你能做的 task"
+- **prompt**: 可选,补充上下文
+
+create_task(subject, blocked_by) 创建共享任务入队;成员通过 claim_task 认领、complete_task 完成。
+send_member(member_name, message) 向运行中成员发 steer(非阻塞,调整方向用,不派任务——任务走 create_task)。
+list_tasks / get_task 查队列与详情(含 help_reason 求助标记,成员遇困时会标)。
 
 ## 你可以直接使用的工具
 
-**协调类**: todo_create、todo_update、todo_list、todo_get — 规划与追踪
+**协调类**: delegate_to_member、create_task、cancel_task、list_tasks、get_task、send_member — team 编排
+**规划类**: todo_create、todo_update、todo_list、todo_get — 个人规划追踪
 **只读类**: read_file、list_files、glob、web_search、web_fetch — 了解上下文
 **查询类**: memory_search、read_memory、list_skill、read_skill、cron_list_jobs
 
@@ -272,7 +288,8 @@ delegate_to_member(persona, objective, prompt) 是你的核心工具。
 
 # ── Member system prompt (aligned with jiuwenswarm sections) ────
 
-def build_member_system_prompt(*, persona: str, workspace: str) -> str:
+def build_member_system_prompt(*, persona: str, workspace: str,
+                               member_name: str = "") -> str:
     """Build a member's system prompt with team identity front and center.
 
     Aligned with jiuwenswarm's section model:
@@ -284,13 +301,15 @@ def build_member_system_prompt(*, persona: str, workspace: str) -> str:
     NOT the full user-facing build_system_prompt(). Members don't need
     user-facing identity/behavior rules or global workspace paths.
     """
+    name_line = f"（成员名: `{member_name}`）" if member_name else ""
     return f"""# 团队角色
 
-你是 Teammate，{persona}
+你是 Teammate{name_line}，{persona}
 
 作为团队成员：
 - Leader 定义"做什么"，你来决定"怎么做"
 - 聚焦任务目标，自主搜索、执行、产出
+- 从 queue 认领 task（claim_task）、完成后调 complete_task 回报结果；遇困难用 complete_task(help_reason=...) 求助 Leader
 - 任务完成后给出清晰总结，让 Leader 能直接整合
 
 # 当前人设
@@ -317,6 +336,8 @@ def build_member_system_prompt(*, persona: str, workspace: str) -> str:
 _TEAM_LEADER_TOOL_WHITELIST: frozenset[str] = frozenset({
     # Coordination
     "delegate_to_member",
+    "create_task", "cancel_task", "list_tasks", "get_task",   # NEW: team task 编排
+    "send_member",                                            # NEW: leader→member steer
     # Planning & tracking
     "todo_create", "todo_update", "todo_list", "todo_get",
     # Read-only inspection
@@ -353,6 +374,7 @@ class ReActAgent:
         *,
         hooks: tuple[AgentHook, ...] = (),
         max_steps: int | None = None,
+        inbox: _Inbox | None = None,
     ) -> None:
         self._llm = llm
         self._session_store = store
@@ -361,6 +383,7 @@ class ReActAgent:
         for h in hooks:
             self._hook_manager.register_hook(h)
         self._max_steps = max_steps if max_steps is not None else MAX_STEPS
+        self._inbox = inbox
 
     @property
     def session_store(self) -> SessionStore:
@@ -476,6 +499,10 @@ class ReActAgent:
         full_text = ""
         for _step in range(self._max_steps):
             msgs = self._session_store.get_messages(session_id)
+            if self._inbox is not None:
+                new_messages = self._inbox.drain()
+                if new_messages:
+                    msgs = list(msgs) + [{"role": "user", "content": m} for m in new_messages]
 
             # -- BEFORE_MODEL_CALL -- #
             tool_schemas = self._tool_manager.schemas()

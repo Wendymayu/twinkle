@@ -1,4 +1,4 @@
-"""Tests for Team Phase A: TeamManager, Team, delegate_to_member, wiring."""
+"""Tests for Team Phase 18: TeamManager, Team, delegate_to_member, wiring."""
 
 import asyncio
 import tempfile
@@ -46,7 +46,7 @@ class _ScriptedLLM:
 
 def _team_with_scripted_llm(store, scripts, config=None):
     mgr = _team_manager(store, config=config)
-    team = mgr.get_or_create_team("s1")
+    team = mgr.ensure_team("s1")
     team._llm = _ScriptedLLM(scripts)
     return team
 
@@ -72,7 +72,7 @@ def test_member_key_stable():
     k2 = Team._member_key("researcher")
     assert k1 == k2
     assert isinstance(k1, str)
-    assert len(k1) == 16  # blake2b digest_size=8 -> 16 hex chars
+    assert k1 == "researcher"  # member_name is the key (spec §3.1)
 
 
 def test_member_key_different_persona():
@@ -83,23 +83,23 @@ def test_member_key_different_persona():
 
 # ── TeamManager lifecycle ─────────────────────────────────────
 
-def test_team_manager_get_or_create(session_store):
+def test_team_manager_ensure_team(session_store):
     mgr = _team_manager(session_store)
-    t1 = mgr.get_or_create_team("s1")
-    t2 = mgr.get_or_create_team("s1")
+    t1 = mgr.ensure_team("s1")
+    t2 = mgr.ensure_team("s1")
     assert t1 is t2  # same session → same Team
 
 
 def test_team_manager_different_sessions(session_store):
     mgr = _team_manager(session_store)
-    t1 = mgr.get_or_create_team("s1")
-    t2 = mgr.get_or_create_team("s2")
+    t1 = mgr.ensure_team("s1")
+    t2 = mgr.ensure_team("s2")
     assert t1 is not t2
 
 
 def test_team_manager_destroy(session_store):
     mgr = _team_manager(session_store)
-    mgr.get_or_create_team("s1")
+    mgr.ensure_team("s1")
     assert "s1" in mgr._teams
     mgr.destroy_team("s1")
     assert "s1" not in mgr._teams
@@ -115,11 +115,11 @@ def test_team_manager_destroy_nonexistent_noop(session_store):
 def test_build_member_filtered_tools(session_store):
     mgr = _team_manager(session_store)
     mgr._llm = _ScriptedLLM([])
-    team = mgr.get_or_create_team("s1")
+    team = mgr.ensure_team("s1")
     team._llm = _ScriptedLLM([])
 
     async def _run():
-        return await team._build_member("tester")
+        return await team._build_member("tester", "tester persona")
     member = asyncio.run(_run())
 
     tool_names = {t.card.name for t in member._tool_manager.list()}
@@ -134,11 +134,11 @@ def test_build_member_filtered_tools(session_store):
 def test_build_member_persona_in_system_prompt(session_store):
     mgr = _team_manager(session_store)
     mgr._llm = _ScriptedLLM([])
-    team = mgr.get_or_create_team("s1")
+    team = mgr.ensure_team("s1")
     team._llm = _ScriptedLLM([])
 
     async def _run():
-        await team._build_member("researcher")
+        await team._build_member("researcher", "金融分析师")
     asyncio.run(_run())
 
     member_sid = team._member_session_id("researcher")
@@ -150,11 +150,11 @@ def test_build_member_persona_in_system_prompt(session_store):
 def test_build_member_workspace_in_prompt(session_store):
     mgr = _team_manager(session_store)
     mgr._llm = _ScriptedLLM([])
-    team = mgr.get_or_create_team("s1")
+    team = mgr.ensure_team("s1")
     team._llm = _ScriptedLLM([])
 
     async def _run():
-        await team._build_member("tester")
+        await team._build_member("tester", "tester persona")
     asyncio.run(_run())
 
     member_sid = team._member_session_id("tester")
@@ -169,7 +169,7 @@ def test_delegate_runs_member_to_completion(session_store):
         [TextDelta("analysis done"), Finish("stop",
                                             {"role": "assistant", "content": "analysis done", "tool_calls": None})],
     ])
-    result = asyncio.run(team.delegate("researcher", "analyze data"))
+    result = asyncio.run(team.delegate("researcher", "researcher persona", "analyze data"))
     assert "analysis done" in result
 
 
@@ -180,12 +180,29 @@ def test_delegate_reuses_member(session_store):
         [TextDelta("result2"), Finish("stop",
                                       {"role": "assistant", "content": "result2", "tool_calls": None})],
     ])
-    r1 = asyncio.run(team.delegate("researcher", "task1"))
-    r2 = asyncio.run(team.delegate("researcher", "task2"))
+    r1 = asyncio.run(team.delegate("researcher", "researcher persona", "task1"))
+    r2 = asyncio.run(team.delegate("researcher", "researcher persona", "task2"))
     assert "result1" in r1
     assert "result2" in r2
     # same persona -> same member key -> only one member in cache
     assert len(team._members) == 1
+
+
+def test_member_run_end_releases_uncompleted_claim(session_store, isolated_todo_store):
+    team = _team_with_scripted_llm(session_store, [
+        # member run 一轮就 stop(claim 了但没 complete)
+        [TextDelta("claimed"), Finish("stop", {"role": "assistant",
+          "content": "claimed", "tool_calls": None})],
+    ])
+    # 建一个 task 并手动让 member claim(member 没真调工具,模拟)
+    t = asyncio.run(team.task_store.create_task("T1"))
+    asyncio.run(team.task_store.claim_task(t.id, "researcher"))
+    # member run 结束(delegate 跑完)
+    asyncio.run(team.delegate("researcher", "researcher persona", "claim T1"))
+    # member run 结束 → T1 应被释放(未 complete)
+    after = asyncio.run(team.task_store.get_task(t.id))
+    assert after.status == "pending"
+    assert after.owner == ""
 
 
 # ── delegate_to_member tool ───────────────────────────────────
@@ -196,7 +213,7 @@ def test_delegate_to_member_no_contextvar():
 
     token = CURRENT_TEAM.set(None)
     try:
-        result = asyncio.run(delegate_to_member.func("researcher", "task"))
+        result = asyncio.run(delegate_to_member.func("researcher", "researcher persona", "task"))
         assert "team unavailable" in result
     finally:
         CURRENT_TEAM.reset(token)
@@ -306,6 +323,21 @@ def test_leader_whitelist_has_coordination_tools():
     assert "todo_create" in _TEAM_LEADER_TOOL_WHITELIST
 
 
+def test_leader_whitelist_has_team_task_tools():
+    from twinkle.agentserver.agent import _TEAM_LEADER_TOOL_WHITELIST
+    for name in ("create_task", "cancel_task", "list_tasks", "get_task",
+                 "send_member", "delegate_to_member"):
+        assert name in _TEAM_LEADER_TOOL_WHITELIST, f"missing {name}"
+
+
+def test_member_whitelist_has_claim_complete():
+    for name in ("claim_task", "complete_task", "list_tasks", "get_task"):
+        assert name in MEMBER_TOOL_WHITELIST, f"missing {name}"
+    # member 不应能 create/cancel/send_member(协调权归 leader)
+    for name in ("create_task", "cancel_task", "send_member"):
+        assert name not in MEMBER_TOOL_WHITELIST, f"{name} should not be in member whitelist"
+
+
 def test_base_prompt_omits_team_section():
     """build_system_prompt (normal mode) does NOT include team/leader content."""
     from twinkle.agentserver.agent import build_system_prompt
@@ -366,3 +398,47 @@ def test_member_prompt_has_team_sections():
     assert "/shared" in prompt
     # Team sections come before runtime prompt
     assert prompt.index("团队角色") < prompt.index("运行环境")
+
+
+# ── member_name addressing (Task 3) ───────────────────────────────
+
+def test_member_session_id_uses_member_name(session_store):
+    team = _team_with_scripted_llm(session_store, [])
+    sid = team._member_session_id("researcher")
+    assert "researcher" in sid
+    assert sid.startswith("s1__team_")  # _session_id="s1"
+
+
+def test_ensure_member_keys_by_member_name(session_store):
+    team = _team_with_scripted_llm(session_store, [])
+    asyncio.run(team._ensure_member("researcher", "金融分析师"))
+    assert "researcher" in team._members
+    assert "researcher" in team._inboxes
+
+
+def test_ensure_member_rejects_same_name_different_persona(session_store):
+    team = _team_with_scripted_llm(session_store, [])
+    asyncio.run(team._ensure_member("researcher", "金融分析师"))
+    with pytest.raises(Exception):
+        asyncio.run(team._ensure_member("researcher", "different persona"))
+
+
+def test_send_member_puts_into_inbox(session_store):
+    team = _team_with_scripted_llm(session_store, [])
+    asyncio.run(team._ensure_member("researcher", "金融分析师"))
+    asyncio.run(team.send_member("researcher", "add risk section"))
+    assert team._inboxes["researcher"].drain() == ["add risk section"]
+
+
+def test_send_member_unknown_name_errors(session_store):
+    team = _team_with_scripted_llm(session_store, [])
+    with pytest.raises(KeyError):
+        asyncio.run(team.send_member("nobody", "msg"))
+
+
+def test_member_prompt_contains_member_name(session_store):
+    team = _team_with_scripted_llm(session_store, [])
+    asyncio.run(team._ensure_member("researcher", "金融分析师"))
+    member_sid = team._member_session_id("researcher")
+    history = session_store.get_history(member_sid)
+    assert "researcher" in history[0]["content"]

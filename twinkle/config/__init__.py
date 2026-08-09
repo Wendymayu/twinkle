@@ -113,5 +113,5 @@ EVOLUTION_SIGNAL_FAILURE = settings.evolution.signals.execution_failure
 EVOLUTION_SIGNAL_SCRIPT = settings.evolution.signals.script_artifact
 EVOLUTION_SIGNAL_USER_INTENT = settings.evolution.signals.user_intent
 
-# --- team (Phase 18a) ---
+# --- team (Phase 18) ---
 TEAM_ENABLED = settings.team.enabled

@@ -1,4 +1,4 @@
-# Twinkle Agent Team 协作 · 阶段 A 架构设计
+# Phase 18 — Twinkle Agent Team 协作 MVP
 
 > 日期：2026-08-05 · 状态：设计完成，待实现
 > 对齐：jiuwenswarm `TeamManager` + `TeamAgent`
@@ -26,14 +26,14 @@
 
 ### 0.3 协作要解决的核心问题
 
-| 问题 | 大白话 | 术语/机制 | 18a | 后续阶段 |
+| 问题 | 大白话 | 术语/机制 | Phase 18 | 后续阶段 |
 |---|---|---|---|---|
-| **分工** | 队长把大活拆成小活分给队员 | 任务分解、`create_task` | 部分（LLM 自决策拆） | 18b task queue |
-| **协调/依赖** | 子活有先后（B 等 A 做完） | 依赖图、`blocked_by`、环检测、依赖解除 | ❌ | 18b |
-| **通信** | 队员/队长之间怎么传话 | mailbox、P2P/Broadcast、steer | ❌（靠共享 workspace） | 18b leader→member steer；member 间 defer |
-| **状态管理** | 任务有生命周期（待干/在做/做完），防两人抢同一活 | 状态机、claim 独占、退出释放认领 | ❌ | 18b |
-| **身份** | 队员怎么被叫到、被认领 | `member_name`、persona | 部分（persona hash，不可读） | 18b `member_name` |
-| **容错** | 队员死了/卡住怎么办 | 超时、释放认领、Recovery | 部分（`_drive_member` 超时） | 18b +释放认领；Recovery defer |
+| **分工** | 队长把大活拆成小活分给队员 | 任务分解、`create_task` | 部分（LLM 自决策拆） | Phase 19 task queue |
+| **协调/依赖** | 子活有先后（B 等 A 做完） | 依赖图、`blocked_by`、环检测、依赖解除 | ❌ | Phase 19 |
+| **通信** | 队员/队长之间怎么传话 | mailbox、P2P/Broadcast、steer | ❌（靠共享 workspace） | Phase 19 leader→member steer；member 间 defer |
+| **状态管理** | 任务有生命周期（待干/在做/做完），防两人抢同一活 | 状态机、claim 独占、退出释放认领 | ❌ | Phase 19 |
+| **身份** | 队员怎么被叫到、被认领 | `member_name`、persona | 部分（persona hash，不可读） | Phase 19 `member_name` |
+| **容错** | 队员死了/卡住怎么办 | 超时、释放认领、Recovery | 部分（`_drive_member` 超时） | Phase 19 +释放认领；Recovery defer |
 
 **不解决的后果举例**：分工没 task queue → leader 只能口头委派，任务结果没法跨 member 流转；依赖没依赖图 → member 乱序做，B 在 A 没好时开干白费；通信没机制 → member 只能靠共享文件间接协作；状态没 claim 独占 → 两 member 抢同一活；身份没 `member_name` → 消息和任务没法寻址到具体 member。
 
@@ -43,9 +43,9 @@
 
 **steer（打断递条式）**：member 的 run 循环**每跑一步先查信箱**，有新消息立刻作为一条临时输入注入当前轮，member 马上看到、据此调整。消息**不进对话历史**，跑完这轮就消失，不累积膨胀——所以下次 member 被唤醒时是干净状态。
 
-jiuwenswarm 用 steer。Twinkle 18b 对齐 steer（单进程下更简单，不需 jiuwenswarm 的 supervisor 串行化）。
+jiuwenswarm 用 steer。Twinkle Phase 19 对齐 steer（单进程下更简单，不需 jiuwenswarm 的 supervisor 串行化）。
 
-> **18a 的定位**：只解决「分工（简化版，靠 delegate）+ 身份（persona hash）+ 容错（超时）」的最低限度，依赖/通信/状态管理全留给后续阶段（见 §9 已知限制）。
+> **Phase 18 的定位**：只解决「分工（简化版，靠 delegate）+ 身份（persona hash）+ 容错（超时）」的最低限度，依赖/通信/状态管理全留给后续阶段（见 §9 已知限制）。
 
 ---
 
@@ -74,18 +74,27 @@ leader 用 `asyncio.gather` 并发委派；member1/member2 **平级**、各自�
 对齐 jiuwenswarm 的两层结构：
 
 ```
-jiuwenswarm                          Twinkle Phase A
+jiuwenswarm                          Twinkle Phase 18
 ─────────────────────────────        ─────────────────────────
 TeamManager (全局单例)               TeamManager (全局单例)
   _team_agents: dict[sid, TeamAgent]   _teams: dict[sid, Team]
   create_team(sid) → TeamAgent         create_team(sid) → Team
-  get_or_create_team(sid)              get_or_create_team(sid)
+  ensure_team(sid)              ensure_team(sid)
 
-TeamAgent (openjiuwen SDK)           Team (per session)
-  leader + members (DeepAgent[])       _members: dict[key, ReActAgent]
-  task_queue                           workspace: Path
-  event_bus                            delegate(persona, objective) → str
-  shared_state (SQLite)                cleanup()
+TeamAgent = 单 agent 实例             Team = per-session 容器
+  (IS-A BaseAgent, 不是容器;          (不继承 agent; hold members)
+   role=leader 或 teammate)
+  composition DeepAgent (agent 内核)   _members: dict[key, ReActAgent]
+  + team 编排设施(挂实例):              delegate(persona, objective) → str
+    _spawn/_recovery/_session/         workspace: Path
+    _stream/_coordination              cleanup()
+  steer() / deliver_input              (无编排设施, 靠 delegate 驱动;
+                                        Phase 19 起加 task_queue/steer)
+team = N 个 TeamAgent 实例            team = 1 Team 容器
+  (1 leader + N teammate;             (hold leader + members ReActAgent)
+   leader spawn teammates)
+  共享 infra: task_queue/event_bus/
+    shared_state
 ```
 
 **职责边界**：
@@ -112,14 +121,14 @@ TeamAgent (openjiuwen SDK)           Team (per session)
 └────────┬────────────────────────────────────────────────────┘
          │
          │  TeamContextHook.before_invoke:
-         │    team = team_mgr.get_or_create_team(session_id)
+         │    team = team_mgr.ensure_team(session_id)
          │    CURRENT_TEAM.set(team)
          │
          ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  TeamManager (全局)                                          │
 │  _teams: dict[session_id, Team]                              │
-│  get_or_create_team(sid) → Team                              │
+│  ensure_team(sid) → Team                              │
 │  destroy_team(sid)                                           │
 └────────┬─────────────────────────────────────────────────────┘
          │  creates / retrieves
@@ -198,7 +207,7 @@ class TeamManager:
         self._config = config
         self._teams: dict[str, Team] = {}
 
-    def get_or_create_team(self, session_id: str) -> Team:
+    def ensure_team(self, session_id: str) -> Team:
         """获取或创建 session 的 Team 实例。"""
         if session_id not in self._teams:
             self._teams[session_id] = Team(
@@ -221,7 +230,9 @@ class TeamManager:
 class Team:
     """一个 session 内的团队实例。管理 member agent 生命周期。
 
-    对齐 jiuwenswarm TeamAgent：持有 members、处理委派、维护 workspace。
+    session 级团队编排入口。Twinkle 是容器设计（不继承 agent、hold members）；
+    jiuwenswarm TeamAgent 是单 agent 实例（IS-A BaseAgent、composition DeepAgent +
+    team 编排设施），两者非同类——见 §2 对照表。
     """
 
     def __init__(self, llm, store, parent_tools, session_id, config):
@@ -238,7 +249,7 @@ class Team:
         import hashlib
         return hashlib.blake2b(persona.encode(), digest_size=8).hexdigest()
 
-    def _get_or_create_member(self, persona: str) -> ReActAgent:
+    def _ensure_member(self, persona: str) -> ReActAgent:
         key = self._member_key(persona)
         if key in self._members:
             return self._members[key]
@@ -270,7 +281,7 @@ class Team:
     async def delegate(self, persona: str, objective: str,
                        prompt: str = "") -> str:
         """委派任务给 member，运行到收敛，返回最终结果。"""
-        member = self._get_or_create_member(persona)
+        member = self._ensure_member(persona)
         member_sid = f"{self._session_id}__team_{self._member_key(persona)}"
         query = f"{objective}\n\n{prompt}" if prompt else objective
         request = AgentRequest(
@@ -320,7 +331,7 @@ class TeamContextHook(AgentHook):
         self._manager = manager
 
     async def before_invoke(self, ctx: HookContext):
-        team = self._manager.get_or_create_team(ctx.session_id)
+        team = self._manager.ensure_team(ctx.session_id)
         CURRENT_TEAM.set(team)
 ```
 
@@ -338,7 +349,7 @@ class TeamContextHook(AgentHook):
 用户: "分析 AAPL Q3 财报"
   │
   ▼ ReActAgent.run()
-  │  TeamContextHook → team_mgr.get_or_create_team(sid) → Team()
+  │  TeamContextHook → team_mgr.ensure_team(sid) → Team()
   │    CURRENT_TEAM.set(team)
   │    build_system_prompt() 注入委派指南
   │
@@ -350,7 +361,7 @@ class TeamContextHook(AgentHook):
   │
   ▼ _try_parallel_tool_calls → asyncio.gather
   │  ├── Team.delegate("金融分析师", "分析 AAPL 10-Q")
-  │  │     → _get_or_create_member: 首次，构建 ReActAgent
+  │  │     → _ensure_member: 首次，构建 ReActAgent
   │  │     → member.run() → 搜集数据 → 返回分析摘要
   │  └── Team.delegate("金融报告撰写人", "写成报告")
   │        → 构建另一个 ReActAgent → 返回报告
@@ -364,8 +375,8 @@ class TeamContextHook(AgentHook):
 
 | 决策 | 理由 |
 |---|---|
-| TeamManager + Team 两层 | 对齐 jiuwenswarm TeamManager + TeamAgent。TeamManager 是注册表，Team 管 member 生命周期 |
-| Team 是 per-session 对象 | 对应 jiuwenswarm 的 `_team_agents: dict[session_id, TeamAgent]` |
+| TeamManager + Team 两层 | 对齐 jiuwenswarm TeamManager + TeamAgent（入口角色）。TeamManager 是注册表，Team 管 member 生命周期。注：Twinkle Team 是容器（hold members），jiuwenswarm TeamAgent 是 agent 实例（leader/teammate），非同类（见 §2） |
+| Team 是 per-session 对象 | 对应 jiuwenswarm `_team_agents: dict[session_id, TeamAgent]`（session→leader TeamAgent 入口）；Twinkle 映射到 Team 容器，jiuwenswarm 映射到 leader TeamAgent 实例 |
 | Team 负责 delegate | member 创建/复用/运行都在 Team 内，不外泄给工具函数 |
 | 工具只从 ContextVar 拿 Team | delegate_to_member 是薄包装，逻辑全在 Team |
 | 硬编码 MEMBER_TOOL_WHITELIST | 对齐 jiuwenswarm TOOL_WHITELIST |

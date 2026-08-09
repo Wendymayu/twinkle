@@ -27,7 +27,7 @@ class TeamContextHook(AgentHook):
     async def before_invoke(self, ctx: HookContext) -> None:
         mode = getattr(ctx.inputs, "mode", "") or ""
         if mode == "team":
-            team = self._manager.get_or_create_team(ctx.session_id)
+            team = self._manager.ensure_team(ctx.session_id)
             CURRENT_TEAM.set(team)
         else:
             CURRENT_TEAM.set(None)

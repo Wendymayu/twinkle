@@ -47,6 +47,13 @@ def tool_manager() -> ToolManager:
     wf_tool.card.description = workflow_tools._build_tool_description()
     tm.register(wf_tool)
     tm.register(team_tools.delegate_to_member)
+    tm.register(team_tools.create_task)
+    tm.register(team_tools.claim_task)
+    tm.register(team_tools.complete_task)
+    tm.register(team_tools.cancel_task)
+    tm.register(team_tools.list_tasks)
+    tm.register(team_tools.get_task)
+    tm.register(team_tools.send_member)
     return tm
 
 
