@@ -16,15 +16,15 @@ def test_schema_creates_six_tables(tmp_path):
         assert t in names
 
 
-def test_resolve_rel_path_whitelist(tmp_path):
+def test_resolve_relative_path_whitelist(tmp_path):
     mgr = _mgr(tmp_path)
-    assert mgr._resolve_rel_path("USER.md") == "USER.md"               # noqa: SLF001
-    assert mgr._resolve_rel_path("MEMORY.md") == "MEMORY.md"
-    assert mgr._resolve_rel_path("daily_memory/2026-07-27.md") == "daily_memory/2026-07-27.md"
-    assert mgr._resolve_rel_path("../escape.md") is None
-    assert mgr._resolve_rel_path("sub/dir/MEMORY.md") is None
-    assert mgr._resolve_rel_path("daily_memory/notadate.md") is None
-    assert mgr._resolve_rel_path("daily_memory/2026-07-27.txt") is None
+    assert mgr._resolve_relative_path("USER.md") == "USER.md"               # noqa: SLF001
+    assert mgr._resolve_relative_path("MEMORY.md") == "MEMORY.md"
+    assert mgr._resolve_relative_path("daily_memory/2026-07-27.md") == "daily_memory/2026-07-27.md"
+    assert mgr._resolve_relative_path("../escape.md") is None
+    assert mgr._resolve_relative_path("sub/dir/MEMORY.md") is None
+    assert mgr._resolve_relative_path("daily_memory/notadate.md") is None
+    assert mgr._resolve_relative_path("daily_memory/2026-07-27.txt") is None
 
 
 def test_list_files_empty(tmp_path):
@@ -115,7 +115,7 @@ def test_search_logs(tmp_path, caplog):
 
 
 def test_write_round_trips_via_nonclean_path():
-    """Regression: _resolve_rel_path compared a resolve()'d path against an
+    """Regression: _resolve_relative_path compared a resolve()'d path against an
     un-resolved self._dir, breaking write/read on Windows short-name paths
     (e.g. C:/Users/WANGGU~1/... from tempfile.mkdtemp). __init__ now stores
     self._dir resolved so is_relative_to stays consistent."""
@@ -169,15 +169,15 @@ def test_edit_old_text_missing(tmp_path):
     assert "not found" in out.lower()
 
 
-def test_model_change_rebuilds_index(tmp_path):
+def test_model_change_clears_index(tmp_path):
     from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
     mgr = MemoryManager(str(tmp_path), embed_provider=MockEmbeddingProvider(dims=8, model="v1"),
                         dims=8)
     mgr.write("MEMORY.md", "some fact", append=True)
     assert mgr._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
-    # swap provider to a different model name -> rebuild
+    # swap provider to a different model name -> clear stale index
     mgr._provider = MockEmbeddingProvider(dims=8, model="v2")
-    mgr._rebuild_if_model_changed()
+    mgr._clear_if_model_changed()
     assert mgr._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
     assert mgr._db.execute("SELECT value FROM meta WHERE key='embed_model'").fetchone() is None
 

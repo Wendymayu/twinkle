@@ -78,7 +78,7 @@ class MemoryManager:
         self._db.row_factory = sqlite3.Row
         self._vec_enabled = False
         self._ensure_schema()
-        self._rebuild_if_model_changed()
+        self._clear_if_model_changed()
 
     # --- schema -----------------------------------------------------------
     def _ensure_schema(self) -> None:
@@ -109,25 +109,25 @@ class MemoryManager:
         db.commit()
 
     # --- path validation --------------------------------------------------
-    def _resolve_rel_path(self, path: str) -> str | None:
+    def _resolve_relative_path(self, path: str) -> str | None:
         """Whitelist: USER.md / MEMORY.md (root) or daily_memory/YYYY-MM-DD.md.
         Returns the resolved-relative path, or None if invalid."""
         if path in _ROOT_FILES:
-            rel = path
+            relative_path = path
         elif path.startswith("daily_memory/"):
             tail = path[len("daily_memory/"):]
             if not _DATE_RE.match(tail):
                 return None
-            rel = path
+            relative_path = path
         else:
             return None
         try:
-            resolved = (self._dir / rel).resolve()
+            resolved = (self._dir / relative_path).resolve()
         except OSError:
             return None
         if not resolved.is_relative_to(self._dir):
             return None
-        return rel
+        return relative_path
 
     # --- listing / reading -----------------------------------------------
     def list_files(self) -> list[str]:
@@ -135,17 +135,17 @@ class MemoryManager:
         for p in sorted(self._dir.rglob("*.md")):
             if not p.is_file():
                 continue
-            rel = p.relative_to(self._dir).as_posix()
-            if self._resolve_rel_path(rel) is not None:
-                out.append(rel)
+            relative_path = p.relative_to(self._dir).as_posix()
+            if self._resolve_relative_path(relative_path) is not None:
+                out.append(relative_path)
         return out
 
     def read(self, path: str, offset: int | None = None, limit: int | None = None) -> str:
-        rel = self._resolve_rel_path(path)
-        if rel is None:
+        relative_path = self._resolve_relative_path(path)
+        if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
-        fpath = self._dir / rel
+        fpath = self._dir / relative_path
         if not fpath.is_file():
             return f"Error: '{path}' not found."
         try:
@@ -159,11 +159,11 @@ class MemoryManager:
 
     # --- writing + indexing ----------------------------------------------
     def write(self, path: str, content: str, append: bool = False) -> str:
-        rel = self._resolve_rel_path(path)
-        if rel is None:
+        relative_path = self._resolve_relative_path(path)
+        if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
-        fpath = self._dir / rel
+        fpath = self._dir / relative_path
         fpath.parent.mkdir(parents=True, exist_ok=True)
         try:
             with fpath.open("a" if append else "w", encoding="utf-8") as f:
@@ -172,16 +172,16 @@ class MemoryManager:
                     f.write("\n")
         except OSError as exc:
             return f"Error writing '{path}': {exc}"
-        self._index_file(rel)
-        log.info("write_memory path=%s append=%s", rel, append)
-        return f"Stored to {rel}."
+        self._index_file(relative_path)
+        log.info("write_memory path=%s append=%s", relative_path, append)
+        return f"Stored to {relative_path}."
 
     def edit(self, path: str, old_text: str, new_text: str) -> str:
-        rel = self._resolve_rel_path(path)
-        if rel is None:
+        relative_path = self._resolve_relative_path(path)
+        if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
-        fpath = self._dir / rel
+        fpath = self._dir / relative_path
         if not fpath.is_file():
             return f"Error: '{path}' not found."
         try:
@@ -191,22 +191,22 @@ class MemoryManager:
         if old_text not in text:
             return f"Error: old_text not found in '{path}'."
         fpath.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-        self._index_file(rel)
-        log.info("edit_memory path=%s", rel)
-        return f"Edited {rel}."
+        self._index_file(relative_path)
+        log.info("edit_memory path=%s", relative_path)
+        return f"Edited {relative_path}."
 
-    def _index_file(self, rel: str) -> None:
-        fpath = self._dir / rel
+    def _index_file(self, relative_path: str) -> None:
+        fpath = self._dir / relative_path
         try:
             stat = fpath.stat()
             content = fpath.read_text(encoding="utf-8")
         except OSError:
             return
         file_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
-        row = self._db.execute(
-            "SELECT mtime, size, hash FROM files WHERE path=?", (rel,)).fetchone()
-        if (row and row["mtime"] == stat.st_mtime
-                and row["size"] == stat.st_size and row["hash"] == file_hash):
+        fingerprint = self._db.execute(
+            "SELECT mtime, size, hash FROM files WHERE path=?", (relative_path,)).fetchone()
+        if (fingerprint and fingerprint["mtime"] == stat.st_mtime
+                and fingerprint["size"] == stat.st_size and fingerprint["hash"] == file_hash):
             return  # unchanged — skip re-index
 
         # Wrap the whole mutation in a transaction so a mid-index failure
@@ -216,23 +216,23 @@ class MemoryManager:
         # jiuwenswarm manager.py _index_file try/rollback.
         try:
             # delete old chunks for this file (collect rowids first)
-            old = [r["rowid"] for r in self._db.execute(
-                "SELECT rowid FROM chunks WHERE path=?", (rel,)).fetchall()]
-            if old:
-                ph = ",".join("?" * len(old))
-                self._db.execute("DELETE FROM chunks WHERE path=?", (rel,))
-                self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({ph})", old)
+            stale_row_ids = [r["rowid"] for r in self._db.execute(
+                "SELECT rowid FROM chunks WHERE path=?", (relative_path,)).fetchall()]
+            if stale_row_ids:
+                placeholders = ",".join("?" * len(stale_row_ids))
+                self._db.execute("DELETE FROM chunks WHERE path=?", (relative_path,))
+                self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({placeholders})", stale_row_ids)
                 if self._vec_enabled:
-                    self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({ph})", old)
+                    self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", stale_row_ids)
 
             want_vec = self._vec_enabled and self._provider is not None
             chunks = self._chunk(content)
             texts = [c.text for c in chunks]
             embeddings = self._embed_chunks(texts) if want_vec else [None] * len(chunks)
             now = _now_iso()
-            model = self._provider.model if self._provider else ""
+            embed_model = self._provider.model if self._provider else ""
             for chunk, emb in zip(chunks, embeddings):
-                chunk_id = f"{rel}:{chunk.start}:{chunk.end}"
+                chunk_id = f"{relative_path}:{chunk.start}:{chunk.end}"
                 # _embed_chunks already returns serialized blobs (it calls
                 # _serialize on the float list). Don't double-serialize — that
                 # treats the blob's bytes as a float list and inflates dims
@@ -241,7 +241,7 @@ class MemoryManager:
                 cur = self._db.execute(
                     "INSERT INTO chunks(id,path,source,start_line,end_line,hash,model,"
                     "text,embedding,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (chunk_id, rel, "memory", chunk.start, chunk.end, file_hash, model,
+                    (chunk_id, relative_path, "memory", chunk.start, chunk.end, file_hash, embed_model,
                      chunk.text, blob, now))
                 rowid = cur.lastrowid
                 self._db.execute("INSERT INTO chunks_fts(rowid, text) VALUES(?, ?)",
@@ -252,11 +252,11 @@ class MemoryManager:
                         (rowid, blob))
             self._db.execute(
                 "INSERT OR REPLACE INTO files(path,source,hash,mtime,size) VALUES(?,?,?,?,?)",
-                (rel, "memory", file_hash, stat.st_mtime, stat.st_size))
+                (relative_path, "memory", file_hash, stat.st_mtime, stat.st_size))
             self._db.execute(
                 "INSERT OR REPLACE INTO meta(key,value) VALUES('embed_model', ?)",
-                (model,))
-            self._enforce_cap(rel)
+                (embed_model,))
+            self._evict_excess_chunks(relative_path)
             self._db.commit()
         except Exception:
             self._db.rollback()
@@ -330,30 +330,30 @@ class MemoryManager:
             import struct
             return struct.pack(f"{len(vec)}f", *vec)
 
-    def _enforce_cap(self, rel: str) -> None:
-        count = self._db.execute(
-            "SELECT COUNT(*) FROM chunks WHERE path=?", (rel,)).fetchone()[0]
-        if count <= self._max_chunks_per_file:
+    def _evict_excess_chunks(self, relative_path: str) -> None:
+        chunk_count = self._db.execute(
+            "SELECT COUNT(*) FROM chunks WHERE path=?", (relative_path,)).fetchone()[0]
+        if chunk_count <= self._max_chunks_per_file:
             return
-        excess = count - self._max_chunks_per_file
-        old = [r["rowid"] for r in self._db.execute(
+        num_to_evict = chunk_count - self._max_chunks_per_file
+        oldest_rowids = [r["rowid"] for r in self._db.execute(
             "SELECT rowid FROM chunks WHERE path=? ORDER BY updated_at ASC LIMIT ?",
-            (rel, excess)).fetchall()]
-        if not old:
+            (relative_path, num_to_evict)).fetchall()]
+        if not oldest_rowids:
             return
-        ph = ",".join("?" * len(old))
-        self._db.execute(f"DELETE FROM chunks WHERE rowid IN ({ph})", old)
-        self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({ph})", old)
+        placeholders = ",".join("?" * len(oldest_rowids))
+        self._db.execute(f"DELETE FROM chunks WHERE rowid IN ({placeholders})", oldest_rowids)
+        self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({placeholders})", oldest_rowids)
         if self._vec_enabled:
-            self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({ph})", old)
+            self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", oldest_rowids)
 
-    def _rebuild_if_model_changed(self) -> None:
+    def _clear_if_model_changed(self) -> None:
         if self._provider is None:
             return
         row = self._db.execute(
             "SELECT value FROM meta WHERE key='embed_model'").fetchone()
         if row and row["value"] and row["value"] != self._provider.model:
-            log.warning("embed model %r -> %r, rebuilding index",
+            log.warning("embed model %r -> %r, clearing stale index",
                         row["value"], self._provider.model)
             self._db.execute("DELETE FROM chunks")
             self._db.execute("DELETE FROM chunks_fts")
@@ -375,32 +375,39 @@ class MemoryManager:
         + FTS bm25 score (both best=high) and rank by the fused score."""
         max_results = max_results or self._max_results
         candidates = min(200, max(1, int(max_results * self._candidate_multiplier)))
-        fts = self._fts_search(query, candidates)  # ORDER BY bm -> best first
+        fts_rows = self._fts_search(query, candidates)  # ORDER BY bm -> best first
+        fts_by_rowid = {r["rowid"]: r for r in fts_rows}
+
         if not (self._vec_enabled and self._provider is not None):
-            fts_only = fts[:max_results]
-            log.info("memory_search query=%r hits=%d (fts-only)", query, len(fts_only))
-            return [self._hit(r, self._text_sim(r["bm"])) for r in fts_only]
-        vec: dict[int, float] = self._vec_search(query, candidates)
-        fts_bm = {r["rowid"]: r for r in fts}  # rowid -> fts row (carries bm)
-        chunk_map = dict(fts_bm)
-        for row_id in vec:
-            if row_id not in chunk_map:
+            hits = fts_rows[:max_results]
+            log.info("memory_search query=%r hits=%d (fts-only)", query, len(hits))
+            return [self._hit(r, self._text_sim(r["bm"])) for r in hits]
+
+        vec_sims = self._vec_search(query, candidates)  # {rowid: 相似度}
+
+        # 候选 = 两路并集;fts 行已带正文,vec-only 的去主表回填
+        candidate_rows = dict(fts_by_rowid)
+        for row_id in vec_sims:
+            if row_id not in candidate_rows:
                 cr = self._db.execute(
                     "SELECT rowid, path, text, start_line, end_line "
                     "FROM chunks WHERE rowid=?", (row_id,)).fetchone()
                 if cr:
-                    chunk_map[row_id] = cr
-        fused: list[tuple] = []
-        for row_id, chunk in chunk_map.items():
-            if chunk is None:
-                continue
-            t = self._text_sim(fts_bm[row_id]["bm"]) if row_id in fts_bm else 0.0
-            v = vec.get(row_id, 0.0)
-            fused.append((chunk, self._vector_weight * v + self._text_weight * t))
-        fused.sort(key=lambda x: x[1], reverse=True)
-        fused = fused[:max_results]
-        log.info("memory_search query=%r hits=%d (hybrid)", query, len(fused))
-        return [self._hit(r, s) for r, s in fused]
+                    candidate_rows[row_id] = cr
+
+        # 融合打分:向量相似度 + 文本相似度,加权
+        scored = []
+        for row_id, row in candidate_rows.items():
+            text_sim = self._text_sim(fts_by_rowid[row_id]["bm"]) if row_id in fts_by_rowid else 0.0
+            vec_sim = vec_sims.get(row_id, 0.0)
+            fused = self._vector_weight * vec_sim + self._text_weight * text_sim
+            scored.append((row, fused))
+
+        # 排序、截断、格式化
+        scored.sort(key=lambda x: x[1], reverse=True)
+        scored = scored[:max_results]
+        log.info("memory_search query=%r hits=%d (hybrid)", query, len(scored))
+        return [self._hit(row, score) for row, score in scored]
 
     def _fts_search(self, query: str, limit: int):
         phrase = '"' + _space_cjk(query).replace('"', '""') + '"'
