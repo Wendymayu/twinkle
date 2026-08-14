@@ -24,10 +24,10 @@ obs = [
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp-proto-grpc",
 ]
-memory = ["sqlite-vec"]
+memory = ["sqlite-vec", "jieba"]
 
 [tool.setuptools.packages.find]
 include = ["twinkle*"]
 
 [tool.setuptools.package-data]
-"twinkle.resources" = ["*.yaml"]
+"twinkle.resources" = ["*.yaml", "*.txt"]

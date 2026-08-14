@@ -230,8 +230,11 @@ class SessionStore:
             sdir = self._session_dir(session_id)
             if not sdir.is_dir():
                 await self._create_session_locked(session_id)
-            # cache
-            self._cache.setdefault(session_id, []).append(dict(message))
+            # cache the OpenAI-native message so a hot ReAct turn feeds the
+            # model exactly what a cold restart would reconstruct — reasoning
+            # and any other non-OpenAI fields are dropped here (thinking is
+            # regenerated each turn, never replayed back into the prompt).
+            self._cache.setdefault(session_id, []).append(self._record_to_openai(message))
             # history record (preserve full OpenAI fields for cold reconstruction)
             role = message.get("role")
             record = {
@@ -241,6 +244,7 @@ class SessionStore:
                 "channel_id": "web",
                 "timestamp": time.time(),
                 "content": message.get("content"),
+                "reasoning": message.get("reasoning"),
                 "event_type": event_type,
                 "session_id": session_id,
                 "tool_calls": message.get("tool_calls"),

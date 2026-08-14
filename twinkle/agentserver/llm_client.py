@@ -26,6 +26,30 @@ class Finish:
     finish_reason: str
     assistant_message: dict
     usage: dict | None = None
+    reasoning: str | None = None
+
+
+def _delta_reasoning(delta: Any) -> str | None:
+    """Pull a provider thinking fragment off a streaming ``ChoiceDelta``.
+
+    The field is provider-specific and lives outside the OpenAI spec, so we
+    probe several known names plus the pydantic ``model_extra`` bag (where the
+    SDK stashes unknown fields when ``extra='allow'``):
+      - DeepSeek / Qwen / GLM thinking models → ``reasoning_content``
+      - OpenAI o-series → ``reasoning``
+    Returns the first non-empty fragment found, else None.
+    """
+    for attr in ("reasoning_content", "reasoning"):
+        val = getattr(delta, attr, None)
+        if val:
+            return val
+    extra = getattr(delta, "model_extra", None)
+    if isinstance(extra, dict):
+        for key in ("reasoning_content", "reasoning"):
+            val = extra.get(key)
+            if val:
+                return val
+    return None
 
 
 class LLMClient:
@@ -60,6 +84,7 @@ class LLMClient:
         stream = await self._client.chat.completions.create(**kwargs)
 
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []  # provider thinking (reasoning_content/reasoning)
         tool_call_accumulator: dict[int, dict] = {}  # index -> {id, name, arguments}
         finish_reason = "stop"
 
@@ -82,6 +107,13 @@ class LLMClient:
             if getattr(delta, "content", None):
                 text_parts.append(delta.content)
                 yield TextDelta(delta.content)
+            # Provider thinking fragments — accumulated separately from the
+            # answer so chain-of-thought never pollutes the ReAct message
+            # stream. Surfaced on Finish for persistence (display/evolution)
+            # but NOT fed back to the model next turn (see SessionStore).
+            reasoning_chunk = _delta_reasoning(delta)
+            if reasoning_chunk:
+                reasoning_parts.append(reasoning_chunk)
             tool_call_deltas = getattr(delta, "tool_calls", None)
             if tool_call_deltas:
                 for tool_call_delta in tool_call_deltas:
@@ -101,6 +133,7 @@ class LLMClient:
                 finish_reason = choice.finish_reason
 
         content = "".join(text_parts) or None
+        reasoning = "".join(reasoning_parts) or None
         tool_calls = None
         if finish_reason == "tool_calls" and tool_call_accumulator:
             tool_calls = [
@@ -114,12 +147,16 @@ class LLMClient:
                 }
                 for i in sorted(tool_call_accumulator)
             ]
+        assistant_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": tool_calls,
+        }
+        if reasoning is not None:
+            assistant_message["reasoning"] = reasoning
         yield Finish(
             finish_reason=finish_reason,
-            assistant_message={
-                "role": "assistant",
-                "content": content,
-                "tool_calls": tool_calls,
-            },
+            assistant_message=assistant_message,
             usage=usage,
+            reasoning=reasoning,
         )

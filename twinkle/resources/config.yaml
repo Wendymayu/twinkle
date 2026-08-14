@@ -49,6 +49,16 @@ memory:
     overlap: 32
   cleanup:
     max_chunks_per_file: 200              # 单文件 chunk 上限,超限 FIFO 丢最旧(5a 唯一自动淘汰;5c Dreaming 取代)
+  auto_inject:
+    enabled: false                # 被动召回(opt-in):每步 before_model_call 把 USER.md + MEMORY.md + 今日 daily 注入 system prompt(顺序 USER→MEMORY→daily,cap 超限截断),模型不主动 memory_search 也能看到。默认关=维持 5a 只注入策略
+    max_chars: 12000             # 注入内容字符上限(估算 char//3 ≈ 4000 token),超限截断
+  flush:
+    enabled: false                # 兜底(opt-in):压缩前 LLM 查 middle 有无未持久化重要信息→write_memory 落盘。默认关=维持 5a
+  dreaming:
+    enabled: false               # 后台整理(opt-in):周期跑 Dreaming 整理 MEMORY.md(去重/合并/冲突/删低值+从 daily 抽)。默认关
+    interval_seconds: 3600        # 整理周期秒
+    start_delay_seconds: 300      # 启动后首跑延迟秒
+    top_k: 5                      # 聚类相似召回数
 permissions:
   enabled: false                          # false = 系统关(全 ALLOW,无审计/无 ASK;command_exec 仍走 builtin_rules)
   enabled_channels: [web]

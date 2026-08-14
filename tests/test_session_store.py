@@ -270,3 +270,23 @@ def test_list_sessions_hides_subagent_sessions(session_store):
     all_rows = session_store.list_sessions(include_subagents=True)
     all_ids = {r["session_id"] for r in all_rows}
     assert "p1__sub_abc12345" in all_ids
+
+
+def test_append_preserves_reasoning_but_does_not_feed_back(session_store, sessions_dir):
+    """reasoning is persisted on the assistant history record (for display /
+    evolution / debugging) but ``_record_to_openai`` drops it so it is never
+    fed back to the model — thinking is regenerated each turn, never replayed
+    (OpenAI reasoning convention)."""
+    _run(session_store.create_session("s1"))
+    _run(session_store.append("s1", {"role": "user", "content": "q"}, request_id="r1"))
+    _run(session_store.append("s1", {"role": "assistant", "content": "a",
+                                    "reasoning": "我的思考"}, request_id="r1"))
+    # persisted on the history record
+    hpath = Path(sessions_dir) / "s1" / "history.json"
+    recs = [json.loads(l) for l in hpath.read_text(encoding="utf-8").splitlines() if l.strip()]
+    asst = [r for r in recs if r["role"] == "assistant"][0]
+    assert asst.get("reasoning") == "我的思考"
+    # NOT fed back to the model — get_messages reconstructs OpenAI messages only
+    msgs = session_store.get_messages("s1")
+    assert "reasoning" not in msgs[-1]
+    assert msgs[-1] == {"role": "assistant", "content": "a"}

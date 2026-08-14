@@ -102,6 +102,24 @@ class MemoryCleanupConfig(_StrictModel):
     max_chunks_per_file: int = 200
 
 
+class MemoryAutoInjectConfig(_StrictModel):
+    enabled: bool = False    # 被动召回开关（opt-in；默认关=维持 5a "只注入策略 prompt"）
+    max_chars: int = 12000   # 注入内容字符上限（估算 char//3 ≈ 4000 token）
+
+
+class MemoryFlushConfig(_StrictModel):
+    enabled: bool = False    # 兜底开关（opt-in；默认关=维持 5a）
+    # prompt 硬编码在 memory_flush_hook._FLUSH_PROMPT：带 JSON 输出契约，进 config 会被用户改坏→静默失效
+
+
+class MemoryDreamingConfig(_StrictModel):
+    enabled: bool = False           # 后台整理开关（opt-in；默认关）
+    interval_seconds: int = 3600   # 整理周期秒
+    start_delay_seconds: int = 300  # 启动后首跑延迟秒
+    top_k: int = 5                  # 聚类相似召回数
+    # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；文本见 docs/design/memory-b-scheme-design.md §4.5
+
+
 class MemoryConfig(_StrictModel):
     dir: str = ""  # "" -> <workspace>/.twinkle_data/memory
     embed_model: str = "text-embedding-3-small"
@@ -109,6 +127,9 @@ class MemoryConfig(_StrictModel):
     hybrid: MemoryHybridConfig = MemoryHybridConfig()
     chunking: MemoryChunkingConfig = MemoryChunkingConfig()
     cleanup: MemoryCleanupConfig = MemoryCleanupConfig()
+    auto_inject: MemoryAutoInjectConfig = MemoryAutoInjectConfig()
+    flush: MemoryFlushConfig = MemoryFlushConfig()
+    dreaming: MemoryDreamingConfig = MemoryDreamingConfig()
 
 
 class PermissionsConfig(_StrictModel):

@@ -26,7 +26,7 @@
 
 要点：
 
-- **注入的是策略 prompt，不是检索结果。** `MemoryHook` 不替模型搜，只教它「什么时候该搜、搜完该往哪写」。检索只发生在模型主动调 `memory_search` 时。理由：ReAct 循环本质是「模型决定调哪个工具」，自动注入既吃 token 预算，又抢了模型对「这轮到底要不要历史」的判断权。
+- **注入的是策略 prompt，不是检索结果。** `MemoryHook` 不替模型搜，只教它「什么时候该搜、搜完该往哪写」。检索只发生在模型主动调 `memory_search` 时。理由：ReAct 循环本质是「模型决定调哪个工具」，自动注入既吃 token 预算，又抢了模型对「这轮到底要不要历史」的判断权。**被动召回（opt-in）**：设 `memory.auto_inject.enabled=true` 时，`before_model_call` 额外把 `USER.md`（用户画像）+ `MEMORY.md`（持久事实）+ 今日 `daily_memory`（episodic）全文（cap，默认 12000 字符）注入 system prompt，对齐 jiuwenswarm `ProjectMemoryRail` / `memory_rail._load_recent_daily_memory`；注入顺序 USER → MEMORY → 今日 daily；默认关，维持只策略。`MEMORY.md` 大到撑爆 cap 时尾部截断 + 提示「更多用 memory_search 查」，退回靠 search。
 - **空 store 不注入。** 记忆目录里没文件时 `MemoryHook` 直接 return，不往上下文塞废话。
 - **策略 prompt 内容**（[`memory_hook.py`](../../twinkle/agentserver/hooks/builtin/memory_hook.py) 的 `_PROMPT_TEMPLATE`）规定了几条路由规则，见下面 §2。
 
@@ -70,7 +70,7 @@ prompt 还规定**不该写**：临时数据、过程性状态（那是 todo 的
 | 表 | 类别 | 作用 | 关键列 |
 |---|---|---|---|
 | `chunks` | 主链 | 分块内容主表，一个 chunk 一行，存原文+元数据+向量 BLOB | `id`(`path:start:end`, 主键) / 隐式 `rowid` / `path` / `start_line` / `end_line` / `hash` / `model` / `text` / `embedding`(BLOB) / `updated_at` |
-| `chunks_fts` | 主链 | FTS5 全文索引，存 chunk 文本的分词副本（CJK 逐字空格后），供 bm25 搜 | 隐式 `rowid` / `text` |
+| `chunks_fts` | 主链 | FTS5 全文索引，存 chunk 文本的分词副本（jieba 词级 / 无则逐字空格），供 bm25 搜 | 隐式 `rowid` / `text` |
 | `chunks_vec` | 主链 | `sqlite-vec` 向量虚表，存 chunk 向量，供 cosine 搜（可选） | 隐式 `rowid` / `embedding float[1536]` |
 | `files` | 辅助 | 文件级指纹，记录每个文件上次索引时的 mtime/size/hash，供增量跳过 | `path`(主键) / `hash` / `mtime` / `size` |
 | `embedding_cache` | 辅助 | 嵌入缓存，按 chunk 文本 md5 去重，同文不重复 embed | `hash`(主键) / `embedding` / `dims` / `updated_at` |
@@ -210,13 +210,20 @@ search(query, max_results)
 
 ### 4.2 FTS 腿 + bm25 归一化
 
-`_fts_search` 用 `chunks_fts MATCH ?` + `ORDER BY bm25(chunks_fts)`（bm25 越负越相关）。`_text_sim(bm)` 把非正值映射到 [0,1]：`a=abs(bm); a/(1+a)`，最相关→接近 1.0，让 FTS 分数和向量相似度同量纲融合。
+`_fts_search` 用 `build_fts_query(query)` 构造 MATCH 串（每 token 包引号 + OR，见 §4.3.1）+ `chunks_fts MATCH ?` + `ORDER BY bm25(chunks_fts)`（bm25 越负越相关）。`_text_sim(bm)` 把非正值映射到 [0,1]：`a=abs(bm); a/(1+a)`，最相关→接近 1.0，让 FTS 分数和向量相似度同量纲融合。
 
-### 4.3 CJK 逐字空格（FTS-only 降级路径的关键）
+### 4.3 CJK 分词：jieba 可选 + 降级逐字空格（FTS 腿的关键）
 
-FTS5 的 `unicode61` 分词器不切 CJK，中文查询会召回失败。`_space_cjk` 把每个汉字前后加空格，让 unicode61 切成单字 token——**索引和查询都做这一步**。
+FTS5 的 `unicode61` 分词器不切 CJK，中文查询会召回失败。分词逻辑在 [`fts.py`](../../twinkle/agentserver/memory/fts.py)（抄 jiuwenswarm `internal.py`），双路径：
 
-为什么必须做：无 API key 时检索降级为 FTS-only，仍要能查中文。`_embed_chunks` 失败的 chunk 不嵌向量，只进 FTS，这时 CJK 召回全靠逐字空格。
+- **有 jieba**（装 `[memory]` extra）：索引走 `jieba.cut_for_search`（细粒度提召回），查询走 `jieba.cut`（粗切），再过停用词（`stopwords_zh.txt` 793 词）——词级召回质量高，对齐 jiuwenswarm。
+- **无 jieba**：降级 `_space_cjk` 逐字空格（每个汉字前后加空格让 unicode61 切单字 token）+ OR——召回率够用但单字语义弱。
+
+为什么必须做：无 API key 时检索降级为 FTS-only，仍要能查中文。`_embed_chunks` 失败的 chunk 不嵌向量，只进 FTS，这时 CJK 召回全靠分词。
+
+### 4.3.1 FTS phrase query bug（已修）
+
+旧 `_fts_search` 把整句 query 包双引号喂 FTS5 = phrase（所有 token 须按序连续），导致换措辞的自然语言 query（如「我们之前为什么决定用 SQLite」对记忆「决定使用 SQLite」）**0 命中**——FTS 腿实际废掉。现 `build_fts_query` 按 token 切分、每 token 包引号 + **OR 连接**（前 10 token），任一 token 命中即记分，换措辞也能召回。对齐 jiuwenswarm `build_fts_query`。
 
 ### 4.4 无分数截断
 
@@ -230,8 +237,9 @@ FTS5 的 `unicode61` 分词器不切 CJK，中文查询会召回失败。`_space
 | `sqlite-vec` 没装 / load 失败 | FTS-only（bm25 排序） |
 | 无 `LLM_API_KEY`（provider=None） | FTS-only（写时不嵌向量） |
 | 查询 embedding 失败 | 向量腿 skip，退回 FTS-only |
+| 无 jieba（未装 `[memory]` extra） | FTS 仍工作，CJK 降级逐字空格 + OR（单字语义弱，召回不丢） |
 
-任何一腿失败都不让整次 search 崩——`search` 总返回一个 list（可能空）。
+任何一腿失败都不让整次 search 崩——`search` 总返回一个 list（可能空）。jieba 有无只影响 CJK 召回质量，不影响检索是否工作。
 
 ---
 
@@ -253,7 +261,7 @@ _index_file(rel):
         └─ 内部先查 embedding_cache 命中、未命中批量调 provider.embed 并写回缓存
         └─ 失败：返回 [None,...]，这些块仍进 FTS，不进向量，不重试
      d. 逐块写库（chunks 主表 INSERT，拿 rowid）：
-        └─ chunks_fts INSERT(rowid, _space_cjk(text))   # CJK 逐字空格
+        └─ chunks_fts INSERT(rowid, tokenize_for_fts(text, True))   # jieba 词级(无则逐字空格)
         └─ want_vec 且 blob 非 None：chunks_vec INSERT(rowid, embedding)
      e. UPSERT files(path, hash, mtime, size)  # 更新指纹，下次增量比对的基准
      f. UPSERT meta(embed_model = provider.model)
@@ -345,17 +353,18 @@ if chunk_count > 200:
 | 边界 | 现状 |
 |---|---|
 | 嵌入维度 | 硬编码 1536（匹配 `text-embedding-3-small`），换模型/维度须删 `memory.db` 重建 |
-| 无 API key | 降级 FTS-only，CJK 靠逐字空格仍可召回 |
+| 无 API key | 降级 FTS-only，CJK 靠 jieba 词级（无则逐字空格）仍可召回 |
 | embed 失败 | chunk 进 FTS 不进向量，不重试，待文件再变 |
 | 自动淘汰 | 单文件 FIFO（>200 chunk 删最旧），不删 markdown |
 | 写路由 | 纯 prompt 教模型往哪个文件写，代码不强制 |
-| passive 注入 | 5a 只 proactive 一档；未来加 config + 第二段 prompt 即可 |
+| passive 注入 | opt-in（`memory.auto_inject.enabled`）：注入 `USER.md` + `MEMORY.md` + 今日 daily（cap，超限截断）；默认关=维持只策略 |
 
 源文件索引：
 
 | 组件 | 文件 |
 |---|---|
 | `MemoryManager`（存储+索引+检索+淘汰） | [memory/store.py](../../twinkle/agentserver/memory/store.py) |
+| FTS 分词 + query 构造（jieba 可选/降级，抄 jiuwenswarm） | [memory/fts.py](../../twinkle/agentserver/memory/fts.py) |
 | 嵌入 Provider（OpenAI 兼容 / Mock 测试） | [memory/embeddings.py](../../twinkle/agentserver/memory/embeddings.py) |
 | 进程单例 + 构造配置 | [memory/__init__.py](../../twinkle/agentserver/memory/__init__.py) |
 | `MemoryHook`（使用策略注入） | [hooks/builtin/memory_hook.py](../../twinkle/agentserver/hooks/builtin/memory_hook.py) |
@@ -377,6 +386,6 @@ Twinkle 的记忆子系统是对齐 jiuwenswarm `MemoryIndexManager`（[`jiuwenc
 | 外部编辑 markdown | watchdog 自动重索引 | 不感知，下次工具写入才重索引（mtime 增量跳过未变文件） |
 | 重建判据 | meta JSON：provider + model + chunkTokens | 只比对 model 名 |
 | 第二数据源 | 还索引 `sessions/*.jsonl`（会话转录） | 只索引 memory markdown |
-| sqlite-vec 不可用 | 内存 cosine 兜底（`_search_vector_fallback`） | 降级 FTS-only（CJK 逐字空格保召回） |
+| sqlite-vec 不可用 | 内存 cosine 兜底（`_search_vector_fallback`） | 降级 FTS-only（CJK jieba 词级 / 无则逐字空格保召回） |
 
 Twinkle 裁掉了 watchdog/interval/onSearch 三条外部触发，只留「工具写入即重索引」——单进程单事件循环、模型驱动写入场景下，外部编辑罕见，mtime 增量跳过已经够用；少一个文件监听器就少一份复杂度和并发风险。这是 5a 的刻意取舍，不是遗漏。

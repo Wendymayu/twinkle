@@ -282,13 +282,19 @@ def test_apply_instrumentors_registers_compression_and_evolution(
         async def evolve(self, skill_name, conversation_messages, *a, **k):
             return None
 
+    class _FakeFlushHook:
+        async def _flush(self, middle):
+            return 0, 0
+
     results = apply_instrumentors(
         tracer, metrics, _Cfg(),
         agent_cls=_NoopAgent, llm_cls=_NoopLLM, tool_cls=_NoopTool,
         compression_mod=fake_comp, orchestrator_cls=_FakeEvo,
+        hook_cls=_FakeFlushHook,
     )
     assert results["agent"] is True
     assert results["llm"] is True
     assert results["tool"] is True
     assert results["compression"] is True
     assert results["evolution"] is True
+    assert results["memory_flush"] is True

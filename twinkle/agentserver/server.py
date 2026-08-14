@@ -78,7 +78,8 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
     from twinkle.agentserver.tools.builtin.subagent import create_subagent_executor
     from twinkle.agentserver.hooks.builtin import (
         SubagentContextHook, ContextCompressionHook,
-        ContextOverflowRecoveryHook, RepeatToolCallDetectorHook,
+        ContextOverflowRecoveryHook, MemoryFlushHook,
+        RepeatToolCallDetectorHook,
     )
     from twinkle.agentserver.workflow.tools import WorkflowContextHook
     from twinkle.agentserver.workflow.executor import WorkflowExecutor
@@ -94,6 +95,7 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
         SubagentContextHook(executor),
         WorkflowContextHook(workflow_executor),
         ContextCompressionHook(llm=llm),
+        MemoryFlushHook(llm=llm),
         ContextOverflowRecoveryHook(llm=llm),
         RepeatToolCallDetectorHook(),
     ]

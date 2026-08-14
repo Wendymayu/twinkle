@@ -107,6 +107,48 @@ def test_search_fts_only_miss(tmp_path):
     assert mgr.search("completelyunrelatedterm") == []
 
 
+def test_search_fts_phrase_bug_regression(tmp_path):
+    """Regression: 多 token 自然语言 query 必须召回措辞不同的记忆。旧 _fts_search
+    把整句包双引号喂 FTS5 = phrase(所有 token 须按序连续)→ 任何换措辞的 query 0
+    命中,FTS 腿实际废掉。build_fts_query 现按 token 切分 + OR 连接,任一共享
+    token(如 决定 / SQLite)即命中。"""
+    mgr = _mgr(tmp_path)  # embed_provider=None → FTS-only(最易暴露 phrase bug)
+    mgr.write("MEMORY.md", "决定使用 SQLite,考虑部署简单。", append=True)
+    hits = mgr.search("我们之前为什么决定用 SQLite")
+    assert hits, "换措辞的多 token query 必须召回(phrase bug 回归)"
+    assert any("SQLite" in h["text"] for h in hits)
+
+
+def test_search_fts_jieba_word_level(tmp_path):
+    """jieba 词级分词路径:换措辞多 token query 仍召回。jieba 把 query 切成词,
+    滤停用词,OR 连接——验证 jieba 路径(装了 jieba 时)不崩 + 召回合理。"""
+    pytest.importorskip("jieba")
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "用户偏好简洁的中文回复,不喜欢长篇大论。", append=True)
+    hits = mgr.search("用户喜欢简短回答")
+    assert hits, "jieba 词级分词应让换措辞 query 召回"
+    assert any("用户" in h["text"] or "偏好" in h["text"] for h in hits)
+
+
+def test_search_fts_degraded_no_jieba(tmp_path, monkeypatch):
+    """无 jieba → 降级 _space_cjk 逐字 OR 路径仍召回(比 phrase 好)。monkeypatch
+    拦 jieba import 强制走降级分支,验证无论 jieba 装否降级都不破。"""
+    import builtins
+    real_import = builtins.__import__
+
+    def _block_jieba(name, *args, **kwargs):
+        if name == "jieba":
+            raise ImportError("blocked for test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _block_jieba)
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "决定使用 SQLite,考虑部署简单。", append=True)
+    hits = mgr.search("为什么决定用 SQLite")
+    assert hits, "降级逐字 OR 路径应召回"
+    assert any("SQLite" in h["text"] for h in hits)
+
+
 def test_search_logs(tmp_path, caplog):
     import logging
     caplog.set_level(logging.INFO, logger="twinkle.memory")

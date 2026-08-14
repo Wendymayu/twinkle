@@ -49,6 +49,13 @@ MEMORY_HYBRID_CANDIDATE_MULTIPLIER = settings.memory.hybrid.candidate_multiplier
 MEMORY_CHUNKING_TOKENS = settings.memory.chunking.tokens
 MEMORY_CHUNKING_OVERLAP = settings.memory.chunking.overlap
 MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE = settings.memory.cleanup.max_chunks_per_file
+MEMORY_AUTO_INJECT_ENABLED = settings.memory.auto_inject.enabled
+MEMORY_AUTO_INJECT_MAX_CHARS = settings.memory.auto_inject.max_chars
+MEMORY_FLUSH_ENABLED = settings.memory.flush.enabled
+MEMORY_DREAMING_ENABLED = settings.memory.dreaming.enabled
+MEMORY_DREAMING_INTERVAL_SECONDS = settings.memory.dreaming.interval_seconds
+MEMORY_DREAMING_START_DELAY_SECONDS = settings.memory.dreaming.start_delay_seconds
+MEMORY_DREAMING_TOP_K = settings.memory.dreaming.top_k
 
 # --- LLM (OpenAI-compatible) ---
 LLM_BASE_URL = settings.llm.base_url

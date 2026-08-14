@@ -35,7 +35,7 @@ def estimate_tokens(msgs: list[dict]) -> int:
     return total // 3
 
 
-def _split_keep_tool_pairs(
+def split_messages_head_middle_tail(
     msgs: list[dict], tail_count: int
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Split into (head, middle, tail). head = first system message (if any).
@@ -95,7 +95,7 @@ def should_compress(msgs: list[dict], *, token_threshold: int,
     """
     if estimate_tokens(msgs) <= token_threshold:
         return False
-    _head, middle, _tail = _split_keep_tool_pairs(msgs, tail_count=keep_recent_pairs * 2)
+    _head, middle, _tail = split_messages_head_middle_tail(msgs, tail_count=keep_recent_pairs * 2)
     return bool(middle)
 
 
@@ -104,7 +104,7 @@ async def do_compress(msgs: list[dict], llm: "LLMClient", *,
                       summary_system_prompt: str) -> list[dict]:
     """真正执行压缩。假设 should_compress 已为 True(仍保留 `if not middle`
     兜底以防被直接调用)。含 _summarize 的 LLM 调用。返回新 list,不改输入。"""
-    head, middle, tail = _split_keep_tool_pairs(msgs, tail_count=keep_recent_pairs * 2)
+    head, middle, tail = split_messages_head_middle_tail(msgs, tail_count=keep_recent_pairs * 2)
     if not middle:
         return list(msgs)
     try:

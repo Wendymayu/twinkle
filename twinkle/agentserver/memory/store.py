@@ -16,21 +16,12 @@ import sqlite3
 from pathlib import Path
 from typing import NamedTuple
 
+from twinkle.agentserver.memory.fts import build_fts_query, tokenize_for_fts
+
 log = logging.getLogger("twinkle.memory")
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 _ROOT_FILES = ("USER.md", "MEMORY.md")
-# CJK ideographs — space each one so FTS5 unicode61 (which does not split CJK
-# into words) can match CJK substrings. jiuwenswarm relies on the vector leg
-# for CJK recall; Twinkle's FTS-only degradation path (no API key) needs CJK
-# recall too, so the FTS leg spaces each CJK char before indexing + querying.
-_CJK_PAT = re.compile("[" + chr(0x3400) + "-" + chr(0x9FFF) + chr(0xF900) + "-" + chr(0xFAFF) + "]")
-
-
-def _space_cjk(text: str) -> str:
-    """Space each CJK char so unicode61 tokenizes into single-char tokens.
-    Latin/whitespace/punctuation untouched (already split)."""
-    return _CJK_PAT.sub(lambda m: " " + m.group(0) + " ", text)
 
 
 def _now_iso() -> str:
@@ -245,7 +236,7 @@ class MemoryManager:
                      chunk.text, blob, now))
                 rowid = cur.lastrowid
                 self._db.execute("INSERT INTO chunks_fts(rowid, text) VALUES(?, ?)",
-                                 (rowid, _space_cjk(chunk.text)))
+                                 (rowid, tokenize_for_fts(chunk.text, True)))
                 if want_vec and blob is not None:
                     self._db.execute(
                         "INSERT INTO chunks_vec(rowid, embedding) VALUES(?, ?)",
@@ -410,13 +401,15 @@ class MemoryManager:
         return [self._hit(row, score) for row, score in scored]
 
     def _fts_search(self, query: str, limit: int):
-        phrase = '"' + _space_cjk(query).replace('"', '""') + '"'
+        fts_query = build_fts_query(query)
+        if not fts_query:
+            return []
         return self._db.execute(
             "SELECT c.rowid, c.path, c.text, c.start_line, c.end_line, "
             "bm25(chunks_fts) AS bm FROM chunks_fts JOIN chunks c "
             "ON c.rowid = chunks_fts.rowid WHERE chunks_fts MATCH ? "
             "ORDER BY bm LIMIT ?",
-            (phrase, limit)).fetchall()
+            (fts_query, limit)).fetchall()
 
     def _vec_search(self, query: str, limit: int) -> dict[int, float]:
         try:

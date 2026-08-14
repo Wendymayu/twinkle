@@ -2,7 +2,7 @@ import asyncio
 
 from twinkle.agentserver.compression import (
     _render_messages_text,
-    _split_keep_tool_pairs,
+    split_messages_head_middle_tail,
     _summarize,
     compress_messages,
     do_compress,
@@ -51,10 +51,10 @@ def test_estimate_tokens_handles_content_list_and_tool_calls():
     assert estimate_tokens(msgs) > 0
 
 
-# --- _split_keep_tool_pairs ---
+# --- split_messages_head_middle_tail ---
 def test_split_returns_all_when_small():
     msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
-    head, middle, tail = _split_keep_tool_pairs(msgs, tail_count=4)
+    head, middle, tail = split_messages_head_middle_tail(msgs, tail_count=4)
     assert head == [{"role": "system", "content": "s"}]
     assert middle == []
     assert tail == msgs
@@ -63,7 +63,7 @@ def test_split_returns_all_when_small():
 def test_split_head_is_system_middle_tail_split():
     msgs = [{"role": "system", "content": "s"}]
     msgs += [{"role": "user", "content": f"u{i}"} for i in range(10)]
-    head, middle, tail = _split_keep_tool_pairs(msgs, tail_count=3)
+    head, middle, tail = split_messages_head_middle_tail(msgs, tail_count=3)
     assert head == [{"role": "system", "content": "s"}]
     assert len(middle) == 7
     assert middle[0]["content"] == "u0"
@@ -77,7 +77,7 @@ def test_split_does_not_break_tool_pair():
     msgs.append({"role": "assistant", "tool_calls": [
         {"id": "c1", "type": "function", "function": {"name": "t", "arguments": "{}"}}]})
     msgs.append({"role": "tool", "tool_call_id": "c1", "content": "r"})
-    head, middle, tail = _split_keep_tool_pairs(msgs, tail_count=1)
+    head, middle, tail = split_messages_head_middle_tail(msgs, tail_count=1)
     assert tail[0]["role"] == "assistant"
     assert tail[0].get("tool_calls") is not None
     assert tail[-1]["role"] == "tool"

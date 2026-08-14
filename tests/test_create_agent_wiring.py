@@ -23,6 +23,7 @@ def test_create_agent_auto_wires_subagent_and_compression():
     """Minimal AgentLoop (no explicit hooks) auto-wires:
     - SubagentContextHook (BEFORE_INVOKE)
     - ContextCompressionHook (BEFORE_MODEL_CALL)
+    - MemoryFlushHook (BEFORE_MODEL_CALL)
     - ContextOverflowRecoveryHook (ON_MODEL_EXCEPTION, AFTER_MODEL_CALL)
     - RepeatToolCallDetectorHook (ON_TOOL_EXCEPTION, BEFORE_MODEL_CALL)
     The rest (retry/permission/skill/memory/logging) are caller-passed (no deps),

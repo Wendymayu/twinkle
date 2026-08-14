@@ -14,7 +14,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, RetryHook, SkillHook
+from twinkle.agentserver.hooks.builtin import (
+    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, SkillHook)
 from twinkle.agentserver.team.context import CURRENT_TEAM
 from twinkle.agentserver.team.message_box import MessageBox
 from twinkle.agentserver.team.task_store import TeamTaskStore
@@ -139,7 +140,8 @@ class Team:
         if member_name not in self._inboxes:
             self._inboxes[member_name] = MessageBox()
         inbox = self._inboxes[member_name]
-        hooks = [SkillHook(), MemoryHook(), LoggingHook(), RetryHook()]
+        hooks = [SkillHook(), MemoryHook(), MemoryFlushHook(llm=self._llm),
+                 LoggingHook(), RetryHook()]
         return ReActAgent(
             self._llm, self._store, tm,
             hooks=tuple(hooks),

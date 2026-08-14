@@ -18,9 +18,13 @@ class _ToolCall:
 
 
 class _Delta:
-    def __init__(self, content=None, tool_calls=None):
+    def __init__(self, content=None, tool_calls=None, reasoning_content=None):
         self.content = content
         self.tool_calls = tool_calls
+        # Provider thinking extension. DeepSeek/Qwen/GLM emit ``reasoning_content``,
+        # OpenAI o-series emits ``reasoning`` — mirrors the SDK's ChoiceDelta extra
+        # field, which lands in model_extra and is reachable via getattr.
+        self.reasoning_content = reasoning_content
 
 
 class _Choice:
@@ -184,3 +188,32 @@ def test_llm_client_forwards_timeout_to_openai_client(monkeypatch):
     assert captured["base_url"] == "https://u"
     assert captured["api_key"] == "k"
     assert captured["timeout"] == 42
+
+
+def test_reasoning_accumulated_on_finish_not_in_text_deltas(monkeypatch) -> None:
+    """Provider thinking (reasoning_content — DeepSeek/Qwen/GLM) is accumulated
+    and surfaced on Finish.assistant_message['reasoning'] / Finish.reasoning,
+    never mixed into TextDelta content (which must stay pure model answer so the
+    ReAct loop and the persisted answer aren't polluted by chain-of-thought)."""
+    scripts = [
+        [
+            _Chunk([_Choice(_Delta(reasoning_content="思考前半"))]),
+            _Chunk([_Choice(_Delta(content="hi"))]),
+            _Chunk([_Choice(_Delta(reasoning_content="思考后半"))]),
+            _Chunk([_Choice(_Delta(), finish_reason="stop")]),
+        ]
+    ]
+    client = _llm_with(scripts, monkeypatch)
+
+    async def run():
+        return [e async for e in client.stream(messages=[{"role": "user", "content": "hi"}], tools=[])]
+
+    events = _run(run())
+    # TextDelta stays pure answer — reasoning never leaks into the content stream
+    deltas = [e for e in events if isinstance(e, TextDelta)]
+    assert [d.content for d in deltas] == ["hi"]
+    finish = events[-1]
+    assert isinstance(finish, Finish)
+    assert getattr(finish, "reasoning", None) == "思考前半思考后半"
+    assert finish.assistant_message["content"] == "hi"
+    assert finish.assistant_message.get("reasoning") == "思考前半思考后半"
