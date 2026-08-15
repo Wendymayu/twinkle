@@ -70,6 +70,15 @@ AGENT_MAX_STEPS = settings.agent.max_steps
 CONTEXT_TOKEN_THRESHOLD = settings.context_compression.token_threshold
 CONTEXT_KEEP_RECENT_PAIRS = settings.context_compression.keep_recent_pairs
 CONTEXT_SUMMARY_PROMPT = settings.context_compression.summary_prompt
+CONTEXT_SUMMARY_PROMPT_MODE = settings.context_compression.summary_prompt_mode
+MICRO_COMPACT_TRIGGER_THRESHOLD = settings.context_compression.micro_compact.trigger_threshold
+MICRO_COMPACT_KEEP_RECENT_PER_TOOL = settings.context_compression.micro_compact.keep_recent_per_tool
+MICRO_COMPACT_COMPACTABLE_TOOL_NAMES = list(settings.context_compression.micro_compact.compactable_tool_names)
+MICRO_COMPACT_CLEARED_MARKER = settings.context_compression.micro_compact.cleared_marker
+TOOL_RESULT_BUDGET_TOKENS_THRESHOLD = settings.context_compression.tool_result_budget.tokens_threshold
+TOOL_RESULT_BUDGET_LARGE_MESSAGE_THRESHOLD = settings.context_compression.tool_result_budget.large_message_threshold
+TOOL_RESULT_BUDGET_TRIM_SIZE = settings.context_compression.tool_result_budget.trim_size
+TOOL_RESULT_BUDGET_PROTECT_LATEST = settings.context_compression.tool_result_budget.protect_latest
 
 # --- permissions (Phase 4) ---
 PERMISSIONS = settings.permissions.model_dump()

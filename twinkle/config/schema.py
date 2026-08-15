@@ -63,6 +63,21 @@ class AgentConfig(_StrictModel):
     max_steps: int = 1000
 
 
+class MicroCompactConfig(_StrictModel):
+    trigger_threshold: int = 5           # 可清条数(总数-keep) > trigger 才清
+    keep_recent_per_tool: int = 3       # 每工具留最近 N 条原文
+    compactable_tool_names: list[str] = [
+        "read_file", "glob", "command_exec", "web_fetch", "web_search"]
+    cleared_marker: str = "[Old tool result content cleared]"
+
+
+class ToolResultBudgetConfig(_StrictModel):
+    tokens_threshold: int = 9000        # 所有 tool 结果总量超此才触发
+    large_message_threshold: int = 3000  # 单条估算 token(char//3) 超此才 eligible
+    trim_size: int = 3000               # 预览保留字符数
+    protect_latest: int = 1             # 最新 N 条 tool result 永不 offload
+
+
 class ContextCompressionConfig(_StrictModel):
     token_threshold: int = 60000
     keep_recent_pairs: int = 6
@@ -70,6 +85,9 @@ class ContextCompressionConfig(_StrictModel):
         "你是对话上下文压缩器。把给定历史对话压成一段摘要，保留关键事实、用户偏好、"
         "已做决策、工具调用结果，丢弃寒暄与冗余。用中文。"
     )
+    summary_prompt_mode: Literal["structured", "free"] = "structured"
+    micro_compact: MicroCompactConfig = MicroCompactConfig()
+    tool_result_budget: ToolResultBudgetConfig = ToolResultBudgetConfig()
 
 
 class SkillsConfig(_StrictModel):

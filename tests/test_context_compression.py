@@ -2,6 +2,7 @@ import asyncio
 
 from twinkle.agentserver.compression import (
     _render_messages_text,
+    _STRUCTURED_SUMMARY_PROMPT,
     split_messages_head_middle_tail,
     _summarize,
     compress_messages,
@@ -96,7 +97,8 @@ def test_render_messages_text_includes_roles_and_tool_calls():
     assert "tool_call" in text and "t" in text
 
 
-def test_summarize_collects_textdeltas():
+def test_summarize_collects_textdeltas(monkeypatch):
+    monkeypatch.setattr("twinkle.agentserver.compression.CONTEXT_SUMMARY_PROMPT_MODE", "free")
     llm = FakeLLM(summary_text="the summary")
     out = asyncio.run(_summarize(llm, "sysprompt", "middle text"))
     assert out == "the summary"
@@ -104,6 +106,22 @@ def test_summarize_collects_textdeltas():
     assert msgs[0]["role"] == "system" and msgs[0]["content"] == "sysprompt"
     assert msgs[1]["role"] == "user" and "middle text" in msgs[1]["content"]
     assert tools == []
+
+
+def test_summarize_uses_structured_prompt_in_structured_mode(monkeypatch):
+    monkeypatch.setattr("twinkle.agentserver.compression.CONTEXT_SUMMARY_PROMPT_MODE", "structured")
+    llm = FakeLLM(summary_text="结构化摘要")
+    asyncio.run(_summarize(llm, "free form prompt", "middle"))
+    msgs, _ = llm.calls[0]
+    # structured 模式用硬编码常量,非传入的 free form prompt
+    assert msgs[0]["content"] == _STRUCTURED_SUMMARY_PROMPT
+
+
+def test_structured_summary_prompt_has_four_sections():
+    assert "关键事实与决定" in _STRUCTURED_SUMMARY_PROMPT
+    assert "已用工具与文件" in _STRUCTURED_SUMMARY_PROMPT
+    assert "待办与当前任务" in _STRUCTURED_SUMMARY_PROMPT
+    assert "错误与修复" in _STRUCTURED_SUMMARY_PROMPT
 
 
 # --- compress_messages ---
