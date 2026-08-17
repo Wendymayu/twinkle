@@ -71,6 +71,13 @@ class MemoryManager:
         self._ensure_schema()
         self._clear_if_model_changed()
 
+    @property
+    def memory_dir(self) -> Path:
+        """Resolved memory directory (read-only). Exposed for dreaming's sidecar
+        (dreaming_state.json) which lives next to MEMORY.md but outside the
+        write-whitelist (raw pathlib, not mgr.write)."""
+        return self._dir
+
     # --- schema -----------------------------------------------------------
     def _ensure_schema(self) -> None:
         db = self._db
@@ -185,6 +192,29 @@ class MemoryManager:
         self._index_file(relative_path)
         log.info("edit_memory path=%s", relative_path)
         return f"Edited {relative_path}."
+
+    def replace(self, path: str, content: str) -> str:
+        """Atomic full overwrite — write to a temp file then rename onto the
+        target in one step (rename is atomic on the same filesystem). Used by
+        dreaming's consolidation step to rewrite MEMORY.md after a read
+        snapshot: the atomic rename prevents a torn write racing an agent
+        append, and the rebuild via _index_file reflects the new content."""
+        relative_path = self._resolve_relative_path(path)
+        if relative_path is None:
+            return (f"Error: invalid memory path '{path}'. "
+                    "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
+        fpath = self._dir / relative_path
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        tmp = fpath.parent / (fpath.name + ".tmp")
+        try:
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(fpath)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)  # 别留 .tmp 残留
+            return f"Error replacing '{path}': {exc}"
+        self._index_file(relative_path)
+        log.info("replace_memory path=%s", relative_path)
+        return f"Replaced {relative_path}."
 
     def _index_file(self, relative_path: str) -> None:
         fpath = self._dir / relative_path

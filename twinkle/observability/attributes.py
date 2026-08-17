@@ -12,7 +12,6 @@ SPAN_GEN_AI_TOOL = "gen_ai.tool"
 SPAN_COMPRESSION = "twinkle.compression"
 SPAN_SKILL_EVOLUTION = "twinkle.skill.evolution"
 SPAN_MEMORY_FLUSH = "twinkle.memory.flush"
-SPAN_MEMORY_DREAMING = "twinkle.memory.dreaming"
 
 # --- gen_ai.* (OTel GenAI semconv) ---
 GEN_AI_SYSTEM = "gen_ai.system"
@@ -46,13 +45,6 @@ TWINKLE_COMPRESSION_STRATEGY = "twinkle.compression.strategy"
 # --- memory flush ---
 TWINKLE_MEMORY_FLUSH_NEW_WRITES = "twinkle.memory.flush.new_writes"
 TWINKLE_MEMORY_FLUSH_ERRORS = "twinkle.memory.flush.errors"
-# --- memory dreaming ---
-TWINKLE_MEMORY_DREAMING_MERGED = "twinkle.memory.dreaming.merged"
-TWINKLE_MEMORY_DREAMING_DEDUPED = "twinkle.memory.dreaming.deduped"
-TWINKLE_MEMORY_DREAMING_CONFLICTS_RESOLVED = "twinkle.memory.dreaming.conflicts_resolved"
-TWINKLE_MEMORY_DREAMING_EXTRACTED = "twinkle.memory.dreaming.extracted"
-TWINKLE_MEMORY_DREAMING_DELETED = "twinkle.memory.dreaming.deleted"
-TWINKLE_MEMORY_DREAMING_ERRORS = "twinkle.memory.dreaming.errors"
 # --- skill / evolution ---
 TWINKLE_SKILL_NAME = "twinkle.skill.name"
 TWINKLE_EVOLUTION_STATUS = "twinkle.evolution.status"

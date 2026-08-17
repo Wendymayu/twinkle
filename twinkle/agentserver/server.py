@@ -32,6 +32,14 @@ from twinkle.schema.message import EventType
 
 log = logging.getLogger("twinkle.agentserver")
 
+# 在途请求数（Dreaming busy-backoff 判据）。run_task inc/dec。
+_inflight_count: int = 0
+
+
+def _get_inflight_count() -> int:
+    """当前在途 agent 请求数（Dreaming busy-backoff 判据）。每次调用读最新值。"""
+    return _inflight_count
+
 ACK_FRAME = {
     "type": "event",
     "event": EventType.CONNECTION_ACK.value,
@@ -141,6 +149,7 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                     log.debug("send on closed connection, dropping %s", resp.request_id)
 
         async def run_task(envelope: E2AEnvelope) -> None:
+            global _inflight_count
             params = envelope.params or {}
             request = AgentRequest(
                 session_id=envelope.session_id or envelope.request_id,
@@ -149,6 +158,7 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                 channel=envelope.channel or "web",
                 mode=params.get("mode", ""),
             )
+            _inflight_count += 1
             try:
                 async for frame in agent.run(request):
                     await send(frame)
@@ -157,6 +167,8 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                 await send(E2AResponse(
                     request_id=envelope.request_id, is_final=True, status="failed",
                     response_kind="e2a.error", body={"error": str(exc)}))
+            finally:
+                _inflight_count -= 1
 
         try:
             async for raw in ws:
@@ -218,6 +230,7 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
 
 
 async def main() -> None:
+    from twinkle.agentserver.memory.dreaming import start_dreaming
     from twinkle.agentserver.permissions import permission_engine
     from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, PermissionHook, RetryHook, SkillHook
     from twinkle.workspace import ensure_workspace_dir
@@ -225,8 +238,12 @@ async def main() -> None:
     ensure_workspace_dir()
     store = session_store()
     engine = permission_engine()
-    agent = create_agent(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook()])
+    llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
+    agent = create_agent(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook()], llm=llm)
     handler = ws_handler(agent)
+    dreaming_task = start_dreaming(llm, _get_inflight_count)  # 后台记忆整理（opt-in 默认关）
+    if dreaming_task is not None:
+        log.info("Dreaming background task started")
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
     async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
         await asyncio.Future()  # run forever

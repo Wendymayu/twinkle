@@ -126,7 +126,7 @@
 
 **验收**：跨会话记住事实（如"用户偏好/项目约定"），新会话里 `recall` 注入相关记忆进上下文；无 embedding 配置时降级到 FTS 仍可用。 ✅
 
-**仍 deferred**：5b 自动抽取（对话自动写记忆）、5c Dreaming（离线记忆整理，取代 FIFO 上限）。
+**仍 deferred**：5b 自动抽取（对话自动写记忆）。~~5c Dreaming~~ **5c Dreaming 已落地**（B 方案 Phase 2，2026-08-17 重做：旧 N² pairwise `_dedupe_and_resolve` + 每段落 LLM 抽取判定为「真的很烂」已废，改 openclaw daily→MEMORY.md promotion 模型，见 `docs/design/dreaming-redesign.md`）：`memory/dreaming.py` 后台 asyncio task + busy-backoff，`dream()` = 扫 daily 非空行 → `claimHash` 跨文件去重 → 确定性门槛（≥`min_distinct_files` 个不同 daily）晋升 append 进 `MEMORY.md` + sidecar 记已晋升（只增不减，幂等）→ 单次 LLM 删行整合（`{"delete":[行号]}`，删冗余/矛盾行，≤25% 比例验证，fail-soft）→ 容量 compact 丢最老提升行。晋升零 LLM，整合 LLM 在后台不进写入路径。daily append-only 不动，opt-in 默认关。
 
 ---
 

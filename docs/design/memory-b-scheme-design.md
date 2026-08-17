@@ -133,78 +133,30 @@ while running:
 
 `inflight_requests` = AgentServer 新增的活跃请求计数（`handle_message` 进来 +1 / 完成 -1），是 jiuwenswarm `DreamingOrchestrator.busy_checker` 的等价。需在 AgentServer 请求处理路径加计数。
 
-### 4.2 整理算法 — 方案 C（检索聚类 + LLM 合并）
+### 4.2 整理算法 — B 模型（claimHash 晋升 + LLM 删行整合）
 
-3 方案对比（A 整文件重写 / B 逐条判定 / C 检索聚类+合并），选 **C**：
+> 2026-08-17 重做：旧「方案 C」（N² pairwise `_dedupe_and_resolve` + 每段落 `_harvest_daily` LLM 抽取 + 判价值 + 3 个 prompt + OTel span）判定为「真的很烂」已全废。现模型参考 openclaw 的 daily→MEMORY.md promotion。完整设计见 [`dreaming-redesign.md`](dreaming-redesign.md)（§0 大白话、§6 dream body、§8 sidecar、§9 consolidate prompt、§10–§11 验证/compact、§14 方法增删），本文只折叠要点。
 
-- 复用现有 `MemoryManager.search`（5a hybrid 已有，不重造轮子）。
-- 结构化聚类对齐 B 方案 industrial pattern（segment merge：读→聚类→合并→写）。
-- 比 A 抗幻觉强（LLM 处理小类非整文件）；比 B 成本低（聚类摊销 LLM 调用）。
-- 从 daily 抽新事实用 search 判「是否已存在」自然落地不重复。
+`dream()`（门卫 `enabled + llm + inflight==0` 过后）三步：
 
-### 4.3 `_dream_once()` 流程
+1. **晋升步 `_promote_append`（零 LLM，确定性）**：扫 `daily_memory/*.md` 非空行 → `claimHash = md5(line.strip())` 跨文件聚合 → 门 `len(source_files) ≥ min_distinct_files(默认2)` AND `hash ∉ state["promoted"]` → 逐条 `mgr.write("MEMORY.md", text, append=True)` + sidecar 记 `{ts,text,source_path}`。返回晋升条数 `count`；`count==0` → return（不跑 consolidate）。**幂等靠 sidecar `promoted` 集（只增不减，consolidate 删行不删 record）——不用 MEMORY.md marker**（marker 会随被 consolidate 删的行消失 → 下 tick 重晋）。
 
-```
-1. 读 MEMORY.md 全文 → 拆条目列表（按 markdown 列表项/段落）
-2. MEMORY.md 内整理:
-   for 目标条目 in MEMORY.md 条目:
-     相似组 = mgr.search(目标条目内容, top_k)   # 召回 MEMORY.md 内其它相似条目
-     相似组非空 → LLM 判(目标 vs 相似组关系)
-       redundant   → edit_memory 删目标条目（留相似旧条）
-       merge       → edit_memory 用合并后内容替换相似旧条 + 删目标条目
-       conflicting → edit_memory 相似旧条改为目标值 + 删目标条目
-       independent → 不动
-3. 删低值: LLM 判每条价值, 低值 edit_memory 删
-4. 从 daily 抽长期事实:
-   for daily_file in daily_memory/*.md:
-     for 段落 in daily_file:
-       相似 = mgr.search(段落, top_k)      # 查 MEMORY.md 有无
-       无高相似(新事实) → LLM 抽长期事实 → append MEMORY.md
-5. (edit/append 已自动 _index_file 重索引)
-```
+2. **整合步 `_consolidate`（一次 LLM）**：MEMORY.md 非空行编号 → LLM 出 `{"delete":[行号]}`（语义重复删冗余留更完整；矛盾删旧值留后写）→ 验证 `len(delete)/len(lines) ≤ max_delete_fraction(0.25)` + 行号 ∈ `[1,len]` + 非 bool → `mgr.replace` 原子写回（留存行逐字保留）。**LLM 全程不碰文本原文，只出行号**（先 append 后 delete，把"既加又合"降为"只删"）。任一步失败（LLM 异常/JSON 解析/验证不过）→ fail-soft 跳过，晋升步 append 的版本即为最终结果（等价 openclaw append-only fallback）。
 
-注：步骤 2 Dreaming 读的是 `MEMORY.md` 现状，条目间互相 search 比较关系——「目标条目」是当前 for 循环处理的条目，「相似旧条目」是 search 召回的其它条目；冲突时留目标值（文件内出现更后者视为更新的事实）。`edit_memory` 的 `old_text` **由程序从 `mgr.search` 返回的 `text` 字段拿**（程序定位，不让 LLM 输出原文——LLM 输出原文易不匹配 `old_text in text` 校验），LLM 只输出 `action` + `merged_content`。`mgr.search` 返回 `{path, score, text, start_line, end_line}`，供程序定位条目。
+3. **compact `_compact_if_over_budget`**：`len(MEMORY.md) > max_memory_chars(10000)` → 按 sidecar `ts` 升序丢最老的仍存在的 promotion 行（非 promotion 用户行不动）→ `mgr.replace` 写回。
 
-### 4.4 LLM 调用
+### 4.3 数据结构
 
-复用 `compression._summarize` 模板，3 类 prompt（整理判定 / 判价值 / 抽长期事实），均可 config 覆盖。JSON 输出，解析失败 fail-soft 跳过该条。
+- **sidecar `<memory_dir>/dreaming_state.json`**（dreaming.py raw pathlib 自管，不走 `mgr.write` 白名单；原子写 tempfile+rename）：`{"version":1,"promoted":{"<hash>":{"ts","text","source_path"}}}`，`promoted` 只增不减。读 `_load_state`：不存在/坏 JSON/坏形状 → `{"version":1,"promoted":{}}`。写 `_save_state`：tempfile+rename，成功不留 `.tmp`。
+- **claim**（`_scan_claims` 返回）：`{"<hash>":{"text":<strip 后行>,"source_files":set,"first_path":str}}`。文件内同行 = 1 claim；跨文件同 claim 累积 `source_files`。
 
-### 4.5 Dreaming prompt 默认值
+### 4.4 LLM 调用（consolidate）
 
-整理判定（目标条目 vs 召回相似旧条目）：
-```
-你是记忆整理器。下面是【目标条目】和它召回的【MEMORY.md 内相似旧条目】。
-判断关系并输出操作：
-- redundant（语义重复，同事实不同措辞）→ 保留旧条，目标条删除。
-- merge（可合并成更完整的一条）→ 输出合并后内容，替换旧条，目标条删除。
-- conflicting（同实体单一取值属性不同取值，如旧"用Windows"目标"用Mac"）→ 保留目标值，旧条改为目标值，目标条删除。
-- independent（不同实体/不同属性）→ 都保留，不动。
-旧条原文由程序从召回结果定位，你只需输出 action 与（merge 时的）合并后内容。
-只输出 JSON，禁止非 JSON 文本：
-{"action":"redundant|merge|conflicting|independent","merged_content":"合并后内容(仅merge非空)"}
-```
+单次 consolidate prompt `_CONSOLIDATE_PROMPT` **硬编码进 `dreaming.py` 模块常量**（JSON 契约 `{"delete":[...]}`，不进 config，守 [[json-contract-prompts-not-in-config]]）。复用 `_ask_llm(prompt)` 收 TextDelta（异常 fail-soft 返回空串）。旧 3 prompt（pairwise `_JUDGE_PROMPT` + harvest `_EXTRACT_PROMPT` + 判价值）全删。
 
-判价值：
-```
-你是记忆价值判定器。下面是【记忆条目】。判断是否值得长期保留：
-- 用户偏好/决策/持久事实/项目约定/架构 → 保留。
-- 已过时（事实已变，且已有更新条目覆盖）→ 删除。
-- 临时/过程性/低信息量 → 删除。
-只输出 JSON：{"keep":true|false,"reason":"简短理由"}
-```
+### 4.5 OTel
 
-抽长期事实（从 daily 段落）：
-```
-你是长期事实抽取器。下面是【日记段落】和它召回的【MEMORY.md 已有相似条目】。
-从日记段落抽取【值得长期保留的事实】（用户偏好/决策/持久事实/项目约定），排除临时/过程性/当日就过期的事。
-若召回的相似条目已覆盖该事实 → 不抽取（已存在）。
-只输出要追加到 MEMORY.md 的新事实（JSON 数组），无新事实则输出 []：
-[{"content":"新事实条目"}]
-```
-
-### 4.6 OTel
-
-span `twinkle.memory.dreaming`，属性 `merged`/`deduped`/`conflicts_resolved`/`extracted`/`deleted`/`errors`。
+无。Dreaming 可观测已删（旧 `instrument_memory_dreaming` + `SPAN_MEMORY_DREAMING` + 6 属性焊进 `dream` 返回契约，违 [[observability-via-instrumentor-not-inline]]；`dream` 纯副作用返回 None）。以后需要再加走 instrumentor monkey-patch，不焊返回值。
 
 ## 5. config schema 汇总（新增两块，opt-in 默认关）
 

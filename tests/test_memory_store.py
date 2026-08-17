@@ -211,6 +211,23 @@ def test_edit_old_text_missing(tmp_path):
     assert "not found" in out.lower()
 
 
+def test_replace_full_overwrite_and_reindexes(tmp_path):
+    """replace 原子全量覆写:旧内容全清(非追加)、索引按新内容重建(旧 chunk
+    不再可召回)、不留 .tmp 残留。dreaming 整合步用 replace 重写 MEMORY.md——
+    read 快照后整文件换写,必须原子(tempfile+rename)且重建索引。"""
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "- 用 Windows 系统\n", append=True)
+    mgr.write("MEMORY.md", "- 偏好中文\n", append=True)
+    out = mgr.replace("MEMORY.md", "- 用 macOS 系统\n")
+    assert "Replaced" in out
+    assert mgr.read("MEMORY.md") == "- 用 macOS 系统"  # 旧内容全清,非追加
+    # 索引按新内容重建:旧 chunk 不再召回,新 chunk 可召回
+    assert not any("Windows" in h["text"] for h in mgr.search("Windows"))
+    assert any("macOS" in h["text"] for h in mgr.search("macOS"))
+    # 原子写不留 .tmp 残留
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
 def test_model_change_clears_index(tmp_path):
     from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
     mgr = MemoryManager(str(tmp_path), embed_provider=MockEmbeddingProvider(dims=8, model="v1"),

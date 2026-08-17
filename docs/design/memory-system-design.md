@@ -338,13 +338,13 @@ if chunk_count > 200:
 
 ### 7.2 没有什么
 
-- **无时间过期**：没有「30 天前的 daily 自动删」。`daily_memory/` 的旧文件会一直留，直到人为删或被 5c 取代。
+- **无时间过期**：没有「30 天前的 daily 自动删」。`daily_memory/` 的旧文件会一直留，直到人为删（Dreaming 从中抽长期事实 append 进 `MEMORY.md`，但不删 daily 原料）。
 - **无全局容量上限**：只有单文件 chunk 上限，没有「全库 N 条」的硬顶。
 - **无重试调度**：embed 失败的 chunk 不重试，直到文件内容再变才重新索引。
 
-### 7.3 未来：Phase 5c Dreaming
+### 7.3 Phase 5c Dreaming（已落地）
 
-路线图里 Phase 5c「Dreaming」（记忆消化/巩固/遗忘）会取代 FIFO——做语义去重、合并、降权旧记忆。目前 5a 只把这个坑占住，机制极简。
+Phase 5c「Dreaming」（记忆消化/巩固）已落地为 B 方案 Phase 2（spec `docs/design/memory-b-scheme-design.md` §4）：`memory/dreaming.py` 后台 asyncio task 周期整理 `MEMORY.md`——语义去重/冲突消解 + 从 `daily_memory/*.md` 抽长期事实 append。daily append-only 不动（§7.2 的 FIFO 仍保留作检索块兜底）。opt-in（`memory.dreaming.enabled` 默认关），fail-soft，busy-backoff（对话进行中跳过）。
 
 ---
 

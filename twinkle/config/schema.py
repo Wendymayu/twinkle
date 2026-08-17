@@ -135,7 +135,10 @@ class MemoryDreamingConfig(_StrictModel):
     interval_seconds: int = 3600   # 整理周期秒
     start_delay_seconds: int = 300  # 启动后首跑延迟秒
     top_k: int = 5                  # 聚类相似召回数
-    # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；文本见 docs/design/memory-b-scheme-design.md §4.5
+    min_distinct_files: int = 2     # 晋升门：同一事实须出现在 ≥N 个不同 daily 文件才搬进 MEMORY.md
+    max_memory_chars: int = 10000   # MEMORY.md 容量预算，超限 compact 丢最老提升行
+    max_delete_fraction: float = 0.25  # 整合步单次删除行数上限比例（安全阀，防 LLM 误删）
+    # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；见 docs/design/dreaming-redesign.md §9
 
 
 class MemoryConfig(_StrictModel):

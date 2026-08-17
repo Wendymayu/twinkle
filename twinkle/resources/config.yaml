@@ -66,10 +66,13 @@ memory:
   flush:
     enabled: false                # 兜底(opt-in):压缩前 LLM 查 middle 有无未持久化重要信息→write_memory 落盘。默认关=维持 5a
   dreaming:
-    enabled: false               # 后台整理(opt-in):周期跑 Dreaming 整理 MEMORY.md(去重/合并/冲突/删低值+从 daily 抽)。默认关
+    enabled: false               # 后台整理(opt-in):周期跑 dream()——扫 daily_memory 非空行→claimHash 去重→跨≥min_distinct_files 日晋升进 MEMORY.md→单次 LLM 整合删冗余/矛盾行。默认关
     interval_seconds: 3600        # 整理周期秒
     start_delay_seconds: 300      # 启动后首跑延迟秒
-    top_k: 5                      # 聚类相似召回数
+    top_k: 5                      # 聚类相似召回数(暂无消费者,备未来 search 用)
+    min_distinct_files: 2          # 晋升门:同一事实须出现在 ≥N 个不同 daily 文件才搬进 MEMORY.md
+    max_memory_chars: 10000       # MEMORY.md 容量预算,超限 compact 丢最老提升行
+    max_delete_fraction: 0.25     # 整合步单次删除行数上限比例(安全阀,防 LLM 误删)
 permissions:
   enabled: false                          # false = 系统关(全 ALLOW,无审计/无 ASK;command_exec 仍走 builtin_rules)
   enabled_channels: [web]
