@@ -91,6 +91,26 @@ def test_write_creates_daily_subdir(tmp_path):
     assert (tmp_path / "daily_memory" / "2026-07-27.md").is_file()
 
 
+def test_write_does_not_index_until_flush(tmp_path):
+    """防抖:write 只落盘标 dirty,不立即索引(DB 无 chunks);search 开头 if dirty
+    同步兜底后搜到;_flush_now 后 DB 有索引。
+
+    对齐 jiuwenswarm 写入零索引 + 去抖:写入路径不碰检索索引(强化 B §7 写入快通道
+    零 API),索引由 search 兜底或后台 timer 异步做。write 不再触发 _index_file
+    全量重索引——这是降频核心。"""
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "用户偏好中文。", append=True)
+    # 防抖未 flush → DB 无索引(写入路径零索引)
+    assert mgr._db.execute(  # noqa: SLF001
+        "SELECT COUNT(*) FROM chunks WHERE path='MEMORY.md'").fetchone()[0] == 0
+    # search 兜底:开头 if dirty 同步索引后搜到
+    hits = mgr.search("偏好")
+    assert any("偏好" in h["text"] for h in hits)
+    # flush 后 DB 有索引
+    assert mgr._db.execute(  # noqa: SLF001
+        "SELECT COUNT(*) FROM chunks WHERE path='MEMORY.md'").fetchone()[0] >= 1
+
+
 def test_search_fts_only_hits_written_fact(tmp_path):
     """No embed_provider → FTS-only; write a fact, search by keyword, hit."""
     mgr = _mgr(tmp_path)  # embed_provider=None
@@ -233,6 +253,7 @@ def test_model_change_clears_index(tmp_path):
     mgr = MemoryManager(str(tmp_path), embed_provider=MockEmbeddingProvider(dims=8, model="v1"),
                         dims=8)
     mgr.write("MEMORY.md", "some fact", append=True)
+    mgr._flush_now()  # noqa: SLF001 — 防抖:write 零索引,显式 flush 落索引后再断言
     assert mgr._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
     # swap provider to a different model name -> clear stale index
     mgr._provider = MockEmbeddingProvider(dims=8, model="v2")
@@ -247,6 +268,7 @@ def test_fifo_cap_evicts_oldest(tmp_path):
     # we need >2 chunks in one file. Write a long content with 3+ chunks.
     long_content = "\n".join(f"line {i} has unique content number {i}" for i in range(20))
     mgr.write("MEMORY.md", long_content, append=False)
+    mgr._flush_now()  # noqa: SLF001 — 防抖:write 零索引,显式 flush 落索引后再断言 cap
     count = mgr._db.execute("SELECT COUNT(*) FROM chunks WHERE path='MEMORY.md'").fetchone()[0]
     assert count <= 2  # capped
 
@@ -281,8 +303,11 @@ def test_index_file_rolls_back_on_insert_error(tmp_path):
     from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
     mgr = MemoryManager(str(tmp_path), embed_provider=MockEmbeddingProvider(dims=8),
                         dims=4)  # vec0 table float[4] vs 8-float vectors
+    mgr.write("MEMORY.md", "some fact", append=True)
+    # 防抖:write 零索引不触发 _index_file → 不引发;显式调 _index_file 触发
+    # vec0 维度不匹配 INSERT,验证 rollback(files/meta 无残留)。
     with pytest.raises(Exception):
-        mgr.write("MEMORY.md", "some fact", append=True)
+        mgr._index_file("MEMORY.md")  # noqa: SLF001
     # rollback: nothing committed for this file
     assert mgr._db.execute(  # noqa: SLF001
         "SELECT COUNT(*) FROM chunks WHERE path='MEMORY.md'").fetchone()[0] == 0

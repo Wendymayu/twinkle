@@ -13,6 +13,7 @@ import hashlib
 import logging
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import NamedTuple
 
@@ -48,6 +49,7 @@ class MemoryManager:
         text_weight: float = 0.3,
         candidate_multiplier: float = 2.0,
         max_chunks_per_file: int = 200,
+        index_debounce_seconds: float = 2.0,
     ) -> None:
         self._dir = Path(memory_dir).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -61,12 +63,18 @@ class MemoryManager:
         self._text_weight = text_weight
         self._candidate_multiplier = candidate_multiplier
         self._max_chunks_per_file = max_chunks_per_file
-        # check_same_thread default (True) holds: all MemoryManager access is
-        # on the AgentServer event-loop thread (single-process, single-loop).
-        # If a future change moves embeds/vector work to asyncio.to_thread or
-        # a background thread, this connection must move with it or go per-thread.
-        self._db = sqlite3.connect(str(self._dir / "memory.db"))
+        self._debounce = index_debounce_seconds
+        # 防抖:写入路径零索引(write/edit/replace 只落盘标 dirty,不调 _index_file);
+        # 索引由 search 兜底(if dirty 同步)或后台 threading.Timer 异步做——对齐
+        # jiuwenswarm 写入零索引 + watchDebounceMs 去抖(省 watchdog:write 在
+        # manager 内直接 mark_dirty,不需文件监听桥)。check_same_thread=False +
+        # RLock:_flush_dirty 跑在 timer 线程,与主线程 search/flush_now 并发访问 SQLite。
+        self._db = sqlite3.connect(str(self._dir / "memory.db"), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._db_lock = threading.RLock()  # 重入:_index_file 持锁调 _embed_chunks/_evict
+        self._dirty_paths: set[str] = set()
+        self._dirty_lock = threading.Lock()  # 保护 _dirty_paths + _sync_timer(主线程 add / timer 线程 drain)
+        self._sync_timer: threading.Timer | None = None
         self._vec_enabled = False
         self._ensure_schema()
         self._clear_if_model_changed()
@@ -170,7 +178,7 @@ class MemoryManager:
                     f.write("\n")
         except OSError as exc:
             return f"Error writing '{path}': {exc}"
-        self._index_file(relative_path)
+        self._mark_dirty(relative_path)
         log.info("write_memory path=%s append=%s", relative_path, append)
         return f"Stored to {relative_path}."
 
@@ -189,7 +197,7 @@ class MemoryManager:
         if old_text not in text:
             return f"Error: old_text not found in '{path}'."
         fpath.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-        self._index_file(relative_path)
+        self._mark_dirty(relative_path)
         log.info("edit_memory path=%s", relative_path)
         return f"Edited {relative_path}."
 
@@ -212,9 +220,44 @@ class MemoryManager:
         except OSError as exc:
             tmp.unlink(missing_ok=True)  # 别留 .tmp 残留
             return f"Error replacing '{path}': {exc}"
-        self._index_file(relative_path)
+        self._mark_dirty(relative_path)
         log.info("replace_memory path=%s", relative_path)
         return f"Replaced {relative_path}."
+
+    # --- debounce: 写入零索引, 索引由 search 兜底 / 后台 timer 异步 ----------
+    def _mark_dirty(self, relative_path: str) -> None:
+        """标记文件 dirty(待索引)+ 排程去抖 sync。写入路径不碰 DB 索引(零
+        embedding API,强化 B §7 写入快通道)。_dirty_paths 跨线程:主线程 add,
+        timer 线程 drain。"""
+        with self._dirty_lock:
+            self._dirty_paths.add(relative_path)
+            if self._sync_timer:
+                self._sync_timer.cancel()
+            self._sync_timer = threading.Timer(self._debounce, self._flush_dirty)
+            self._sync_timer.start()
+
+    def _drain_dirty(self) -> list[str]:
+        """取出并清空 dirty 集 + 取消 pending timer(主线程 _flush_now 和 timer
+        线程 _flush_dirty 都走这里,pop 原子在锁内防重复索引)。"""
+        with self._dirty_lock:
+            if self._sync_timer:
+                self._sync_timer.cancel()
+                self._sync_timer = None
+            paths = sorted(self._dirty_paths)
+            self._dirty_paths.clear()
+            return paths
+
+    def _flush_dirty(self) -> None:
+        """timer 线程:去抖窗口到期后批量重索引 dirty 文件(文件级 hash 跳过未变)。
+        与主线程 search 并发 → _index_file 持 _db_lock(RLock)互斥。"""
+        for path in self._drain_dirty():
+            self._index_file(path)
+
+    def _flush_now(self) -> None:
+        """主线程同步重索引 dirty(search 兜底 / 测试用)。取消 pending timer
+        避免重复,立即索引保证 search 搜到刚写的内容。"""
+        for path in self._drain_dirty():
+            self._index_file(path)
 
     def _index_file(self, relative_path: str) -> None:
         fpath = self._dir / relative_path
@@ -224,64 +267,67 @@ class MemoryManager:
         except OSError:
             return
         file_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
-        fingerprint = self._db.execute(
-            "SELECT mtime, size, hash FROM files WHERE path=?", (relative_path,)).fetchone()
-        if (fingerprint and fingerprint["mtime"] == stat.st_mtime
-                and fingerprint["size"] == stat.st_size and fingerprint["hash"] == file_hash):
-            return  # unchanged — skip re-index
+        # 防抖后 _index_file 跑在 timer 线程(_flush_dirty)或主线程(search 兜底
+        # _flush_now),跨线程并发 → _db_lock(RLock)互斥。文件 stat/read/hash 在锁外。
+        with self._db_lock:
+            fingerprint = self._db.execute(
+                "SELECT mtime, size, hash FROM files WHERE path=?", (relative_path,)).fetchone()
+            if (fingerprint and fingerprint["mtime"] == stat.st_mtime
+                    and fingerprint["size"] == stat.st_size and fingerprint["hash"] == file_hash):
+                return  # unchanged — skip re-index
 
-        # Wrap the whole mutation in a transaction so a mid-index failure
-        # (e.g. a vec0 dims-mismatch INSERT) rolls back cleanly. Without this
-        # the open transaction leaks onto the next write on this singleton
-        # connection and commits the broken file's partial state. Mirrors
-        # jiuwenswarm manager.py _index_file try/rollback.
-        try:
-            # delete old chunks for this file (collect rowids first)
-            stale_row_ids = [r["rowid"] for r in self._db.execute(
-                "SELECT rowid FROM chunks WHERE path=?", (relative_path,)).fetchall()]
-            if stale_row_ids:
-                placeholders = ",".join("?" * len(stale_row_ids))
-                self._db.execute("DELETE FROM chunks WHERE path=?", (relative_path,))
-                self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({placeholders})", stale_row_ids)
-                if self._vec_enabled:
-                    self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", stale_row_ids)
+            # Wrap the whole mutation in a transaction so a mid-index failure
+            # (e.g. a vec0 dims-mismatch INSERT) rolls back cleanly. Without this
+            # the open transaction leaks onto the next write on this singleton
+            # connection and commits the broken file's partial state. Mirrors
+            # jiuwenswarm manager.py _index_file try/rollback.
+            try:
+                # delete old chunks for this file (collect rowids first)
+                stale_row_ids = [r["rowid"] for r in self._db.execute(
+                    "SELECT rowid FROM chunks WHERE path=?", (relative_path,)).fetchall()]
+                if stale_row_ids:
+                    placeholders = ",".join("?" * len(stale_row_ids))
+                    self._db.execute("DELETE FROM chunks WHERE path=?", (relative_path,))
+                    self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({placeholders})", stale_row_ids)
+                    if self._vec_enabled:
+                        self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", stale_row_ids)
 
-            want_vec = self._vec_enabled and self._provider is not None
-            chunks = self._chunk(content)
-            texts = [c.text for c in chunks]
-            embeddings = self._embed_chunks(texts) if want_vec else [None] * len(chunks)
-            now = _now_iso()
-            embed_model = self._provider.model if self._provider else ""
-            for chunk, emb in zip(chunks, embeddings):
-                chunk_id = f"{relative_path}:{chunk.start}:{chunk.end}"
-                # _embed_chunks already returns serialized blobs (it calls
-                # _serialize on the float list). Don't double-serialize — that
-                # treats the blob's bytes as a float list and inflates dims
-                # (8 floats -> 32-byte blob -> 32 dims -> vec0 mismatch).
-                blob = emb
-                cur = self._db.execute(
-                    "INSERT INTO chunks(id,path,source,start_line,end_line,hash,model,"
-                    "text,embedding,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (chunk_id, relative_path, "memory", chunk.start, chunk.end, file_hash, embed_model,
-                     chunk.text, blob, now))
-                rowid = cur.lastrowid
-                self._db.execute("INSERT INTO chunks_fts(rowid, text) VALUES(?, ?)",
-                                 (rowid, tokenize_for_fts(chunk.text, True)))
-                if want_vec and blob is not None:
-                    self._db.execute(
-                        "INSERT INTO chunks_vec(rowid, embedding) VALUES(?, ?)",
-                        (rowid, blob))
-            self._db.execute(
-                "INSERT OR REPLACE INTO files(path,source,hash,mtime,size) VALUES(?,?,?,?,?)",
-                (relative_path, "memory", file_hash, stat.st_mtime, stat.st_size))
-            self._db.execute(
-                "INSERT OR REPLACE INTO meta(key,value) VALUES('embed_model', ?)",
-                (embed_model,))
-            self._evict_excess_chunks(relative_path)
-            self._db.commit()
-        except Exception:
-            self._db.rollback()
-            raise
+                want_vec = self._vec_enabled and self._provider is not None
+                chunks = self._chunk(content)
+                texts = [c.text for c in chunks]
+                embeddings = self._embed_chunks(texts) if want_vec else [None] * len(chunks)
+                now = _now_iso()
+                embed_model = self._provider.model if self._provider else ""
+                for chunk, emb in zip(chunks, embeddings):
+                    chunk_id = f"{relative_path}:{chunk.start}:{chunk.end}"
+                    # _embed_chunks already returns serialized blobs (it calls
+                    # _serialize on the float list). Don't double-serialize — that
+                    # treats the blob's bytes as a float list and inflates dims
+                    # (8 floats -> 32-byte blob -> 32 dims -> vec0 mismatch).
+                    blob = emb
+                    cur = self._db.execute(
+                        "INSERT INTO chunks(id,path,source,start_line,end_line,hash,model,"
+                        "text,embedding,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (chunk_id, relative_path, "memory", chunk.start, chunk.end, file_hash, embed_model,
+                         chunk.text, blob, now))
+                    rowid = cur.lastrowid
+                    self._db.execute("INSERT INTO chunks_fts(rowid, text) VALUES(?, ?)",
+                                     (rowid, tokenize_for_fts(chunk.text, True)))
+                    if want_vec and blob is not None:
+                        self._db.execute(
+                            "INSERT INTO chunks_vec(rowid, embedding) VALUES(?, ?)",
+                            (rowid, blob))
+                self._db.execute(
+                    "INSERT OR REPLACE INTO files(path,source,hash,mtime,size) VALUES(?,?,?,?,?)",
+                    (relative_path, "memory", file_hash, stat.st_mtime, stat.st_size))
+                self._db.execute(
+                    "INSERT OR REPLACE INTO meta(key,value) VALUES('embed_model', ?)",
+                    (embed_model,))
+                self._evict_excess_chunks(relative_path)
+                self._db.commit()
+            except Exception:
+                self._db.rollback()
+                raise
 
     def _chunk(self, content: str) -> list[Chunk]:
         lines = content.splitlines()
@@ -394,41 +440,46 @@ class MemoryManager:
         jiuwenswarm's no-cutoff FTS). FTS-only (no sqlite-vec or no provider):
         matches in SQL bm25 order (best first). Hybrid: fuse vector similarity
         + FTS bm25 score (both best=high) and rank by the fused score."""
+        # 兜底:写入零索引后,刚写的内容可能还在 dirty 集未索引→搜不到。
+        # search 前同步 flush 保证可见性(对齐 jiuwenswarm search 前确保索引最新)。
+        if self._dirty_paths:
+            self._flush_now()
         max_results = max_results or self._max_results
         candidates = min(200, max(1, int(max_results * self._candidate_multiplier)))
-        fts_rows = self._fts_search(query, candidates)  # ORDER BY bm -> best first
-        fts_by_rowid = {r["rowid"]: r for r in fts_rows}
+        with self._db_lock:
+            fts_rows = self._fts_search(query, candidates)  # ORDER BY bm -> best first
+            fts_by_rowid = {r["rowid"]: r for r in fts_rows}
 
-        if not (self._vec_enabled and self._provider is not None):
-            hits = fts_rows[:max_results]
-            log.info("memory_search query=%r hits=%d (fts-only)", query, len(hits))
-            return [self._hit(r, self._text_sim(r["bm"])) for r in hits]
+            if not (self._vec_enabled and self._provider is not None):
+                hits = fts_rows[:max_results]
+                log.info("memory_search query=%r hits=%d (fts-only)", query, len(hits))
+                return [self._hit(r, self._text_sim(r["bm"])) for r in hits]
 
-        vec_sims = self._vec_search(query, candidates)  # {rowid: 相似度}
+            vec_sims = self._vec_search(query, candidates)  # {rowid: 相似度}
 
-        # 候选 = 两路并集;fts 行已带正文,vec-only 的去主表回填
-        candidate_rows = dict(fts_by_rowid)
-        for row_id in vec_sims:
-            if row_id not in candidate_rows:
-                cr = self._db.execute(
-                    "SELECT rowid, path, text, start_line, end_line "
-                    "FROM chunks WHERE rowid=?", (row_id,)).fetchone()
-                if cr:
-                    candidate_rows[row_id] = cr
+            # 候选 = 两路并集;fts 行已带正文,vec-only 的去主表回填
+            candidate_rows = dict(fts_by_rowid)
+            for row_id in vec_sims:
+                if row_id not in candidate_rows:
+                    cr = self._db.execute(
+                        "SELECT rowid, path, text, start_line, end_line "
+                        "FROM chunks WHERE rowid=?", (row_id,)).fetchone()
+                    if cr:
+                        candidate_rows[row_id] = cr
 
-        # 融合打分:向量相似度 + 文本相似度,加权
-        scored = []
-        for row_id, row in candidate_rows.items():
-            text_sim = self._text_sim(fts_by_rowid[row_id]["bm"]) if row_id in fts_by_rowid else 0.0
-            vec_sim = vec_sims.get(row_id, 0.0)
-            fused = self._vector_weight * vec_sim + self._text_weight * text_sim
-            scored.append((row, fused))
+            # 融合打分:向量相似度 + 文本相似度,加权
+            scored = []
+            for row_id, row in candidate_rows.items():
+                text_sim = self._text_sim(fts_by_rowid[row_id]["bm"]) if row_id in fts_by_rowid else 0.0
+                vec_sim = vec_sims.get(row_id, 0.0)
+                fused = self._vector_weight * vec_sim + self._text_weight * text_sim
+                scored.append((row, fused))
 
-        # 排序、截断、格式化
-        scored.sort(key=lambda x: x[1], reverse=True)
-        scored = scored[:max_results]
-        log.info("memory_search query=%r hits=%d (hybrid)", query, len(scored))
-        return [self._hit(row, score) for row, score in scored]
+            # 排序、截断、格式化
+            scored.sort(key=lambda x: x[1], reverse=True)
+            scored = scored[:max_results]
+            log.info("memory_search query=%r hits=%d (hybrid)", query, len(scored))
+            return [self._hit(row, score) for row, score in scored]
 
     def _fts_search(self, query: str, limit: int):
         fts_query = build_fts_query(query)

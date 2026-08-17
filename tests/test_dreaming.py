@@ -44,6 +44,23 @@ class _FailingLLM:
         yield  # unreachable
 
 
+class _WriteSpy:
+    """包真实 MemoryManager，计数 write 调用次数。
+
+    验 _append_promotions 批量 append 只写一次盘（非逐条 N 次），减 _index_file
+    全量重索引。其余方法透传给被包 mgr。"""
+    def __init__(self, real):
+        self._real = real
+        self.write_calls = 0
+
+    def write(self, path, content, append=False):
+        self.write_calls += 1
+        return self._real.write(path, content, append=append)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
 # --- 组A：骨架 + 触发（不调 LLM）---
 
 
@@ -399,6 +416,28 @@ def test_append_empty_candidates_noop(tmp_path):
     DreamingOrchestrator._append_promotions(mgr, [], promotion_state)
     assert mgr.read("MEMORY.md") == "- 已有条目"
     assert promotion_state["promoted"] == {}
+
+
+def test_append_batch_single_write(tmp_path):
+    """多候选 → _append_promotions 批量 append 只写一次盘(非逐条 N 次)。
+
+    逐条 append 会触发 N 次 _index_file(MEMORY.md) 全量重索引(删旧 chunks+
+    重分块+重插);批量拼好一次写 → 1 次重索引。内容仍全进 MEMORY.md,已晋升集仍逐条记。"""
+    real = _mgr(tmp_path)
+    spy = _WriteSpy(real)
+    candidates = [
+        {"hash": "h1", "text": "- 喜欢爬山运动", "source_path": "daily_memory/2026-08-14.md"},
+        {"hash": "h2", "text": "- 偏好中文", "source_path": "daily_memory/2026-08-15.md"},
+        {"hash": "h3", "text": "- 用 Windows 系统", "source_path": "daily_memory/2026-08-16.md"},
+    ]
+    promotion_state = {"version": 1, "promoted": {}}
+    DreamingOrchestrator._append_promotions(spy, candidates, promotion_state)
+    assert spy.write_calls == 1  # 批量 → 一次写盘(非 3 次)
+    memory = real.read("MEMORY.md")
+    assert "- 喜欢爬山运动" in memory
+    assert "- 偏好中文" in memory
+    assert "- 用 Windows 系统" in memory
+    assert len(promotion_state["promoted"]) == 3  # 3 条都记了 ts/text/source_path
 
 
 # --- 组J：_consolidate LLM 删行号 ---

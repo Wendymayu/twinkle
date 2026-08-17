@@ -60,6 +60,8 @@ memory:
     overlap: 32
   cleanup:
     max_chunks_per_file: 200              # 单文件 chunk 上限,超限 FIFO 丢最旧(5a 唯一自动淘汰;5c Dreaming 取代)
+  index:
+    debounce_seconds: 2.0                 # 写后去抖窗口秒:连续写塌成一次重索引(对齐 jiuwenswarm 防抖);写入路径零索引,search 兜底/后台 timer 异步索引
   auto_inject:
     enabled: false                # 被动召回(opt-in):每步 before_model_call 把 USER.md + MEMORY.md + 今日 daily 注入 system prompt(顺序 USER→MEMORY→daily,cap 超限截断),模型不主动 memory_search 也能看到。默认关=维持 5a 只注入策略
     max_chars: 12000             # 注入内容字符上限(估算 char//3 ≈ 4000 token),超限截断

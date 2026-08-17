@@ -181,12 +181,18 @@ class DreamingOrchestrator:
 
     @staticmethod
     def _append_promotions(mgr, candidates: list[dict], promotion_state: dict) -> None:
-        """把候选逐条 append 进 MEMORY.md + 记进 promotion_state["promoted"]
+        """候选批量 append 进 MEMORY.md(一次写)+ 记进 promotion_state["promoted"]
         (ts/text/source_path)。零 LLM。幂等靠 promotion_state 已晋升集
         (由 _filter_promotable 已筛掉已晋升),append 本身不防重。promotion_state
-        由调用方 _save_state 落盘。"""
+        由调用方 _save_state 落盘。
+
+        批量一次写而非逐条:每次 mgr.write 都触发 _index_file 全量重索引 MEMORY.md
+        (删旧 chunks+重分块+重插);N 条候选逐条写 = N 次重索引,批量拼好一次写 = 1 次。"""
+        if not candidates:
+            return
+        bulk = "".join(cand["text"] + "\n" for cand in candidates)
+        mgr.write("MEMORY.md", bulk, append=True)
         for cand in candidates:
-            mgr.write("MEMORY.md", cand["text"] + "\n", append=True)
             promotion_state["promoted"][cand["hash"]] = {
                 "ts": datetime.datetime.now().isoformat(),
                 "text": cand["text"],

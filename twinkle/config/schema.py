@@ -120,6 +120,10 @@ class MemoryCleanupConfig(_StrictModel):
     max_chunks_per_file: int = 200
 
 
+class MemoryIndexConfig(_StrictModel):
+    debounce_seconds: float = 2.0  # 写后去抖窗口:连续写塌成一次重索引(对齐 jiuwenswarm watchDebounceMs)
+
+
 class MemoryAutoInjectConfig(_StrictModel):
     enabled: bool = False    # 被动召回开关（opt-in；默认关=维持 5a "只注入策略 prompt"）
     max_chars: int = 12000   # 注入内容字符上限（估算 char//3 ≈ 4000 token）
@@ -148,6 +152,7 @@ class MemoryConfig(_StrictModel):
     hybrid: MemoryHybridConfig = MemoryHybridConfig()
     chunking: MemoryChunkingConfig = MemoryChunkingConfig()
     cleanup: MemoryCleanupConfig = MemoryCleanupConfig()
+    index: MemoryIndexConfig = MemoryIndexConfig()
     auto_inject: MemoryAutoInjectConfig = MemoryAutoInjectConfig()
     flush: MemoryFlushConfig = MemoryFlushConfig()
     dreaming: MemoryDreamingConfig = MemoryDreamingConfig()

@@ -21,6 +21,7 @@ def get_memory_manager() -> MemoryManager:
             MEMORY_DIR, MEMORY_EMBED_MODEL,
             MEMORY_HYBRID_CANDIDATE_MULTIPLIER,
             MEMORY_HYBRID_TEXT_WEIGHT, MEMORY_HYBRID_VECTOR_WEIGHT,
+            MEMORY_INDEX_DEBOUNCE_SECONDS,
             MEMORY_QUERY_MAX_RESULTS,
         )
         provider = None
@@ -36,7 +37,8 @@ def get_memory_manager() -> MemoryManager:
             vector_weight=MEMORY_HYBRID_VECTOR_WEIGHT,
             text_weight=MEMORY_HYBRID_TEXT_WEIGHT,
             candidate_multiplier=MEMORY_HYBRID_CANDIDATE_MULTIPLIER,
-            max_chunks_per_file=MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE)
+            max_chunks_per_file=MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE,
+            index_debounce_seconds=MEMORY_INDEX_DEBOUNCE_SECONDS)
     return _MEMORY_MANAGER
 
 
