@@ -7,6 +7,7 @@ minimal subset: register/unregister/list/get/schemas/execute. No catalog()
 from __future__ import annotations
 
 from twinkle.agentserver.tools.base import Tool
+from twinkle.agentserver.tools.errors import ToolError
 
 
 class ToolManager:
@@ -44,7 +45,7 @@ class ToolManager:
     async def execute(self, name: str, args: dict) -> str:
         t = self._tools.get(name)
         if t is None:
-            return f"[error] unknown tool: {name}"
+            raise ToolError(f"unknown tool: {name}", kind="validation")
         # Tool exceptions propagate (not swallowed here) so the @hook-decorated
         # _hooked_tool_call can fire ON_TOOL_EXCEPTION and RetryHook can retry
         # transient ones. The agent loop turns non-retried / exhausted failures

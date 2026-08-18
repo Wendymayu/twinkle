@@ -1,7 +1,10 @@
 import asyncio
 
+import pytest
+
 from twinkle.agentserver.tools import tool_manager
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.errors import ToolError
 from twinkle.agentserver.tools.manager import ToolManager
 
 
@@ -35,9 +38,10 @@ def test_schemas_are_openai_function_defs() -> None:
     ]
 
 
-def test_unknown_tool_returns_error_string() -> None:
+def test_unknown_tool_raises_tool_error() -> None:
     m = _make_manager()
-    assert asyncio.run(m.execute("nope", {})) == "[error] unknown tool: nope"
+    with pytest.raises(ToolError, match="unknown tool: nope"):
+        asyncio.run(m.execute("nope", {}))
 
 
 def test_execute_passes_kwargs() -> None:
