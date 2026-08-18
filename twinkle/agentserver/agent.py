@@ -14,7 +14,6 @@ import platform
 import sys
 import time
 from dataclasses import dataclass
-from datetime import date
 from typing import AsyncIterator, Protocol
 
 from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
@@ -39,6 +38,7 @@ from twinkle.agentserver.hooks.base import (
 )
 from twinkle.agentserver.hooks.decorator import hook
 from twinkle.agentserver.hooks.manager import HookManager
+from twinkle.agentserver.prompts import PromptSection, SystemPromptBuilder
 from twinkle.e2a.models import E2AResponse
 from twinkle.config import (
     AGENT_MAX_STEPS as MAX_STEPS,
@@ -88,7 +88,6 @@ def build_system_prompt() -> str:
     are resolved at injection time so the prompt stays current.
     """
     os_type = sys.platform
-    today_date = date.today().isoformat()
     workspace = WORKSPACE_DIR
     memory_dir = MEMORY_DIR
     skills_dir = SKILLS_DIR
@@ -113,9 +112,6 @@ def build_system_prompt() -> str:
 - **简洁输出** — 不要重复表达相同的意思，每个想法只说一次。
 
 # 运行环境
-
-当前平台：`{os_type}`
-当前日期：`{today_date}`
 
 **必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
 
@@ -160,7 +156,6 @@ def build_agent_runtime_prompt() -> str:
     workspace paths — members see team workspace via their team section.
     """
     os_type = sys.platform
-    today_date = date.today().isoformat()
 
     mkdir_warning = ""
     if os_type.startswith("win"):
@@ -171,9 +166,6 @@ def build_agent_runtime_prompt() -> str:
         )
 
     return f"""# 运行环境
-
-当前平台：`{os_type}`
-当前日期：`{today_date}`
 
 **必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
 
@@ -210,7 +202,6 @@ def build_leader_system_prompt() -> str:
       then   runtime + tool guidance
     """
     os_type = sys.platform
-    today_date = date.today().isoformat()
 
     mkdir_warning = ""
     if os_type.startswith("win"):
@@ -245,9 +236,6 @@ def build_leader_system_prompt() -> str:
 6. 整合输出 → 汇总所有结果,向用户交付最终答案
 
 # 运行环境
-
-当前平台：`{os_type}`
-当前日期：`{today_date}`
 
 **必须严格使用与当前平台匹配的命令语法**，切勿混用其他平台命令。常见差异：
 
@@ -326,6 +314,27 @@ def build_member_system_prompt(*, persona: str, workspace: str,
 {build_agent_runtime_prompt()}"""
 
 
+# ── base_sections 工厂(loop 每步注入 builder;member/subagent 构造时带 persona) ──
+
+def normal_base_sections() -> list[PromptSection]:
+    """Normal-mode base sections for the generic agent path."""
+    return [PromptSection("system_prompt", build_system_prompt(), priority=10)]
+
+
+def leader_base_sections() -> list[PromptSection]:
+    """Team-leader base sections (mode=team)."""
+    return [PromptSection("system_prompt", build_leader_system_prompt(), priority=10)]
+
+
+def member_base_sections(*, persona: str, workspace: str,
+                         member_name: str = "") -> list[PromptSection]:
+    """Team-member base sections — persona baked at construction time."""
+    return [PromptSection("system_prompt",
+                           build_member_system_prompt(persona=persona, workspace=workspace,
+                                                      member_name=member_name),
+                           priority=10)]
+
+
 # ── Leader tool whitelist for team mode ──────────────────────────
 # In team mode the leader is a COORDINATOR: plan, delegate, review.
 # Execution tools (command_exec, write_file, edit_file) are reserved
@@ -375,6 +384,7 @@ class ReActAgent:
         hooks: tuple[AgentHook, ...] = (),
         max_steps: int | None = None,
         inbox: _Inbox | None = None,
+        base_sections: list[PromptSection] | None = None,
     ) -> None:
         self._llm = llm
         self._session_store = store
@@ -384,6 +394,7 @@ class ReActAgent:
             self._hook_manager.register_hook(h)
         self._max_steps = max_steps if max_steps is not None else MAX_STEPS
         self._inbox = inbox
+        self._base_sections = base_sections  # None → normal/leader by mode; list → member/subagent
 
     @property
     def session_store(self) -> SessionStore:
@@ -477,18 +488,6 @@ class ReActAgent:
 
         is_team_mode = request.mode == "team"
 
-        # Insert the base system prompt once per session.
-        # Team mode uses a dedicated leader prompt; normal mode uses the
-        # generic user-facing prompt.
-        messages = self._session_store.get_messages(session_id)
-        if not messages or messages[0].get("role") != "system":
-            system_prompt = build_leader_system_prompt() if is_team_mode else build_system_prompt()
-            await self._session_store.append(
-                session_id,
-                {"role": "system", "content": system_prompt},
-                request_id=request_id,
-            )
-
         await self._session_store.append(
             session_id,
             {"role": "user", "content": request.query},
@@ -497,6 +496,12 @@ class ReActAgent:
 
         seq = 0
         full_text = ""
+        # 一次冻结 tool schemas:invoke 内不变;team 过滤只依赖 request.mode(before_invoke 时已知)。
+        # 对齐 jiuwenswarm:tools 跨步稳定 → system prefix 字节稳定 → provider 自动 prefix cache 命中。
+        tool_schemas = self._tool_manager.schemas()
+        if is_team_mode:
+            tool_schemas = [t for t in tool_schemas
+                           if t["function"]["name"] in _TEAM_LEADER_TOOL_WHITELIST]
         for _step in range(self._max_steps):
             msgs = self._session_store.get_messages(session_id)
             if self._inbox is not None:
@@ -505,15 +510,35 @@ class ReActAgent:
                     msgs = list(msgs) + [{"role": "user", "content": m} for m in new_messages]
 
             # -- BEFORE_MODEL_CALL -- #
-            tool_schemas = self._tool_manager.schemas()
-            if is_team_mode:
-                tool_schemas = [t for t in tool_schemas
-                               if t["function"]["name"] in _TEAM_LEADER_TOOL_WHITELIST]
+            # 每步新建 builder + 注 base sections(normal/leader by mode,或构造时注入的 member/subagent)
+            builder = SystemPromptBuilder()
+            if self._base_sections is not None:
+                base = self._base_sections
+            elif is_team_mode:
+                base = leader_base_sections()
+            else:
+                base = normal_base_sections()
+            for sec in base:
+                builder.add_section(sec)
+            # per-invoke 冻结段(before_invoke hooks 如 SkillHook/MemoryHook 注入,跨步稳定)
+            for sec in ctx.extra.get("frozen_sections", []):
+                builder.add_section(sec)
+            ctx.builder = builder
+
             ctx.inputs = ModelCallInputs(messages=msgs, tools=tool_schemas)
             await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
 
-            # -- Merge leading system messages into one -- #
-            ctx.inputs.messages = self._merge_system_messages(ctx.inputs.messages)
+            # -- 注 builder.build() 为首条 system + env 尾部 UserMessage -- #
+            ctx.inputs.messages = (
+                [{"role": "system", "content": ctx.builder.build()}]
+                + ctx.inputs.messages
+            )
+            env_entries = ctx.extra.pop("environment_context", None)
+            if env_entries:
+                env_text = "\n\n".join(e["content"] for e in env_entries)
+                ctx.inputs.messages.append(
+                    {"role": "user",
+                     "content": f"<environment_context>\n{env_text}\n</environment_context>"})
 
             # Check force_finish
             force_finish = ctx.consume_force_finish_request()
@@ -842,64 +867,6 @@ class ReActAgent:
                     session_id,
                     {"role": "tool", "tool_call_id": tc_id, "content": content},
                     request_id=request_id)
-
-    # -- System message merge -----------------------------------------------
-
-    @staticmethod
-    def _merge_system_messages(messages: list[dict]) -> list[dict]:
-        """Merge all leading system-role messages into ONE.
-
-        Order: identity → skill → memory → summary → other.
-        """
-        if not messages:
-            return messages
-
-        system_msgs: list[dict] = []
-        rest_start = 0
-        for i, m in enumerate(messages):
-            if m.get("role") == "system":
-                system_msgs.append(m)
-                rest_start = i + 1
-            else:
-                break
-
-        if len(system_msgs) <= 1:
-            return messages
-
-        rest = messages[rest_start:]
-
-        identity_parts: list[str] = []
-        skill_parts: list[str] = []
-        memory_parts: list[str] = []
-        summary_parts: list[str] = []
-        other_parts: list[str] = []
-
-        _IDENTITY_PREFIXES = ("# 身份与行为原则", "# 团队角色")
-        _SKILL_PREFIXES = ("## 可用技能", "你有 skills")
-        _MEMORY_PREFIX = "## 长期记忆"
-        _SUMMARY_PREFIX = "[prior context summary]"
-
-        for m in system_msgs:
-            content = m.get("content", "")
-            if any(content.startswith(p) for p in _IDENTITY_PREFIXES):
-                identity_parts.append(content)
-            elif any(content.startswith(p) for p in _SKILL_PREFIXES):
-                skill_parts.append(content)
-            elif content.startswith(_MEMORY_PREFIX):
-                memory_parts.append(content)
-            elif content.startswith(_SUMMARY_PREFIX):
-                summary_parts.append(content)
-            else:
-                other_parts.append(content)
-
-        merged_content = "\n\n".join(
-            part for part in (
-                identity_parts + skill_parts + memory_parts
-                + summary_parts + other_parts
-            ) if part
-        )
-
-        return [{"role": "system", "content": merged_content}] + rest
 
     # -- @hook-decorated tool call ------------------------------------------
 
