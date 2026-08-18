@@ -22,9 +22,10 @@ class ToolError(Exception):
     """Raise inside a tool on failure. Never encode errors into return content.
 
     ``kind`` stays on the exception object for future consumers (RetryHook
-    retry-by-kind, observability is_error metadata) — it is NOT rendered into
-    content by format_tool_error. Has no current consumer (YAGNI border); kept
-    as the zero-cost hand-off point for the deferred observability B-plan.
+    retry-by-kind; a session-store is_error metadata B-plan) and is NOT
+    rendered into content by format_tool_error. No current consumer — the
+    existing instrumentor keys off TOOL_ERROR_PREFIX on content, not kind.
+    Kept as the zero-cost hand-off point (YAGNI border).
     """
 
     def __init__(self, message: str, *, kind: str = "failed") -> None:
@@ -32,7 +33,7 @@ class ToolError(Exception):
         self.kind = kind
 
 
-def format_tool_error(source: "str | BaseException") -> str:
+def format_tool_error(source: str | BaseException) -> str:
     """Render any tool failure into the unified ``[tool error] ...`` content.
 
     - ToolError        -> ``[tool error] {message}``        (kind not rendered)

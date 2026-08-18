@@ -6,8 +6,6 @@ format_tool_error to render one unified [tool error] prefix.
 """
 from __future__ import annotations
 
-import pytest
-
 from twinkle.agentserver.tools.errors import ToolError, format_tool_error
 from twinkle.observability.attributes import TOOL_ERROR_PREFIX
 
