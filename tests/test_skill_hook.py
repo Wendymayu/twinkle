@@ -59,12 +59,23 @@ def test_auto_list_mode_stashes_note_section(isolated_skills):
 
 
 def test_stashes_exactly_one_skills_section(isolated_skills):
-    """同名覆写语义在 frozen_sections 上仍只留一条 skills section。"""
+    """before_invoke 一次只 append 一条 skills section(每 invoke 调一次,非覆写语义)。"""
     hook = SkillHook(mode="all")
     ctx = _ctx()
     asyncio.run(hook.before_invoke(ctx))
     skills_secs = [s for s in ctx.extra.get("frozen_sections", []) if s.name == "skills"]
     assert len(skills_secs) == 1
+
+
+def test_appends_to_existing_frozen_sections(isolated_skills):
+    """已有 frozen_sections(sibling hook 注入)时,SkillHook 追加而非覆盖。"""
+    pre = PromptSection("other", "x", priority=10)
+    ctx = _ctx()
+    ctx.extra["frozen_sections"] = [pre]
+    asyncio.run(SkillHook(mode="all").before_invoke(ctx))
+    assert ctx.extra["frozen_sections"][0] is pre       # sibling entry preserved
+    assert len(ctx.extra["frozen_sections"]) == 2       # appended, not replaced
+    assert ctx.extra["frozen_sections"][1].name == "skills"
 
 
 def test_no_skills_is_noop(tmp_path):
