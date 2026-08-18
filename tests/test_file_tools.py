@@ -4,6 +4,7 @@ import json
 import pytest
 
 from twinkle.agentserver.tools.builtin import file_tools
+from twinkle.agentserver.tools.errors import ToolError
 
 
 @pytest.fixture
@@ -90,14 +91,14 @@ def test_read_file_returns_content_and_marks_registry(ws):
 
 
 def test_read_file_not_found(ws):
-    out = _invoke(file_tools.read_file, file_path="missing.txt")
-    assert "file not found" in out
+    with pytest.raises(ToolError, match="file not found"):
+        _invoke(file_tools.read_file, file_path="missing.txt")
 
 
 def test_read_file_binary_rejected(ws):
     (ws / "b.png").write_bytes(b"\x89PNG\r\n\x00")
-    out = _invoke(file_tools.read_file, file_path="b.png")
-    assert "binary or unsupported" in out
+    with pytest.raises(ToolError, match="binary or unsupported"):
+        _invoke(file_tools.read_file, file_path="b.png")
 
 
 def test_read_file_pagination(ws):
@@ -109,12 +110,13 @@ def test_read_file_pagination(ws):
 
 
 def test_read_file_escape_rejected(ws):
-    out = _invoke(file_tools.read_file, file_path="../../outside.txt")
-    assert "outside the project workspace" in out
+    with pytest.raises(ToolError, match="outside the project workspace"):
+        _invoke(file_tools.read_file, file_path="../../outside.txt")
 
 
 def test_read_file_empty_path(ws):
-    assert "file_path is required" in _invoke(file_tools.read_file, file_path="")
+    with pytest.raises(ToolError, match="file_path is required"):
+        _invoke(file_tools.read_file, file_path="")
 
 
 # --- write_file ---
@@ -129,8 +131,8 @@ def test_write_file_creates_new(ws):
 
 def test_write_file_overwrite_requires_prior_read(ws):
     (ws / "e.txt").write_text("existing", encoding="utf-8")
-    out = _invoke(file_tools.write_file, file_path="e.txt", content="new")
-    assert "must read_file before overwriting" in out
+    with pytest.raises(ToolError, match="must read_file before overwriting"):
+        _invoke(file_tools.write_file, file_path="e.txt", content="new")
 
 
 def test_write_file_overwrite_after_read(ws):
@@ -143,8 +145,8 @@ def test_write_file_overwrite_after_read(ws):
 
 
 def test_write_file_too_large(ws):
-    out = _invoke(file_tools.write_file, file_path="big.txt", content="x" * (5 * 1024 * 1024 + 1))
-    assert "content too large" in out
+    with pytest.raises(ToolError, match="content too large"):
+        _invoke(file_tools.write_file, file_path="big.txt", content="x" * (5 * 1024 * 1024 + 1))
 
 
 def test_write_file_creates_parent_dirs(ws):
@@ -153,16 +155,16 @@ def test_write_file_creates_parent_dirs(ws):
 
 
 def test_write_file_escape_rejected(ws):
-    out = _invoke(file_tools.write_file, file_path="../../out.txt", content="x")
-    assert "outside the project workspace" in out
+    with pytest.raises(ToolError, match="outside the project workspace"):
+        _invoke(file_tools.write_file, file_path="../../out.txt", content="x")
 
 
 # --- edit_file ---
 
 def test_edit_file_requires_prior_read(ws):
     (ws / "e.txt").write_text("foo bar foo", encoding="utf-8")
-    out = _invoke(file_tools.edit_file, file_path="e.txt", old_string="foo", new_string="baz")
-    assert "must read_file before editing" in out
+    with pytest.raises(ToolError, match="must read_file before editing"):
+        _invoke(file_tools.edit_file, file_path="e.txt", old_string="foo", new_string="baz")
 
 
 def test_edit_file_single_replace(ws):
@@ -177,8 +179,8 @@ def test_edit_file_single_replace(ws):
 def test_edit_file_multiple_without_replace_all_rejected(ws):
     (ws / "e.txt").write_text("foo bar foo", encoding="utf-8")
     _invoke(file_tools.read_file, file_path="e.txt")
-    out = _invoke(file_tools.edit_file, file_path="e.txt", old_string="foo", new_string="baz")
-    assert "matches 2 times" in out
+    with pytest.raises(ToolError, match="matches 2 times"):
+        _invoke(file_tools.edit_file, file_path="e.txt", old_string="foo", new_string="baz")
 
 
 def test_edit_file_replace_all(ws):
@@ -193,15 +195,15 @@ def test_edit_file_replace_all(ws):
 def test_edit_file_old_string_not_found(ws):
     (ws / "e.txt").write_text("hello", encoding="utf-8")
     _invoke(file_tools.read_file, file_path="e.txt")
-    out = _invoke(file_tools.edit_file, file_path="e.txt", old_string="zzz", new_string="y")
-    assert "old_string not found" in out
+    with pytest.raises(ToolError, match="old_string not found"):
+        _invoke(file_tools.edit_file, file_path="e.txt", old_string="zzz", new_string="y")
 
 
 def test_edit_file_empty_old_string_rejected(ws):
     (ws / "e.txt").write_text("hello", encoding="utf-8")
     _invoke(file_tools.read_file, file_path="e.txt")
-    out = _invoke(file_tools.edit_file, file_path="e.txt", old_string="", new_string="y")
-    assert "use write_file to create" in out
+    with pytest.raises(ToolError, match="use write_file to create"):
+        _invoke(file_tools.edit_file, file_path="e.txt", old_string="", new_string="y")
 
 
 def test_edit_file_chain_after_write(ws):
@@ -246,13 +248,13 @@ def test_list_files_show_hidden(ws):
 
 def test_list_files_not_a_dir(ws):
     (ws / "f.txt").write_text("x")
-    out = _invoke(file_tools.list_files, path="f.txt")
-    assert "not a directory" in out
+    with pytest.raises(ToolError, match="not a directory"):
+        _invoke(file_tools.list_files, path="f.txt")
 
 
 def test_list_files_escape_rejected(ws):
-    out = _invoke(file_tools.list_files, path="../../")
-    assert "outside the project workspace" in out
+    with pytest.raises(ToolError, match="outside the project workspace"):
+        _invoke(file_tools.list_files, path="../../")
 
 
 # --- glob ---
@@ -278,18 +280,17 @@ def test_glob_recursive(ws):
 
 
 def test_glob_rejects_dotdot(ws):
-    out = _invoke(file_tools.glob, pattern="../**")
-    assert "must not contain '..'" in out
+    with pytest.raises(ToolError, match=r"must not contain '\.\.'"):
+        _invoke(file_tools.glob, pattern="../**")
 
 
 def test_glob_escape_base_rejected(ws):
-    out = _invoke(file_tools.glob, pattern="*.py", path="../../")
-    assert "outside the project workspace" in out
+    with pytest.raises(ToolError, match="outside the project workspace"):
+        _invoke(file_tools.glob, pattern="*.py", path="../../")
 
 
 def test_glob_absolute_pattern_returns_error(ws):
     # Path.glob raises NotImplementedError on absolute patterns (Py 3.14);
-    # the tool must catch it and return a clean [ERROR] string, not leak.
-    out = _invoke(file_tools.glob, pattern="/abs/*")
-    assert out.startswith("[ERROR]:")
-    assert "glob failed" in out
+    # the tool must catch it and raise a clean ToolError, not leak.
+    with pytest.raises(ToolError, match="glob failed"):
+        _invoke(file_tools.glob, pattern="/abs/*")
