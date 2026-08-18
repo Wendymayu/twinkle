@@ -1,8 +1,9 @@
 import asyncio
 from pathlib import Path
 import pytest
-from twinkle.agentserver.hooks.base import HookContext, HookEvent, ModelCallInputs
+from twinkle.agentserver.hooks.base import HookContext, HookEvent, InvokeInputs
 from twinkle.agentserver.hooks.builtin.skill_hook import SkillHook
+from twinkle.agentserver.prompts import PromptSection
 from twinkle.agentserver.skills import _set_skill_manager, SkillManager
 
 
@@ -13,12 +14,18 @@ def _make_skill(dir_: Path, name: str, desc: str) -> None:
     )
 
 
-def _ctx(messages=None) -> HookContext:
+def _ctx(query="hi") -> HookContext:
+    """before_invoke 时 builder 尚不存在(每步在 loop 里才建);inputs 是 InvokeInputs。"""
     return HookContext(
-        agent=None, event=HookEvent.BEFORE_MODEL_CALL,
-        inputs=ModelCallInputs(messages=messages or [], tools=[]),
+        agent=None, event=HookEvent.BEFORE_INVOKE,
+        inputs=InvokeInputs(query=query, mode=""),
         session_id="s", request_id="r",
     )
+
+
+def _skills_section(ctx: HookContext) -> PromptSection | None:
+    secs = ctx.extra.get("frozen_sections", [])
+    return next((s for s in secs if s.name == "skills"), None)
 
 
 @pytest.fixture
@@ -30,39 +37,49 @@ def isolated_skills(tmp_path):
     _set_skill_manager(None)
 
 
-def test_all_mode_prepends_catalog(isolated_skills):
+def test_all_mode_stashes_catalog_section(isolated_skills):
     hook = SkillHook(mode="all")
-    ctx = _ctx([{"role": "user", "content": "hi"}])
-    asyncio.run(hook.before_model_call(ctx))
-    assert ctx.inputs.messages[0]["role"] == "system"
-    assert "## 可用技能" in ctx.inputs.messages[0]["content"]
-    assert "a: desc a" in ctx.inputs.messages[0]["content"]
-    # 原 messages 保留在后
-    assert ctx.inputs.messages[1] == {"role": "user", "content": "hi"}
+    ctx = _ctx()
+    asyncio.run(hook.before_invoke(ctx))
+    sec = _skills_section(ctx)
+    assert sec is not None
+    assert sec.priority == 90
+    assert "## 可用技能" in sec.content
+    assert "a: desc a" in sec.content
+    assert "b: desc b" in sec.content
 
 
-def test_all_mode_replaces_list_not_mutate(isolated_skills):
-    """不 in-place mutate 原 list(避免污染 store 内部 list)。"""
-    original = [{"role": "user", "content": "hi"}]
-    ctx = _ctx(original)
-    asyncio.run(SkillHook(mode="all").before_model_call(ctx))
-    assert original == [{"role": "user", "content": "hi"}]  # 原 list 未被改
-    assert ctx.inputs.messages is not original  # 赋了新 list
-
-
-def test_auto_list_mode_prepends_note(isolated_skills):
+def test_auto_list_mode_stashes_note_section(isolated_skills):
     hook = SkillHook(mode="auto_list")
-    ctx = _ctx([])
-    asyncio.run(hook.before_model_call(ctx))
-    assert ctx.inputs.messages[0]["role"] == "system"
-    assert "list_skill" in ctx.inputs.messages[0]["content"]
+    ctx = _ctx()
+    asyncio.run(hook.before_invoke(ctx))
+    sec = _skills_section(ctx)
+    assert sec is not None
+    assert "list_skill" in sec.content
+
+
+def test_stashes_exactly_one_skills_section(isolated_skills):
+    """同名覆写语义在 frozen_sections 上仍只留一条 skills section。"""
+    hook = SkillHook(mode="all")
+    ctx = _ctx()
+    asyncio.run(hook.before_invoke(ctx))
+    skills_secs = [s for s in ctx.extra.get("frozen_sections", []) if s.name == "skills"]
+    assert len(skills_secs) == 1
 
 
 def test_no_skills_is_noop(tmp_path):
     _set_skill_manager(SkillManager(str(tmp_path)))  # 空目录
     try:
-        ctx = _ctx([{"role": "user", "content": "hi"}])
-        asyncio.run(SkillHook(mode="all").before_model_call(ctx))
-        assert ctx.inputs.messages == [{"role": "user", "content": "hi"}]  # 未动
+        ctx = _ctx()
+        asyncio.run(SkillHook(mode="all").before_invoke(ctx))
+        assert "frozen_sections" not in ctx.extra  # 无 skill → 不 stash
     finally:
         _set_skill_manager(None)
+
+
+def test_before_invoke_does_not_touch_builder(isolated_skills):
+    """before_invoke 在 builder 存在前跑;不应碰 ctx.builder(仍为 None)。"""
+    hook = SkillHook(mode="all")
+    ctx = _ctx()
+    asyncio.run(hook.before_invoke(ctx))
+    assert ctx.builder is None
