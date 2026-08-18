@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from twinkle.agentserver.hooks.base import HookContext, HookEvent, ModelCallInputs
+from twinkle.agentserver.hooks.base import HookContext, HookEvent, InvokeInputs
 from twinkle.agentserver.hooks.builtin.memory_hook import MemoryHook
 from twinkle.agentserver.memory import _set_memory_manager
 from twinkle.agentserver.memory.store import MemoryManager
@@ -34,28 +34,32 @@ def test_cross_session_recall_via_toolmanager(memory_enabled):
 
 
 def test_hook_injects_then_tool_answers(memory_enabled):
-    """MemoryHook injects the usage-strategy prompt on a populated store; the
-    memory_search tool then returns a hit — proving the hook + tool cooperate."""
+    """MemoryHook.before_invoke stashes the strategy section to frozen_sections
+    (loop applies it to the prefix); the memory_search tool then returns a hit —
+    proving hook + tool cooperate end-to-end under the per-invoke design."""
     tm = tool_manager()
     asyncio.run(tm.execute("write_memory",
                            {"path": "MEMORY.md",
                             "content": "项目架构是两进程 WebSocket。",
                             "append": True}))
-    ctx = HookContext(agent=None, event=HookEvent.BEFORE_MODEL_CALL,
-                      inputs=ModelCallInputs(messages=[{"role": "user", "content": "上次说的架构是啥"}], tools=[]),
+    ctx = HookContext(agent=None, event=HookEvent.BEFORE_INVOKE,
+                      inputs=InvokeInputs(query="上次说的架构是啥", mode=""),
                       session_id="s", request_id="r")
-    asyncio.run(MemoryHook().before_model_call(ctx))
-    # hook injected the prompt
-    assert ctx.inputs.messages[0]["role"] == "system"
-    assert "memory_search" in ctx.inputs.messages[0]["content"]
+    asyncio.run(MemoryHook().before_invoke(ctx))
+    # hook stashed the strategy section (contains memory_search hint) to frozen_sections
+    sections = ctx.extra.get("frozen_sections", [])
+    strat = next((s for s in sections if s.name == "memory_strategy"), None)
+    assert strat is not None
+    assert "memory_search" in strat.content
     # and the tool actually returns a hit for the populated store
     hits = asyncio.run(tm.execute("memory_search", {"query": "架构"}))
     assert "WebSocket" in hits
 
 
 def test_empty_store_hook_noop(memory_enabled):
-    ctx = HookContext(agent=None, event=HookEvent.BEFORE_MODEL_CALL,
-                      inputs=ModelCallInputs(messages=[{"role": "user", "content": "hi"}], tools=[]),
+    """空 store → before_invoke no-op(不 stash frozen_sections,不碰 inputs)。"""
+    ctx = HookContext(agent=None, event=HookEvent.BEFORE_INVOKE,
+                      inputs=InvokeInputs(query="hi", mode=""),
                       session_id="s", request_id="r")
-    asyncio.run(MemoryHook().before_model_call(ctx))
-    assert ctx.inputs.messages == [{"role": "user", "content": "hi"}]
+    asyncio.run(MemoryHook().before_invoke(ctx))
+    assert "frozen_sections" not in ctx.extra  # empty store → no-op,不创建 key
