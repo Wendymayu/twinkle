@@ -5,11 +5,16 @@ import asyncio
 from twinkle.agentserver.agent import ReActAgent, AgentRequest, normal_base_sections
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
 from twinkle.agentserver.hooks.builtin.runtime_env_hook import RuntimeEnvHook
+from twinkle.agentserver.hooks.builtin.skill_hook import SkillHook
+from twinkle.agentserver.hooks.builtin.memory_hook import MemoryHook
 from twinkle.agentserver.llm_client import Finish
 from twinkle.agentserver.prompts import PromptSection
 from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.manager import ToolManager
+from twinkle.agentserver.skills import SkillManager, _set_skill_manager
+from twinkle.agentserver.memory import _set_memory_manager
+from twinkle.agentserver.memory.store import MemoryManager
 
 
 class _FinishLLM:
@@ -188,3 +193,77 @@ def test_tool_schemas_frozen_once_per_invoke(tmp_path):
     asyncio.run(_run())
     assert llm.calls == 2            # 跑了 2 步
     assert tm.schemas_calls == 1     # 但 schemas() 只调一次 = 冻结
+
+
+def test_skill_and_memory_hooks_cooperate_through_loop(tmp_path, monkeypatch):
+    """真 SkillHook + 真 MemoryHook 同跑 2 步:两 hook 协作 append 同一 frozen_sections →
+    loop 每步套用 → build() 按 priority 升序排(memory_strategy80 < memory_static81 < skills90)→ 跨步字节稳定。
+
+    回归守卫:既有测试只单 hook 或用 _MarkerHook,缺真双 hook 同跑端到端断言。
+    未来若某 hook 把 setdefault 改成直接赋值覆写 list,本测试会红。"""
+    import twinkle.config
+
+    # --- SkillManager 单例:1 个 skill(镜像 test_skill_hook 的 isolated_skills) ---
+    skill_root = tmp_path / "skillroot"
+    skill_a = skill_root / "a"
+    skill_a.mkdir(parents=True)
+    (skill_a / "SKILL.md").write_text(
+        "---\nname: a\ndescription: desc a\n---\n\nbody\n", encoding="utf-8"
+    )
+    _set_skill_manager(SkillManager(str(skill_root)))
+
+    # --- MemoryManager 单例:MEMORY.md(镜像 test_memory_hook 的 _with_mgr + _mgr) ---
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    mgr = MemoryManager(str(tmp_path / "memory"), embed_provider=None)
+    mem_body = "项目用 Python 3.12 被动召回"
+    mgr.write("MEMORY.md", mem_body, append=True)
+    _set_memory_manager(mgr)
+
+    try:
+        store = SessionStore(str(tmp_path / "sessions"))
+        asyncio.run(store.create_session("s1"))
+        reg = _reg_with_echo_tool()
+        llm = _ScriptedLLM([
+            [Finish("tool_calls", {"role": "assistant", "content": None,
+                  "tool_calls": [{"id": "c1", "type": "function",
+                                  "function": {"name": "echo", "arguments": '{"text": "hi"}'}}]})],
+            [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
+        ])
+        agent = ReActAgent(llm, store, reg,
+                           hooks=[SkillHook(mode="all"), MemoryHook()],
+                           base_sections=normal_base_sections(), max_steps=3)
+        req = AgentRequest(session_id="s1", request_id="r1", query="call echo")
+
+        async def _run():
+            async for _frame in agent.run(req):
+                pass
+
+        asyncio.run(_run())
+
+        # --- 断言:协作契约 ---
+        # 1) 真跑了 2 步(2 次模型调用)
+        assert llm.calls == 2
+
+        mem_strat_marker = "## 长期记忆"
+        skills_marker = "## 可用技能"
+        mem_static_marker = "## 被动召回"
+
+        # 2) 两 hook 的 section 在两步都出现
+        assert mem_strat_marker in llm.seen_systems[0]
+        assert skills_marker in llm.seen_systems[0]
+        assert mem_strat_marker in llm.seen_systems[1]
+        assert skills_marker in llm.seen_systems[1]
+
+        # 3) opt-in memory_static 也在(证 auto-inject 路径)+ MEMORY.md 正文进前缀
+        assert mem_static_marker in llm.seen_systems[0]
+        assert mem_body in llm.seen_systems[0]
+
+        # 4) priority 顺序:memory_strategy(80) 在 skills(90) 之前(build 升序排)
+        assert llm.seen_systems[0].index(mem_strat_marker) < llm.seen_systems[0].index(skills_marker)
+
+        # 5) 跨步字节稳定
+        assert llm.seen_systems[0] == llm.seen_systems[1]
+    finally:
+        _set_skill_manager(None)
+        _set_memory_manager(None)
