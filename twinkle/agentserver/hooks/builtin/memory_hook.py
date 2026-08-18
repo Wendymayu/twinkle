@@ -2,7 +2,7 @@
 
 No-op when the memory store is empty. 注入走 ctx.extra["frozen_sections"](loop 每步套用到 builder):
 - memory_strategy(priority 80):何时搜/写的策略 prompt(稳定,常开;提示需 daily 时 memory_search)。
-- memory_static(priority 81, opt-in):USER.md + MEMORY.md 被注入(读一次/invoke,无 daily)。
+- memory_static(priority 81, opt-in):USER.md + MEMORY.md 各按自己字符预算注入(超限 head+tail 截断,对齐 openclaw)。
 daily 不再自动注入——需 daily 时 memory_search('daily_memory/<日期>')(= tool message = 动态区)。
 """
 from __future__ import annotations
@@ -45,25 +45,45 @@ def _build_prompt() -> str:
     return _PROMPT_TEMPLATE.format(mem_dir=MEMORY_DIR)
 
 
+_TRUNCATE_MARKER = "\n…[已截断,首尾保留,更多用 memory_search 查]\n"
+
+
+def _truncate_head_tail(text: str, max_chars: int) -> str:
+    """超 max_chars → 保首尾丢中间(对齐 openclaw trimBootstrapContent)。
+
+    首部=画像/核心偏好(稳定),尾部=最近事实(新);丢中间陈旧段。budget 留给 marker 后首尾各半。
+    """
+    if len(text) <= max_chars:
+        return text
+    budget = max(0, max_chars - len(_TRUNCATE_MARKER))
+    head = budget // 2
+    tail = budget - head
+    return text[:head] + _TRUNCATE_MARKER + text[-tail:]
+
+
 def _build_static(mgr) -> str:
     """opt-in 时把 USER.md + MEMORY.md 注入(读一次/invoke,无 daily)。
 
-    开关关或无可注入文件 → 返回空串(只注策略)。超 max_chars 截断并提示用 memory_search。
+    USER.md 与 MEMORY.md 各走自己的字符预算(对齐 openclaw 分文件预算),超限各自 head+tail 截断。
+    开关关或无可注入文件 → 返回空串(只注策略)。
     daily 不再自动注入——需要时模型 memory_search('daily_memory/<日期>')。
     """
-    from twinkle.config import MEMORY_AUTO_INJECT_ENABLED, MEMORY_AUTO_INJECT_MAX_CHARS
+    from twinkle.config import (
+        MEMORY_AUTO_INJECT_ENABLED,
+        MEMORY_AUTO_INJECT_MAX_CHARS_USER,
+        MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY,
+    )
     if not MEMORY_AUTO_INJECT_ENABLED:
         return ""
     sections: list[str] = []
     user_md = mgr.read("USER.md")
     if not user_md.startswith("Error:"):
+        user_md = _truncate_head_tail(user_md, MEMORY_AUTO_INJECT_MAX_CHARS_USER)
         sections.append(f"### 用户画像（USER.md）\n{user_md}")
     mem_md = mgr.read("MEMORY.md")
     if not mem_md.startswith("Error:"):
+        mem_md = _truncate_head_tail(mem_md, MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY)
         sections.append(f"### 持久事实（MEMORY.md）\n{mem_md}")
     if not sections:
         return ""
-    body = "\n\n".join(sections)
-    if len(body) > MEMORY_AUTO_INJECT_MAX_CHARS:
-        body = body[:MEMORY_AUTO_INJECT_MAX_CHARS] + "\n…[静态注入已截断,更多用 memory_search 查]"
-    return "## 被动召回（自动注入的长期记忆）\n" + body
+    return "## 被动召回（自动注入的长期记忆）\n" + "\n\n".join(sections)

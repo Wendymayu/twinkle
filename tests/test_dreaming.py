@@ -120,9 +120,8 @@ def test_dreaming_busy_skips(tmp_path, monkeypatch):
 
 
 def test_dreaming_no_daily_files_noop(tmp_path, monkeypatch):
-    """门过 + 无 daily → 无 claims → count=0 → 不跑 consolidate（不调 LLM、不落 sidecar）。
-
-    与 disabled/busy 的门卫挡不同：这里门是过的,挡在"无晋升→跳 consolidate"。"""
+    """门过 + 无 daily → 无 claims → 无晋升 → 不跑 consolidate（不调 LLM、不落 sidecar）;
+    compact 跑但 MEMORY.md 不存在 → noop（compact 不依赖新晋升,独立兜底）。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_ENABLED", True)
     reset = _with_mgr(_mgr(tmp_path))
@@ -197,7 +196,7 @@ def test_dreaming_enabled_starts_task(tmp_path, monkeypatch):
 
 
 def test_dreaming_runs_when_idle(tmp_path, monkeypatch):
-    """空闲 + 有 MEMORY.md（无 daily）→ dream 跑到 return（无晋升 → 不调 LLM）。"""
+    """空闲 + 有 MEMORY.md（无 daily）→ 无晋升 → compact 跑（未超 → noop,不调 LLM）。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_ENABLED", True)
     reset = _with_mgr(_mgr(tmp_path))
@@ -275,6 +274,8 @@ def test_dreaming_config_defaults():
     max_memory_chars=10000（MEMORY.md 容量预算，超限 compact 丢最老提升行），
     max_delete_fraction=0.25（整合步单次删除行数上限比例，安全阀防 LLM 误删）。
     """
+    from twinkle.config.schema import MemoryDreamingConfig
+    assert MemoryDreamingConfig().enabled is True  # 默认开：盘上 MEMORY.md 周期 compact 兜底容量
     import twinkle.config
     assert twinkle.config.MEMORY_DREAMING_MIN_DISTINCT_FILES == 2
     assert twinkle.config.MEMORY_DREAMING_MAX_MEMORY_CHARS == 10000
@@ -508,10 +509,11 @@ def test_consolidate_json_parse_fail_soft(tmp_path):
 
 
 def test_compact_drops_oldest_promotion(tmp_path, monkeypatch):
-    """超 max → 按 sidecar ts 升序丢最老的仍存在 promotion 行;非 promotion 用户行不动。
+    """阶段1:超 max → 按 sidecar ts 升序丢最老的仍存在 promotion 行。本例丢 L2 即 ≤预算,
+    不进阶段2(丢光 promotion 仍超才丢非 promotion 头部)。
 
     MEMORY.md 3 行:非 promo(L1)+ 老 promo(L2,ts 早)+ 新 promo(L3,ts 晚)。
-    read 长度 29 > max=24 → 丢 L2 → 19 ≤ 24 停。L2 丢、L1/L3 留(L1 非 promo 不动)。
+    len 27 > max=24 → 丢 L2 → 18 ≤ 24 停。L2 丢、L1/L3 留。
     """
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 24)
@@ -544,6 +546,73 @@ def test_compact_under_budget_noop(tmp_path, monkeypatch):
     assert mgr.read("MEMORY.md") == "- 短条目1\n- 短条目2"  # 不变
 
 
+# --- 组K2：compact 分阶段 + reconcile + 无晋升也 compact（手写不记 ts，机械兜底）---
+
+
+def test_compact_phase2_drops_untracked_by_position(tmp_path, monkeypatch):
+    """丢光 promotion 仍超预算 → 阶段2 丢非 promotion 行(手写/未追踪)按文件
+    位置头部先(append-only 头部≈最早写,该让位)。手写不记 ts,机械丢头部。
+
+    MEMORY.md: oldA(手写)+oldB(手写)+PROMO(promotion)+newC(手写),max=15。
+    阶段1 丢 PROMO(唯一 promotion)→仍超 → 阶段2 丢 oldA(头部最老非 promo)→≤预算停。
+    结果:PROMO+oldA 丢,oldB+newC 留。
+    """
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 15)
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "- oldA\n- oldB\n- PROMO\n- newC\n", append=False)
+    state = {"version": 1, "promoted": {
+        "h1": {"ts": "2026-08-15T03:00:00", "text": "- PROMO",
+               "source_path": "daily_memory/2026-08-14.md"}}}
+    DreamingOrchestrator._compact_if_over_budget(mgr, state)
+    result = mgr.read("MEMORY.md")
+    assert "PROMO" not in result   # promotion 丢(阶段1)
+    assert "oldA" not in result    # 手写头部丢(阶段2,append-only 头部=最早)
+    assert "oldB" in result        # 较后手写留
+    assert "newC" in result        # 最新手写留
+    assert result.count("- ") == 2
+
+
+def test_compact_no_candidates_still_runs(tmp_path, monkeypatch):
+    """无晋升(无 daily)但 MEMORY.md 超预算 → dream() 仍跑 compact 丢 promotion
+    (compact 不依赖新晋升,独立兜底容量)。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_ENABLED", True)
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 15)
+    reset = _with_mgr(_mgr(tmp_path))
+    try:
+        from twinkle.agentserver.memory import get_memory_manager
+        mgr = get_memory_manager()
+        mgr.write("MEMORY.md", "- oldA\n- PROMO\n- newC\n", append=False)
+        sidecar = mgr.memory_dir / "dreaming_state.json"
+        DreamingOrchestrator._save_state({"version": 1, "promoted": {
+            "h1": {"ts": "2026-08-15T03:00:00", "text": "- PROMO",
+                   "source_path": "daily_memory/2026-08-14.md"}}}, sidecar)
+        orch = DreamingOrchestrator(llm=_FakeLLM([]), get_inflight=lambda: 0)
+        asyncio.run(orch.dream())  # 无 daily→无晋升→但 compact 仍跑
+        result = mgr.read("MEMORY.md")
+        assert "PROMO" not in result  # compact 丢了 promotion(无晋升也 compact)
+    finally:
+        reset(None)
+
+
+def test_compact_reconciles_orphans(tmp_path, monkeypatch):
+    """consolidate 删行后 sidecar 留孤儿(被删行 text 仍在 promoted)→ compact
+    reconcile 清(text 不在文件的 promoted 记录删),防 sidecar 膨胀。未超预算也清。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 1000)
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "- 保留行\n", append=False)  # consolidate 删了别的,只留这行
+    state = {"version": 1, "promoted": {
+        "h1": {"ts": "2026-08-15T03:00:00", "text": "- 保留行",
+               "source_path": "daily_memory/2026-08-14.md"},
+        "h2": {"ts": "2026-08-16T03:00:00", "text": "- 已删行",  # 孤儿(文件没了)
+               "source_path": "daily_memory/2026-08-15.md"}}}
+    DreamingOrchestrator._compact_if_over_budget(mgr, state)
+    assert "h1" in state["promoted"]      # 文件还在→留
+    assert "h2" not in state["promoted"]  # 孤儿→清
+
+
 # --- 组L：dream() 端到端(新 B 模型) ---
 
 
@@ -572,7 +641,7 @@ def test_dream_promotes_across_two_daily_then_consolidates(tmp_path, monkeypatch
 
 def test_dream_sidecar_idempotent_across_ticks(tmp_path, monkeypatch):
     """连跑两次 dream:tick1 晋升+consolidate+存 sidecar;tick2 sidecar 已记 hash →
-    不重晋、不重跑 consolidate(fake.calls 仍 1, MEMORY.md 不变)。"""
+    不重晋、不重跑 consolidate(fake.calls 仍 1);tick2 compact 跑(未超→noop,MEMORY.md 不变)。"""
     import json
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_ENABLED", True)

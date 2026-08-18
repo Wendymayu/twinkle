@@ -10,9 +10,9 @@ def test_flush_defaults_off():
     assert c.enabled is False
 
 
-def test_dreaming_defaults_off():
+def test_dreaming_defaults_on():
     c = MemoryDreamingConfig()
-    assert c.enabled is False
+    assert c.enabled is True  # 默认开:盘上 MEMORY.md 周期 compact 兜底容量(无 LLM 仍 no-op)
     assert c.interval_seconds == 3600
     assert c.start_delay_seconds == 300
     assert c.top_k == 5

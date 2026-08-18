@@ -63,12 +63,13 @@ memory:
   index:
     debounce_seconds: 2.0                 # 写后去抖窗口秒:连续写塌成一次重索引(对齐 jiuwenswarm 防抖);写入路径零索引,search 兜底/后台 timer 异步索引
   auto_inject:
-    enabled: true                 # 被动召回(默认开):before_invoke 一次把 USER.md + MEMORY.md 注入 system prefix(无 daily;daily 用 memory_search 召回=动态区),cap 超限截断。对齐 jiuwenswarm 跨步稳定 prefix
-    max_chars: 12000             # 注入内容字符上限(估算 char//3 ≈ 4000 token),超限截断
+    enabled: true                 # 被动召回(默认开):before_invoke 一次把 USER.md + MEMORY.md 注入 system prefix(无 daily;daily 用 memory_search 召回=动态区)。超限各自 head+tail 截断(保首尾丢中间)。对齐 openclaw 分预算+trimBootstrap
+    max_chars_user: 4000          # USER.md 注入上限(画像小而稳;对齐 openclaw USER_BOOTSTRAP_MAX_CHARS)
+    max_chars_memory: 12000       # MEMORY.md 注入上限(累积会膨胀;大预算)。估算 char//3 ≈ 4000 token
   flush:
     enabled: false                # 兜底(opt-in):压缩前 LLM 查 middle 有无未持久化重要信息→write_memory 落盘。默认关=维持 5a
   dreaming:
-    enabled: false               # 后台整理(opt-in):周期跑 dream()——扫 daily_memory 非空行→claimHash 去重→跨≥min_distinct_files 日晋升进 MEMORY.md→单次 LLM 整合删冗余/矛盾行。默认关
+    enabled: true                # 后台整理(默认开):周期跑 dream()——扫 daily_memory 非空行→claimHash 去重→跨≥min_distinct_files 日晋升进 MEMORY.md→单次 LLM 整合删冗余/矛盾行→compact 兜底容量(无晋升也 compact 丢手写)。无 LLM 仍 no-op
     interval_seconds: 3600        # 整理周期秒
     start_delay_seconds: 300      # 启动后首跑延迟秒
     top_k: 5                      # 聚类相似召回数(暂无消费者,备未来 search 用)

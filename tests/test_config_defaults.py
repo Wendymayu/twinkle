@@ -7,7 +7,9 @@ def test_memory_auto_inject_default_enabled():
     assert MemoryAutoInjectConfig().enabled is True
 
 
-def test_memory_auto_inject_max_chars_default():
-    """max_chars 默认不变(12000)。"""
+def test_memory_auto_inject_budget_defaults():
+    """分预算默认:USER.md 4000(对齐 openclaw USER_BOOTSTRAP_MAX_CHARS)/MEMORY.md 12000。"""
     from twinkle.config.schema import MemoryAutoInjectConfig
-    assert MemoryAutoInjectConfig().max_chars == 12000
+    cfg = MemoryAutoInjectConfig()
+    assert cfg.max_chars_user == 4000
+    assert cfg.max_chars_memory == 12000

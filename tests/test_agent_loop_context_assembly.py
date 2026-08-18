@@ -214,7 +214,7 @@ def test_skill_and_memory_hooks_cooperate_through_loop(tmp_path, monkeypatch):
 
     # --- MemoryManager 单例:MEMORY.md(镜像 test_memory_hook 的 _with_mgr + _mgr) ---
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY", 12000)
     mgr = MemoryManager(str(tmp_path / "memory"), embed_provider=None)
     mem_body = "项目用 Python 3.12 被动召回"
     mgr.write("MEMORY.md", mem_body, append=True)

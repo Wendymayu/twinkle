@@ -126,7 +126,8 @@ class MemoryIndexConfig(_StrictModel):
 
 class MemoryAutoInjectConfig(_StrictModel):
     enabled: bool = True     # 被动召回开关（默认开=before_invoke 注 USER.md+MEMORY.md 进 prefix；关=只策略 prompt）
-    max_chars: int = 12000   # 注入内容字符上限（估算 char//3 ≈ 4000 token）
+    max_chars_user: int = 4000     # USER.md 注入上限（画像小而稳；对齐 openclaw USER_BOOTSTRAP_MAX_CHARS）
+    max_chars_memory: int = 12000 # MEMORY.md 注入上限（累积会膨胀；大预算）。超限各自 head+tail 截断（保首尾丢中间）
 
 
 class MemoryFlushConfig(_StrictModel):
@@ -135,7 +136,7 @@ class MemoryFlushConfig(_StrictModel):
 
 
 class MemoryDreamingConfig(_StrictModel):
-    enabled: bool = False           # 后台整理开关（opt-in；默认关）
+    enabled: bool = True            # 后台整理开关（默认开：盘上 MEMORY.md 周期 compact 兜底容量；无 LLM 仍 no-op）
     interval_seconds: int = 3600   # 整理周期秒
     start_delay_seconds: int = 300  # 启动后首跑延迟秒
     top_k: int = 5                  # 聚类相似召回数

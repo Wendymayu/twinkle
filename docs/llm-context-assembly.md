@@ -240,7 +240,11 @@ await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
 
 **条件**：`get_memory_manager().list_files()` 返回非空时生效；空 store → no-op。
 
-**行为**：prepend 一条包含完整使用策略的 system 消息：
+**触发时机**：`before_invoke`（每个 ReAct 步骤入口；早于 `before_model_call`）。
+
+**行为**：往 `ctx.extra["frozen_sections"]` stash 两个 `PromptSection`（loop 每步套用到 `SystemPromptBuilder`，按 priority 升序 join 进首条 system 消息）：
+
+- `memory_strategy`（priority 80，常开）：使用策略 prompt——何时搜/写、三类文件语义、daily 不自动注入需 `memory_search('daily_memory/<日期>')`：
 
 ```
 ## 长期记忆
@@ -257,7 +261,9 @@ await self._hook_manager.execute(HookEvent.BEFORE_MODEL_CALL, ctx)
 recall 到与当前信息矛盾的记忆时,用 edit_memory 修正它。
 ```
 
-其中 `{mem_dir}` 来自 `config.MEMORY_DIR`，`{today}` 是 `datetime.date.today().isoformat()`。
+其中 `{mem_dir}` 来自 `config.MEMORY_DIR`。
+
+- `memory_static`（priority 81，opt-in，`memory.auto_inject.enabled` 默认开）：被动召回 `USER.md` + `MEMORY.md` 全文注入。两者**各走自己的字符预算**（`max_chars_user` / `max_chars_memory`，默认 4000 / 12000，对齐 openclaw 分文件预算）；超限**各自 head+tail 截断**（保首尾丢中间，对齐 openclaw `trimBootstrapContent`——首部=画像/核心偏好稳定，尾部=最近事实，丢中间陈旧段）。`daily_memory` **不**自动注入——需 daily 时模型 `memory_search('daily_memory/<日期>')`（= tool message = 动态区）。空 store → 两 section 都不 stash。
 
 ### 5.3 LoggingHook（priority=10，最后执行）
 

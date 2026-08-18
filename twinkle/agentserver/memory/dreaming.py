@@ -80,15 +80,14 @@ class DreamingOrchestrator:
         promotion_state = self._load_state(sidecar_path)
         # ③ 门槛筛:够格(≥min_distinct_files 日复现)且未已晋升的候选(纯函数,无副作用)
         candidates = self._filter_promotable(claims, promotion_state)
-        if not candidates:
-            return  # 无够格新候选 → 不必整合(等下个 interval)
-        # ④ 写 MEMORY.md(append)+ 记进已晋升集
-        self._append_promotions(mgr, candidates, promotion_state)
-        # ⑤ 落盘已晋升集(下次 _load_state 能读到,防下 tick 重搬)
-        self._save_state(promotion_state, sidecar_path)
-        # ⑥ 整合:单次 LLM 删 MEMORY.md 内语义重复/矛盾行(≤25%),fail-soft
-        await self._consolidate(mgr)
-        # ⑦ 容量预算:MEMORY.md 超 max_memory_chars → 按时序丢最老晋升行
+        if candidates:
+            # ④ 写 MEMORY.md(append)+ 记进已晋升集
+            self._append_promotions(mgr, candidates, promotion_state)
+            # ⑤ 落盘已晋升集(下次 _load_state 能读到,防下 tick 重搬)
+            self._save_state(promotion_state, sidecar_path)
+            # ⑥ 整合:单次 LLM 删 MEMORY.md 内语义重复/矛盾行(≤25%),fail-soft
+            await self._consolidate(mgr)
+        # ⑦ 容量预算:无论晋升与否都跑——手写行膨胀不靠新晋升,compact 独立兜底
         self._compact_if_over_budget(mgr, promotion_state)
 
     @staticmethod
@@ -243,38 +242,66 @@ class DreamingOrchestrator:
 
     @staticmethod
     def _compact_if_over_budget(mgr, promotion_state: dict) -> None:
-        """MEMORY.md 超 max_memory_chars → 按 sidecar ts 升序丢最老的仍存在的
-        promotion 行(非 promotion 用户行不动),直到 ≤ 预算。mgr.replace 原子写回。
+        """MEMORY.md 超 max_memory_chars → 分阶段丢行 + reconcile 清孤儿,末尾落盘 sidecar。
 
-        promotion 行 = MEMORY.md 中文本 ∈ promotion_state["promoted"] 的 text 集;按其 sidecar
-        ts 升序逐个丢(append-only 保证 ts 序≈行位序)。非 promotion 行永不丢——
-        若丢光所有 promotion 仍超预算,也只能如此(不强删用户行)。"""
+        reconcile:promoted 只留 text 仍在 MEMORY.md 的记录(清 consolidate 删行/edit 改行
+        产生的孤儿),防 sidecar 膨胀。未超预算也 reconcile + save。
+
+        分阶段(手写不记 ts,机械兜底;consolidate LLM 删冗余在前兜智能):
+        阶段1 丢 promotion 行(按 sidecar ts 最老→新)——episodic 该让位。
+        阶段2 丢光 promotion 仍超 → 丢非 promotion 行(手写/未追踪,无 ts)按文件位置
+        头部先(append-only 头部≈最早写)。未追踪行(迁移旧文件)同按位置丢头部。"""
         from twinkle.config import MEMORY_DREAMING_MAX_MEMORY_CHARS
         text = mgr.read("MEMORY.md")
         if text.startswith("Error:"):
-            return
-        if len(text) <= MEMORY_DREAMING_MAX_MEMORY_CHARS:
-            return  # 未超预算 → 不动
+            return  # 无 MEMORY.md → 无可 compact
+        sidecar_path = mgr.memory_dir / "dreaming_state.json"
         lines = DreamingOrchestrator._nonempty_lines(text)
-        # text → ts 映射(sidecar promoted 记录);text 唯一(因 hash=md5(text))
-        text_to_ts = {rec["text"]: rec["ts"]
-                      for rec in promotion_state.get("promoted", {}).values()
-                      if isinstance(rec, dict)}
-        # 当前 MEMORY.md 中 promotion 行的(原索引, ts),按 ts 升序(最老先丢)
-        drop_order = sorted(
-            ((i, text_to_ts[line]) for i, line in enumerate(lines)
-             if line in text_to_ts),
-            key=lambda x: x[1])
+        file_text_set = {line.strip() for line in lines}
+        # reconcile:promoted 只留 text 仍在文件的(清孤儿)
+        promoted = promotion_state.get("promoted", {})
+        reconciled = {h: rec for h, rec in promoted.items()
+                      if isinstance(rec, dict)
+                      and rec.get("text", "").strip() in file_text_set}
+        reconciled_changed = len(reconciled) != len(promoted)  # 清了孤儿?
+        promotion_state["promoted"] = reconciled
+        budget = MEMORY_DREAMING_MAX_MEMORY_CHARS
+        if len("\n".join(lines)) <= budget:
+            if reconciled_changed:
+                DreamingOrchestrator._save_state(promotion_state, sidecar_path)  # 清孤儿落盘
+            return  # 未超 → 不丢行(只 reconcile 若有孤儿)
+        # text → (hash, ts) 映射(reconcile 后的 promotion 行;text 唯一因 hash=md5(text))
+        text_to_hash_ts = {
+            rec["text"].strip(): (h, rec.get("ts", ""))
+            for h, rec in reconciled.items() if isinstance(rec, dict)}
         keep = [True] * len(lines)
-        for i, _ in drop_order:
-            kept_lines = [line for j, line in enumerate(lines) if keep[j]]
-            if len("\n".join(kept_lines)) <= MEMORY_DREAMING_MAX_MEMORY_CHARS:
+        # 阶段1:丢 promotion 行(按 ts 升序,最老先丢)
+        promo_drop = sorted(
+            ((i, text_to_hash_ts[line.strip()][1]) for i, line in enumerate(lines)
+             if line.strip() in text_to_hash_ts),
+            key=lambda x: x[1])
+        for i, _ in promo_drop:
+            kept = [line for j, line in enumerate(lines) if keep[j]]
+            if len("\n".join(kept)) <= budget:
                 break  # 已在预算内 → 不再丢
-            keep[i] = False  # 丢这一条最老的仍存在 promotion 行
+            keep[i] = False  # 丢这条最老的仍存在 promotion 行
+            promotion_state["promoted"].pop(text_to_hash_ts[lines[i].strip()][0], None)
+        # 阶段2:丢光 promotion 仍超 → 丢非 promotion 行按文件位置头部先(append-only 头部≈最早)
+        if len("\n".join([line for j, line in enumerate(lines) if keep[j]])) > budget:
+            for i in range(len(lines)):
+                if not keep[i] or lines[i].strip() in text_to_hash_ts:
+                    continue  # 已丢 或 promotion 行(阶段1 处理)
+                kept = [line for j, line in enumerate(lines) if keep[j]]
+                if len("\n".join(kept)) <= budget:
+                    break
+                keep[i] = False  # 丢非 promotion 头部
         if all(keep):
-            return  # 无 promotion 可丢(超预算也无可删)→ 不重写
+            if reconciled_changed:
+                DreamingOrchestrator._save_state(promotion_state, sidecar_path)
+            return  # 无可丢(reconcile 若有孤儿清)
         kept_lines = [line for j, line in enumerate(lines) if keep[j]]
         mgr.replace("MEMORY.md", "\n".join(kept_lines) + "\n")
+        DreamingOrchestrator._save_state(promotion_state, sidecar_path)
 
     async def _ask_llm(self, prompt: str) -> str:
         """调 LLM 单轮（无 tools），收集文本。异常 fail-soft 返回空串。"""

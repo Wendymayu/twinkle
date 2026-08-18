@@ -1,7 +1,8 @@
 """MemoryHook 测试——before_invoke 注 memory_strategy(常开)+ memory_static(opt-in,USER.md+MEMORY.md,无 daily)。
 
 覆盖:空 store no-op、策略-only(开关关)、USER.md 注入、MEMORY.md 注入、daily 不进前缀、
-超 cap 截断、开关开但无 injectable 文件(只有昨日 daily)回退策略-only。
+超 cap head+tail 截断(保首尾丢中间,对齐 openclaw trimBootstrapContent)、USER/MEMORY 分预算互不挤占、
+开关开但无 injectable 文件(只有昨日 daily)回退策略-only。
 daily 不再自动注入——需 daily 时 memory_search('daily_memory/<日期>')。沿用 asyncio.run 风格。
 """
 import asyncio
@@ -79,7 +80,7 @@ def test_auto_inject_user_md(tmp_path, monkeypatch):
     """auto_inject 开 + USER.md → memory_static 含 USER.md 内容。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_USER", 12000)
     mgr = _mgr(tmp_path)
     mgr.write("USER.md", "姓名:张三\n偏好中文", append=True)
     reset = _with_mgr(mgr)
@@ -99,7 +100,7 @@ def test_auto_inject_memory_md(tmp_path, monkeypatch):
     """auto_inject 开 + MEMORY.md → memory_static 含 MEMORY.md 内容(持久事实)。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY", 12000)
     mgr = _mgr(tmp_path)
     mgr.write("MEMORY.md", "项目用 Python 3.12", append=True)
     reset = _with_mgr(mgr)
@@ -119,7 +120,8 @@ def test_auto_inject_user_and_memory_md_together(tmp_path, monkeypatch):
     """auto_inject 开 + USER.md + MEMORY.md 都在 → memory_static 含两者,join 拼接。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_USER", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY", 12000)
     mgr = _mgr(tmp_path)
     mgr.write("USER.md", "姓名:张三", append=True)
     mgr.write("MEMORY.md", "项目用 Python 3.12", append=True)
@@ -142,7 +144,7 @@ def test_daily_excluded_from_static(tmp_path, monkeypatch):
     """daily 不进 memory_static(只 USER.md+MEMORY.md);需 daily 用 memory_search。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_USER", 12000)
     mgr = _mgr(tmp_path)
     today = dt.date.today().isoformat()
     mgr.write("USER.md", "姓名:张三", append=True)
@@ -163,13 +165,18 @@ def test_daily_excluded_from_static(tmp_path, monkeypatch):
         reset(None)
 
 
-def test_auto_inject_truncates_when_over_cap(tmp_path, monkeypatch):
-    """内容超 max_chars → memory_static 追加截断标记 + 提示用 memory_search。"""
+def test_auto_inject_truncates_head_tail(tmp_path, monkeypatch):
+    """超 max_chars → head+tail 截断(保首尾丢中间),对齐 openclaw trimBootstrapContent。
+
+    内容=HEAD+X*180+TAIL(188>50):截断后首 HEAD 在/尾 TAIL 在/中部 X 大段丢。
+    对比 head-only 会丢全部 TAIL——TAIL 在即 head+tail 证据。
+    """
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 50)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_USER", 50)
     mgr = _mgr(tmp_path)
-    mgr.write("USER.md", "X" * 200, append=True)
+    body = "HEAD" + "X" * 180 + "TAIL"
+    mgr.write("USER.md", body, append=True)
     reset = _with_mgr(mgr)
     try:
         hook = MemoryHook()
@@ -177,9 +184,42 @@ def test_auto_inject_truncates_when_over_cap(tmp_path, monkeypatch):
         _run(hook, ctx)
         static = _section(ctx, "memory_static")
         assert static is not None
+        assert "HEAD" in static.content          # 首部保留
+        assert "TAIL" in static.content          # 尾部保留(head+tail 证据;head-only 会丢)
+        assert "X" * 180 not in static.content   # 中部大段丢失(确实截断)
         assert "截断" in static.content
         assert "memory_search" in static.content
-        assert "X" * 200 not in static.content   # body actually sliced, not just marker appended
+    finally:
+        reset(None)
+
+
+def test_auto_inject_separate_budgets(tmp_path, monkeypatch):
+    """USER.md 与 MEMORY.md 各走自己预算,互不挤占(对齐 openclaw 分文件预算)。
+
+    两者都超各自 50 上限 → 各自 head+tail 截断(首尾在/中部丢);合并预算会互相挤占丢首尾。
+    """
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_USER", 50)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY", 50)
+    mgr = _mgr(tmp_path)
+    mgr.write("USER.md", "U_HEAD" + "X" * 180 + "U_TAIL", append=True)
+    mgr.write("MEMORY.md", "M_HEAD" + "Y" * 180 + "M_TAIL", append=True)
+    reset = _with_mgr(mgr)
+    try:
+        hook = MemoryHook()
+        ctx = _ctx()
+        _run(hook, ctx)
+        static = _section(ctx, "memory_static")
+        assert static is not None
+        # USER 段独立截断:首尾在、中部 X 丢
+        assert "U_HEAD" in static.content
+        assert "U_TAIL" in static.content
+        assert "X" * 180 not in static.content
+        # MEMORY 段独立截断:首尾在、中部 Y 丢
+        assert "M_HEAD" in static.content
+        assert "M_TAIL" in static.content
+        assert "Y" * 180 not in static.content
     finally:
         reset(None)
 
@@ -188,7 +228,7 @@ def test_auto_inject_no_injectable_falls_back_to_strategy(tmp_path, monkeypatch)
     """auto_inject 开但只有昨日 daily(不在注入列表)→ 只 strategy,无 static。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
-    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS_USER", 12000)
     mgr = _mgr(tmp_path)
     yesterday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
     mgr.write(f"daily_memory/{yesterday}.md", "yesterday note", append=True)  # 昨日,不注入
