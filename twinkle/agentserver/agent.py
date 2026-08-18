@@ -27,6 +27,7 @@ from twinkle.agentserver.todo import (
 from twinkle.agentserver.permission_context import set_permission_channel
 from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY, ApprovalPendingRecord
 from twinkle.agentserver.tools.manager import ToolManager
+from twinkle.agentserver.tools.errors import ToolError, format_tool_error
 from twinkle.agentserver.hooks.base import (
     AgentHook,
     HookContext,
@@ -656,12 +657,13 @@ class ReActAgent:
                                                 except HookInterrupt:
                                                     raise
                                                 except Exception as exc:
-                                                    result = f"[tool error] {type(exc).__name__}: {exc}"
+                                                    result = format_tool_error(exc)
                                             else:
-                                                result = (f"[tool denied by user: {hook_interrupt.data['tool']}] "
-                                                          f"{hook_interrupt.data.get('reason', '')}")
+                                                result = format_tool_error(
+                                                    f"tool denied by user: {hook_interrupt.data['tool']} "
+                                                    f"— {hook_interrupt.data.get('reason', '')}")
                                         except Exception as exc:
-                                            result = f"[tool error] {type(exc).__name__}: {exc}"
+                                            result = format_tool_error(exc)
                                         for snap in flush_todo_events():
                                             yield E2AResponse(
                                                 request_id=request_id,
@@ -775,7 +777,7 @@ class ReActAgent:
             except HookInterrupt:
                 raise
             except Exception as exc:
-                result = f"[tool error] {type(exc).__name__}: {exc}"
+                result = format_tool_error(exc)
 
             results_per_tool[idx] = (tool_call["id"], result)
             todos_per_tool[idx] = list(todo_buffer)
