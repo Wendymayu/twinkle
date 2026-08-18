@@ -82,8 +82,8 @@ def test_parent_delegates_then_summarizes(session_store):
     # The child result was re-injected into the PARENT session as {role:"tool"}
     parent_msgs = session_store.get_messages("parent")
     roles = [m["role"] for m in parent_msgs]
-    assert roles == ["system", "user", "assistant", "tool", "assistant"]
-    tool_msg = parent_msgs[3]
+    assert roles == ["user", "assistant", "tool", "assistant"]
+    tool_msg = parent_msgs[2]
     assert tool_msg["role"] == "tool"
     assert "42" in tool_msg["content"]
     assert "[SYSTEM]" in tool_msg["content"]              # stop hint appended

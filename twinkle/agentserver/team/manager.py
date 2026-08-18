@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import (
-    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, SkillHook)
+    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, RuntimeEnvHook, SkillHook)
 from twinkle.agentserver.team.context import CURRENT_TEAM
 from twinkle.agentserver.team.message_box import MessageBox
 from twinkle.agentserver.team.task_store import TeamTaskStore
@@ -115,7 +115,7 @@ class Team:
         filtered tools, structured team prompt (role → persona → workspace),
         shared workspace.
         """
-        from twinkle.agentserver.agent import ReActAgent, build_member_system_prompt
+        from twinkle.agentserver.agent import ReActAgent, member_base_sections
 
         # 1. ToolManager filtered by MEMBER_TOOL_WHITELIST
         tm = ToolManager()
@@ -123,16 +123,10 @@ class Team:
             if t.card.name in MEMBER_TOOL_WHITELIST:
                 tm.register(t)
 
-        # 2. Pre-seed session with structured team system prompt
-        #    Sections: team_role → persona → workspace → base prompt
+        # 2. Member identity (persona → workspace → base prompt) baked into base_sections,
+        #    injected at construction; loop rebuilds it each step. Session no longer stores a system msg.
         member_sid = self._member_session_id(member_name)
         await self._store.create_session(member_sid)
-        system_prompt = build_member_system_prompt(
-            persona=persona,
-            workspace=str(self.workspace),
-            member_name=member_name,
-        )
-        await self._store.append(member_sid, {"role": "system", "content": system_prompt})
 
         # 3. Build ReActAgent — inbox wired via constructor so send_member
         #    (writes to self._inboxes[member_name]) and the run-loop drain
@@ -141,12 +135,14 @@ class Team:
             self._inboxes[member_name] = MessageBox()
         inbox = self._inboxes[member_name]
         hooks = [SkillHook(), MemoryHook(), MemoryFlushHook(llm=self._llm),
-                 LoggingHook(), RetryHook()]
+                 LoggingHook(), RetryHook(), RuntimeEnvHook()]
         return ReActAgent(
             self._llm, self._store, tm,
             hooks=tuple(hooks),
             max_steps=SUBAGENT_MAX_STEPS,
             inbox=inbox,
+            base_sections=member_base_sections(
+                persona=persona, workspace=str(self.workspace), member_name=member_name),
         )
 
     # ── delegation ──────────────────────────────────────────

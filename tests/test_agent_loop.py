@@ -84,14 +84,14 @@ def test_tool_call_round_trip_then_answer(session_store) -> None:
     assert final.response_kind == "e2a.complete"
     assert "good" in final.body["result"]["content"]
 
-    # session store now holds: system, user, assistant(tool_calls), tool, assistant(answer)
+    # session store now holds: user, assistant(tool_calls), tool, assistant(answer)
+    # (system prompt is injected per-step into LLM messages, not persisted)
     msgs = store.get_messages("s1")
-    assert msgs[0]["role"] == "system"
-    assert msgs[1]["role"] == "user"
-    assert msgs[2]["role"] == "assistant" and msgs[2]["tool_calls"]
-    assert msgs[3]["role"] == "tool" and msgs[3]["tool_call_id"] == "c1"
-    assert msgs[3]["content"] == "tool-saw:hi"
-    assert msgs[4]["role"] == "assistant"
+    assert msgs[0]["role"] == "user"
+    assert msgs[1]["role"] == "assistant" and msgs[1]["tool_calls"]
+    assert msgs[2]["role"] == "tool" and msgs[2]["tool_call_id"] == "c1"
+    assert msgs[2]["content"] == "tool-saw:hi"
+    assert msgs[3]["role"] == "assistant"
 
 
 def test_cross_turn_remembers_context(session_store) -> None:
@@ -159,8 +159,8 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
     """Model calls todo_create then answers — verifies the ContextVar is set
     to the envelope's session_id (via the store assertions below; without
     PLAN_TODO_SESSION_ID.set the tool would fall back to "default" and the
-    "s-todo" store key would stay empty) and that the system message is
-    present."""
+    "s-todo" store key would stay empty). System prompt is injected per-step
+    into LLM messages, not persisted in the store."""
     from twinkle.agentserver.tools import tool_manager
 
     store = session_store
@@ -183,13 +183,12 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
     assert frames[-1].response_kind == "e2a.complete"
     # tool result was re-injected into the store
     msgs = store.get_messages("s-todo")
-    assert msgs[0]["role"] == "system"
-    assert msgs[1]["role"] == "user"
-    assert msgs[2]["role"] == "assistant" and msgs[2]["tool_calls"]
-    assert msgs[3]["role"] == "tool"
-    assert "Created 2 todo tasks." in msgs[3]["content"]
-    assert "step one" in msgs[3]["content"]
-    assert msgs[4]["role"] == "assistant" and msgs[4]["content"] == "planned it"
+    assert msgs[0]["role"] == "user"
+    assert msgs[1]["role"] == "assistant" and msgs[1]["tool_calls"]
+    assert msgs[2]["role"] == "tool"
+    assert "Created 2 todo tasks." in msgs[2]["content"]
+    assert "step one" in msgs[2]["content"]
+    assert msgs[3]["role"] == "assistant" and msgs[3]["content"] == "planned it"
 
     # ContextVar was actually set to the envelope's session_id, not the
     # "default" fallback — otherwise both store keys below would be empty

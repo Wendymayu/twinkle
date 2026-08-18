@@ -69,7 +69,7 @@ def test_ask_then_allow_resumes_and_executes(session_store, tmp_path) -> None:
     assert ask.body["tool"] == "echo" and ask.is_final is False
     assert frames[-1].response_kind == "e2a.complete"
     msgs = session_store.get_messages("s1")
-    assert msgs[3]["role"] == "tool" and msgs[3]["content"] == "tool-saw:hi"
+    assert msgs[2]["role"] == "tool" and msgs[2]["content"] == "tool-saw:hi"
 
 
 def test_ask_then_denied_injects_deny_result(session_store, tmp_path) -> None:
@@ -97,8 +97,8 @@ def test_ask_then_denied_injects_deny_result(session_store, tmp_path) -> None:
 
     frames = asyncio.run(run())
     msgs = session_store.get_messages("s1")
-    assert msgs[3]["role"] == "tool"
-    assert "denied by user" in msgs[3]["content"]
+    assert msgs[2]["role"] == "tool"
+    assert "denied by user" in msgs[2]["content"]
     assert frames[-1].response_kind == "e2a.complete"
 
 

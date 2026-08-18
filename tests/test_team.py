@@ -138,13 +138,13 @@ def test_build_member_persona_in_system_prompt(session_store):
     team._llm = _ScriptedLLM([])
 
     async def _run():
-        await team._build_member("researcher", "金融分析师")
-    asyncio.run(_run())
+        return await team._build_member("researcher", "金融分析师")
+    member = asyncio.run(_run())
 
-    member_sid = team._member_session_id("researcher")
-    history = session_store.get_history(member_sid)
-    assert len(history) >= 1
-    assert "researcher" in history[0]["content"]
+    # persona baked into base_sections (injected at construction); session store no longer seeds a system msg
+    built = "\n\n".join(s.content for s in member._base_sections)
+    assert "researcher" in built
+    assert "金融分析师" in built
 
 
 def test_build_member_workspace_in_prompt(session_store):
@@ -154,12 +154,11 @@ def test_build_member_workspace_in_prompt(session_store):
     team._llm = _ScriptedLLM([])
 
     async def _run():
-        await team._build_member("tester", "tester persona")
-    asyncio.run(_run())
+        return await team._build_member("tester", "tester persona")
+    member = asyncio.run(_run())
 
-    member_sid = team._member_session_id("tester")
-    history = session_store.get_history(member_sid)
-    assert "workspace" in history[0]["content"].lower() or team.workspace.name in history[0]["content"]
+    built = "\n\n".join(s.content for s in member._base_sections)
+    assert "workspace" in built.lower() or team.workspace.name in built
 
 
 # ── delegate ──────────────────────────────────────────────────
@@ -368,12 +367,14 @@ def test_member_prompt_omits_global_workspace_paths():
 
 
 def test_member_prompt_has_runtime_environment():
-    """Member prompt includes platform + date for command execution."""
+    """Member prompt includes runtime environment block (platform/date moved to env-tail)."""
     from twinkle.agentserver.agent import build_member_system_prompt
     prompt = build_member_system_prompt(persona="tester", workspace="/tmp/ws")
     assert "运行环境" in prompt
-    assert "当前平台" in prompt
-    assert "当前日期" in prompt
+    # 当前平台：/当前日期： env 数值行已移到尾部 <environment_context>(RuntimeEnvHook);
+    # 引导句"与当前平台匹配的命令语法"保留(无冒号,不误伤)。
+    assert "当前平台：" not in prompt
+    assert "当前日期：" not in prompt
 
 
 def test_member_prompt_has_tool_usage_guide():
@@ -438,7 +439,7 @@ def test_send_member_unknown_name_errors(session_store):
 
 def test_member_prompt_contains_member_name(session_store):
     team = _team_with_scripted_llm(session_store, [])
-    asyncio.run(team._ensure_member("researcher", "金融分析师"))
-    member_sid = team._member_session_id("researcher")
-    history = session_store.get_history(member_sid)
-    assert "researcher" in history[0]["content"]
+    member = asyncio.run(team._ensure_member("researcher", "金融分析师"))
+    # member_name baked into base_sections (injected at construction); session store no longer seeds a system msg
+    built = "\n\n".join(s.content for s in member._base_sections)
+    assert "researcher" in built

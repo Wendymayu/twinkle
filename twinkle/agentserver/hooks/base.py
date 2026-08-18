@@ -186,6 +186,7 @@ class HookContext:
     session_id: str | None
     request_id: str | None
     extra: dict = field(default_factory=dict)
+    builder: Any = None  # SystemPromptBuilder | None — loop 每步赋,hook 读
     exception: Exception | None = None
     retry_attempt: int = 0
 

@@ -34,11 +34,13 @@ def test_build_tool_manager_excludes_subagent_and_memory_writes(session_store):
 
 def test_system_prompt_mentions_rules(session_store):
     ex = _make_executor(session_store, child_hooks=[])
-    prompt = ex._system_prompt()
-    assert "子 agent" in prompt               # 子 agent 角色
-    assert "spawn_subagent" not in prompt    # 不注入子调不了的工具名（schema 已排除）
-    assert "list_skill" in prompt             # skill 用法
-    assert "memory_search" in prompt          # 记忆只读
+    child = ex._build_child_agent()
+    # child identity = normal base prompt + sub-agent addendum, baked into base_sections
+    built = "\n\n".join(s.content for s in child._base_sections)
+    assert "子 agent" in built               # 子 agent 角色 (addendum)
+    assert "spawn_subagent" not in built    # 不注入子调不了的工具名（schema 已排除）
+    assert "list_skill" in built             # skill 用法
+    assert "memory_search" in built          # 记忆只读
 
 
 def test_build_query_objective_with_prompt(session_store):
@@ -82,7 +84,7 @@ def test_execute_subagent_returns_child_final(session_store):
 
 
 def test_execute_subagent_uses_isolated_child_session(session_store):
-    """Child session != parent; child history has only [system, user, assistant]."""
+    """Child session != parent; child history has only [user, assistant]."""
     from twinkle.agentserver.tools.builtin.subagent import SubagentTaskSpec
     # pre-populate the parent session with history the child must NOT inherit
     asyncio.run(session_store.append("p1", {"role": "user", "content": "parent secret"}))
@@ -101,8 +103,8 @@ def test_execute_subagent_uses_isolated_child_session(session_store):
     child_sids = [s for s in all_sids if s.startswith("p1__sub_")]
     assert len(child_sids) == 1
     child_msgs = session_store.get_messages(child_sids[0])
-    assert [m["role"] for m in child_msgs] == ["system", "user", "assistant"]
-    assert child_msgs[1]["content"] == "child task"
+    assert [m["role"] for m in child_msgs] == ["user", "assistant"]
+    assert child_msgs[0]["content"] == "child task"
     assert "parent secret" not in str(child_msgs)
     # parent session untouched by the child run
     assert [m["content"] for m in session_store.get_messages("p1")] == ["parent secret"]

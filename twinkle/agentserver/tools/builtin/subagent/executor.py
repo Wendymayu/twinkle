@@ -14,7 +14,8 @@ import uuid
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import (
-    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, SkillHook)
+    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, RuntimeEnvHook, SkillHook)
+from twinkle.agentserver.prompts import PromptSection
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.agentserver.tools.builtin.subagent.models import (
@@ -70,14 +71,6 @@ class SubagentExecutor:
                 tool_manager.register(t)
         return tool_manager
 
-    def _system_prompt(self) -> str:
-        # Reuse the parent's base prompt (identity + runtime + workspace + tool
-        # guidance) so the child uses command_exec/file tools correctly, then
-        # append the sub-agent role addendum. Pre-seeding this as the first
-        # message also makes _inner_run_stream skip its default build_system_prompt() seed.
-        from twinkle.agentserver.agent import build_system_prompt  # lazy: avoid circular (agent -> tools -> subagent -> executor)
-        return build_system_prompt() + "\n\n" + _SUBAGENT_ADDENDUM
-
     def _build_query(self, task: SubagentTaskSpec) -> str:
         if task.prompt:
             return f"{task.objective}\n\n{task.prompt}"
@@ -87,16 +80,20 @@ class SubagentExecutor:
         if self._child_hooks is not None:
             return self._child_hooks
         return [SkillHook(), MemoryHook(), MemoryFlushHook(llm=self._llm),
-                LoggingHook(), RetryHook()]
+                LoggingHook(), RetryHook(), RuntimeEnvHook()]
 
     # --- build + run ---
 
     def _build_child_agent(self) -> "ReActAgent":
-        from twinkle.agentserver.agent import ReActAgent  # lazy: avoid circular (agent -> tools -> subagent -> executor)
+        from twinkle.agentserver.agent import ReActAgent, normal_base_sections  # lazy: avoid circular
         tool_manager = self._build_tool_manager()
+        # child identity = parent's base prompt (priority 10) + sub-agent addendum (priority 15)
+        base_sections = normal_base_sections() + [
+            PromptSection("subagent_addendum", _SUBAGENT_ADDENDUM, priority=15)]
         return ReActAgent(self._llm, self._store, tool_manager,
                           hooks=tuple(self._hook_list()),
-                          max_steps=self._config.max_steps)
+                          max_steps=self._config.max_steps,
+                          base_sections=base_sections)
 
     async def _drive_child(self, child_loop: "ReActAgent", child_request: "AgentRequest") -> str:
         """Run child agent in a child task (ContextVar isolation); drain
@@ -150,10 +147,6 @@ class SubagentExecutor:
     ) -> SubagentResult:
         session_id = f"{parent_session_id}__sub_{uuid.uuid4().hex[:8]}"
         await self._store.create_session(session_id)
-        await self._store.append(
-            session_id, {"role": "system", "content": self._system_prompt()},
-            request_id=parent_request_id,
-        )
         child_agent = self._build_child_agent()
         from twinkle.agentserver.agent import AgentRequest  # lazy: avoid circular
         child_request = AgentRequest(
