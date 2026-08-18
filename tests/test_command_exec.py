@@ -2,7 +2,10 @@ import asyncio
 import json
 import subprocess
 
+import pytest
+
 from twinkle.agentserver.tools.builtin import command_exec
+from twinkle.agentserver.tools.errors import ToolError
 
 
 def _fake_completed(stdout: str = "", stderr: str = "", code: int = 0):
@@ -14,18 +17,18 @@ def _fake_completed(stdout: str = "", stderr: str = "", code: int = 0):
 # --- safety + workdir guards ---
 
 def test_rejects_empty_command() -> None:
-    assert asyncio.run(command_exec.command_exec.invoke({"command": ""})) == "[ERROR]: command cannot be empty."
+    with pytest.raises(ToolError, match="command cannot be empty"):
+        asyncio.run(command_exec.command_exec.invoke({"command": ""}))
 
 
 def test_blocks_dangerous_pattern() -> None:
-    out = asyncio.run(command_exec.command_exec.invoke({"command": "rm -rf /"}))
-    assert "rejected for safety" in out
-    assert "rm -rf" in out
+    with pytest.raises(ToolError, match=r"rejected for safety.*rm -rf"):
+        asyncio.run(command_exec.command_exec.invoke({"command": "rm -rf /"}))
 
 
 def test_rejects_workdir_escape() -> None:
-    out = asyncio.run(command_exec.command_exec.invoke({"command": "echo hi", "workdir": "../../"}))
-    assert "outside the project workspace" in out
+    with pytest.raises(ToolError, match="outside the project workspace"):
+        asyncio.run(command_exec.command_exec.invoke({"command": "echo hi", "workdir": "../../"}))
 
 
 # --- foreground / background execution (mocked subprocess seam) ---
@@ -63,8 +66,8 @@ def test_timeout_returns_error(monkeypatch) -> None:
         raise subprocess.TimeoutExpired(cmd=command, timeout=timeout_seconds)
 
     monkeypatch.setattr(command_exec, "_run_command_sync", fake_run_sync)
-    out = asyncio.run(command_exec.command_exec.invoke({"command": "sleep 999", "timeout_seconds": 1}))
-    assert "timed out after 1s" in out
+    with pytest.raises(ToolError, match="timed out after 1s"):
+        asyncio.run(command_exec.command_exec.invoke({"command": "sleep 999", "timeout_seconds": 1}))
 
 
 def test_background_returns_pid(monkeypatch) -> None:
@@ -82,8 +85,8 @@ def test_background_failure_returns_error(monkeypatch) -> None:
         "_run_command_background",
         lambda c, w: (1, "powershell", "Process exited with code 1"),
     )
-    out = asyncio.run(command_exec.command_exec.invoke({"command": "badcmd", "background": True}))
-    assert "background command failed" in out
+    with pytest.raises(ToolError, match="background command failed"):
+        asyncio.run(command_exec.command_exec.invoke({"command": "badcmd", "background": True}))
 
 
 # --- cross-platform shell selection (no real execution needed) ---

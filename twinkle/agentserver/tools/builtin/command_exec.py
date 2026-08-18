@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Sequence
 
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.errors import ToolError
 from twinkle.config import WORKSPACE_DIR
 
 # --- Safety: deny patterns live in the single source of truth. ---
@@ -121,16 +122,16 @@ async def command_exec(
     """
     command = (command or "").strip()
     if not command:
-        return "[ERROR]: command cannot be empty."
+        raise ToolError("command cannot be empty.", kind="validation")
 
     blocked_reason = _check_command_safety(command)
     if blocked_reason:
-        return f"[ERROR]: command rejected for safety ({blocked_reason})."
+        raise ToolError(f"command rejected for safety ({blocked_reason}).", kind="denied")
 
     try:
         resolved_workdir = _resolve_workdir(workdir)
     except Exception:
-        return "[ERROR]: workdir is outside the project workspace."
+        raise ToolError("workdir is outside the project workspace.", kind="validation")
 
     try:
         timeout_seconds = int(timeout_seconds)
@@ -150,9 +151,9 @@ async def command_exec(
                 _run_command_background, command, resolved_workdir
             )
         except Exception as exc:
-            return f"[ERROR]: command failed to start: {exc}"
+            raise ToolError(f"command failed to start: {exc}", kind="failed")
         if err:
-            return f"[ERROR]: background command failed: {err}"
+            raise ToolError(f"background command failed: {err}", kind="failed")
         return json.dumps(
             {
                 "command": command,
@@ -169,9 +170,9 @@ async def command_exec(
             _run_command_sync, command, timeout_seconds, resolved_workdir
         )
     except subprocess.TimeoutExpired:
-        return f"[ERROR]: command timed out after {timeout_seconds}s."
+        raise ToolError(f"command timed out after {timeout_seconds}s.", kind="failed")
     except Exception as exc:
-        return f"[ERROR]: command execution failed: {exc}"
+        raise ToolError(f"command execution failed: {exc}", kind="failed")
 
     return json.dumps(
         {

