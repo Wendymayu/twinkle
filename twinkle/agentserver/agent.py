@@ -27,7 +27,7 @@ from twinkle.agentserver.todo import (
 from twinkle.agentserver.permission_context import set_permission_channel
 from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY, ApprovalPendingRecord
 from twinkle.agentserver.tools.manager import ToolManager
-from twinkle.agentserver.tools.errors import ToolError, format_tool_error
+from twinkle.agentserver.tools.errors import format_tool_error
 from twinkle.agentserver.hooks.base import (
     AgentHook,
     HookContext,
