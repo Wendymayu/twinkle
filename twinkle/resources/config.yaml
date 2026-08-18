@@ -63,7 +63,7 @@ memory:
   index:
     debounce_seconds: 2.0                 # 写后去抖窗口秒:连续写塌成一次重索引(对齐 jiuwenswarm 防抖);写入路径零索引,search 兜底/后台 timer 异步索引
   auto_inject:
-    enabled: false                # 被动召回(opt-in):每步 before_model_call 把 USER.md + MEMORY.md + 今日 daily 注入 system prompt(顺序 USER→MEMORY→daily,cap 超限截断),模型不主动 memory_search 也能看到。默认关=维持 5a 只注入策略
+    enabled: true                 # 被动召回(默认开):before_invoke 一次把 USER.md + MEMORY.md 注入 system prefix(无 daily;daily 用 memory_search 召回=动态区),cap 超限截断。对齐 jiuwenswarm 跨步稳定 prefix
     max_chars: 12000             # 注入内容字符上限(估算 char//3 ≈ 4000 token),超限截断
   flush:
     enabled: false                # 兜底(opt-in):压缩前 LLM 查 middle 有无未持久化重要信息→write_memory 落盘。默认关=维持 5a

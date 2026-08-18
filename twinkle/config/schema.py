@@ -125,7 +125,7 @@ class MemoryIndexConfig(_StrictModel):
 
 
 class MemoryAutoInjectConfig(_StrictModel):
-    enabled: bool = False    # 被动召回开关（opt-in；默认关=维持 5a "只注入策略 prompt"）
+    enabled: bool = True     # 被动召回开关（默认开=before_invoke 注 USER.md+MEMORY.md 进 prefix；关=只策略 prompt）
     max_chars: int = 12000   # 注入内容字符上限（估算 char//3 ≈ 4000 token）
 
 
