@@ -115,6 +115,29 @@ def test_auto_inject_memory_md(tmp_path, monkeypatch):
         reset(None)
 
 
+def test_auto_inject_user_and_memory_md_together(tmp_path, monkeypatch):
+    """auto_inject 开 + USER.md + MEMORY.md 都在 → memory_static 含两者,join 拼接。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
+    monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
+    mgr = _mgr(tmp_path)
+    mgr.write("USER.md", "姓名:张三", append=True)
+    mgr.write("MEMORY.md", "项目用 Python 3.12", append=True)
+    reset = _with_mgr(mgr)
+    try:
+        hook = MemoryHook()
+        ctx = _ctx()
+        _run(hook, ctx)
+        static = _section(ctx, "memory_static")
+        assert static is not None
+        assert "张三" in static.content
+        assert "Python 3.12" in static.content
+        assert "USER.md" in static.content
+        assert "MEMORY.md" in static.content
+    finally:
+        reset(None)
+
+
 def test_daily_excluded_from_static(tmp_path, monkeypatch):
     """daily 不进 memory_static(只 USER.md+MEMORY.md);需 daily 用 memory_search。"""
     import twinkle.config
@@ -156,6 +179,7 @@ def test_auto_inject_truncates_when_over_cap(tmp_path, monkeypatch):
         assert static is not None
         assert "截断" in static.content
         assert "memory_search" in static.content
+        assert "X" * 200 not in static.content   # body actually sliced, not just marker appended
     finally:
         reset(None)
 
