@@ -1,27 +1,24 @@
-"""MemoryHook 测试——策略 prompt 常开 + opt-in 被动召回。
+"""MemoryHook 测试——before_invoke 注 memory_strategy(常开)+ memory_static(opt-in,USER.md+MEMORY.md,无 daily)。
 
-覆盖:空 store no-op、策略-only(开关关)、USER.md 注入、MEMORY.md 注入、
-今日 daily 注入、超 cap 截断、"开关开但无 injectable 文件(只有昨日 daily)"
-回退到策略-only。沿用 test_memory_store 的 async run 风格。
+覆盖:空 store no-op、策略-only(开关关)、USER.md 注入、MEMORY.md 注入、daily 不进前缀、
+超 cap 截断、开关开但无 injectable 文件(只有昨日 daily)回退策略-only。
+daily 不再自动注入——需 daily 时 memory_search('daily_memory/<日期>')。沿用 asyncio.run 风格。
 """
 import asyncio
 import datetime as dt
 
-from twinkle.agentserver.hooks.base import HookContext, HookEvent, ModelCallInputs
+from twinkle.agentserver.hooks.base import HookContext, HookEvent, InvokeInputs
 from twinkle.agentserver.hooks.builtin.memory_hook import MemoryHook
 from twinkle.agentserver.memory.store import MemoryManager
+from twinkle.agentserver.prompts import PromptSection
 
 
-def _ctx(messages=None):
+def _ctx(query="hi") -> HookContext:
+    """before_invoke 时 builder 尚不存在;inputs 是 InvokeInputs。"""
     return HookContext(
-        agent=None,
-        event=HookEvent.BEFORE_MODEL_CALL,
-        inputs=ModelCallInputs(
-            messages=messages or [{"role": "user", "content": "hi"}],
-            tools=[],
-        ),
-        session_id="s",
-        request_id="r",
+        agent=None, event=HookEvent.BEFORE_INVOKE,
+        inputs=InvokeInputs(query=query, mode=""),
+        session_id="s", request_id="r",
     )
 
 
@@ -30,7 +27,7 @@ def _mgr(tmp_path, **kw):
 
 
 def _run(hook, ctx):
-    asyncio.run(hook.before_model_call(ctx))
+    asyncio.run(hook.before_invoke(ctx))
 
 
 def _with_mgr(mgr):
@@ -40,21 +37,25 @@ def _with_mgr(mgr):
     return _set_memory_manager
 
 
+def _section(ctx, name: str) -> PromptSection | None:
+    secs = ctx.extra.get("frozen_sections", [])
+    return next((s for s in secs if s.name == name), None)
+
+
 def test_empty_store_noop(tmp_path):
-    """空 store → 不注入(messages 不变)。"""
+    """空 store → 不注入(frozen_sections 无 key)。"""
     reset = _with_mgr(_mgr(tmp_path))
     try:
         hook = MemoryHook()
         ctx = _ctx()
-        before = list(ctx.inputs.messages)
         _run(hook, ctx)
-        assert ctx.inputs.messages == before
+        assert "frozen_sections" not in ctx.extra  # 空 store → no-op,不 stash
     finally:
         reset(None)
 
 
 def test_strategy_only_when_auto_inject_disabled(tmp_path, monkeypatch):
-    """auto_inject 关(默认)→ 只策略 prompt,无「被动召回」段。"""
+    """auto_inject 关 → 只 strategy section,无 memory_static;env(today)不进策略。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", False)
     mgr = _mgr(tmp_path)
@@ -64,15 +65,18 @@ def test_strategy_only_when_auto_inject_disabled(tmp_path, monkeypatch):
         hook = MemoryHook()
         ctx = _ctx()
         _run(hook, ctx)
-        injected = ctx.inputs.messages[0]["content"]
-        assert "长期记忆" in injected        # 策略 prompt 在
-        assert "被动召回" not in injected     # 无被动召回
+        strat = _section(ctx, "memory_strategy")
+        assert strat is not None
+        assert "长期记忆" in strat.content
+        assert "memory_search('daily_memory" in strat.content  # 新提示:需 daily 用 search
+        assert dt.date.today().isoformat() not in strat.content  # 今日日期不进 prefix
+        assert _section(ctx, "memory_static") is None  # 开关关 → 无 static
     finally:
         reset(None)
 
 
 def test_auto_inject_user_md(tmp_path, monkeypatch):
-    """auto_inject 开 + USER.md 存在 → 注入含 USER.md 内容。"""
+    """auto_inject 开 + USER.md → memory_static 含 USER.md 内容。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
@@ -83,16 +87,16 @@ def test_auto_inject_user_md(tmp_path, monkeypatch):
         hook = MemoryHook()
         ctx = _ctx()
         _run(hook, ctx)
-        injected = ctx.inputs.messages[0]["content"]
-        assert "被动召回" in injected
-        assert "张三" in injected
-        assert "USER.md" in injected
+        static = _section(ctx, "memory_static")
+        assert static is not None
+        assert "张三" in static.content
+        assert "USER.md" in static.content
     finally:
         reset(None)
 
 
 def test_auto_inject_memory_md(tmp_path, monkeypatch):
-    """auto_inject 开 + MEMORY.md 存在 → 注入含 MEMORY.md 内容(持久事实)。"""
+    """auto_inject 开 + MEMORY.md → memory_static 含 MEMORY.md 内容(持久事实)。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
@@ -103,36 +107,41 @@ def test_auto_inject_memory_md(tmp_path, monkeypatch):
         hook = MemoryHook()
         ctx = _ctx()
         _run(hook, ctx)
-        injected = ctx.inputs.messages[0]["content"]
-        assert "被动召回" in injected
-        assert "Python 3.12" in injected
-        assert "MEMORY.md" in injected
+        static = _section(ctx, "memory_static")
+        assert static is not None
+        assert "Python 3.12" in static.content
+        assert "MEMORY.md" in static.content
     finally:
         reset(None)
 
 
-def test_auto_inject_today_daily(tmp_path, monkeypatch):
-    """auto_inject 开 + 今日 daily 存在 → 注入含 daily 内容。"""
+def test_daily_excluded_from_static(tmp_path, monkeypatch):
+    """daily 不进 memory_static(只 USER.md+MEMORY.md);需 daily 用 memory_search。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
     mgr = _mgr(tmp_path)
     today = dt.date.today().isoformat()
+    mgr.write("USER.md", "姓名:张三", append=True)
     mgr.write(f"daily_memory/{today}.md", "今日部署了 v1.2", append=True)
     reset = _with_mgr(mgr)
     try:
         hook = MemoryHook()
         ctx = _ctx()
         _run(hook, ctx)
-        injected = ctx.inputs.messages[0]["content"]
-        assert "v1.2" in injected
-        assert today in injected
+        static = _section(ctx, "memory_static")
+        assert static is not None
+        assert "张三" in static.content        # USER.md 在
+        assert "v1.2" not in static.content   # daily 内容不进 prefix
+        assert today not in static.content     # daily 日期不进 prefix
+        strat = _section(ctx, "memory_strategy")
+        assert "memory_search('daily_memory" in strat.content  # 策略提示去搜 daily
     finally:
         reset(None)
 
 
 def test_auto_inject_truncates_when_over_cap(tmp_path, monkeypatch):
-    """内容超 max_chars → 追加截断标记 + 提示用 memory_search。"""
+    """内容超 max_chars → memory_static 追加截断标记 + 提示用 memory_search。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 50)
@@ -143,15 +152,16 @@ def test_auto_inject_truncates_when_over_cap(tmp_path, monkeypatch):
         hook = MemoryHook()
         ctx = _ctx()
         _run(hook, ctx)
-        injected = ctx.inputs.messages[0]["content"]
-        assert "截断" in injected
-        assert "memory_search" in injected
+        static = _section(ctx, "memory_static")
+        assert static is not None
+        assert "截断" in static.content
+        assert "memory_search" in static.content
     finally:
         reset(None)
 
 
 def test_auto_inject_no_injectable_falls_back_to_strategy(tmp_path, monkeypatch):
-    """auto_inject 开但只有昨日 daily(不在注入列表)→ 只策略。"""
+    """auto_inject 开但只有昨日 daily(不在注入列表)→ 只 strategy,无 static。"""
     import twinkle.config
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_ENABLED", True)
     monkeypatch.setattr(twinkle.config, "MEMORY_AUTO_INJECT_MAX_CHARS", 12000)
@@ -163,8 +173,7 @@ def test_auto_inject_no_injectable_falls_back_to_strategy(tmp_path, monkeypatch)
         hook = MemoryHook()
         ctx = _ctx()
         _run(hook, ctx)
-        injected = ctx.inputs.messages[0]["content"]
-        assert "长期记忆" in injected
-        assert "被动召回" not in injected
+        assert _section(ctx, "memory_strategy") is not None
+        assert _section(ctx, "memory_static") is None  # 无 USER/MEMORY → 无 static
     finally:
         reset(None)
