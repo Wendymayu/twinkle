@@ -11,6 +11,7 @@ from twinkle.agentserver.sessions import SessionStore
 from twinkle.agentserver.team.context import CURRENT_TEAM
 from twinkle.agentserver.team.manager import MEMBER_TOOL_WHITELIST, Team, TeamManager
 from twinkle.agentserver.team.workspace import ensure_team_workspace, team_workspace_dir
+from twinkle.agentserver.tools.errors import ToolError
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.config.schema import TeamConfig
 
@@ -207,13 +208,13 @@ def test_member_run_end_releases_uncompleted_claim(session_store, isolated_todo_
 # ── delegate_to_member tool ───────────────────────────────────
 
 def test_delegate_to_member_no_contextvar():
-    """When CURRENT_TEAM is not set, returns error message."""
+    """When CURRENT_TEAM is not set, raises ToolError (unavailable)."""
     from twinkle.agentserver.tools.builtin.team_tools import delegate_to_member
 
     token = CURRENT_TEAM.set(None)
     try:
-        result = asyncio.run(delegate_to_member.func("researcher", "researcher persona", "task"))
-        assert "team unavailable" in result
+        with pytest.raises(ToolError, match="team feature not initialized"):
+            asyncio.run(delegate_to_member.func("researcher", "researcher persona", "task"))
     finally:
         CURRENT_TEAM.reset(token)
 
