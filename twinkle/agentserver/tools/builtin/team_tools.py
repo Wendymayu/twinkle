@@ -13,6 +13,7 @@ from __future__ import annotations
 from twinkle.agentserver.team.context import CURRENT_TEAM
 from twinkle.agentserver.todo import TodoError
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.errors import ToolError
 
 
 @tool
@@ -29,7 +30,7 @@ async def delegate_to_member(member_name: str, persona: str, objective: str,
     """
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     return await team.delegate(member_name, persona, objective, prompt)
 
 
@@ -42,7 +43,7 @@ async def create_task(subject: str, blocked_by: list[str] | None = None) -> str:
     """
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     try:
         t = await team.task_store.create_task(subject, blocked_by=blocked_by)
         return f"Created task {t.id}: {t.subject}" + (
@@ -60,7 +61,7 @@ async def claim_task(task_id: str, member_name: str = "") -> str:
     """
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     name = member_name or _current_member_name()
     try:
         t = await team.task_store.claim_task(task_id, name)
@@ -84,7 +85,7 @@ async def complete_task(task_id: str, result: str = "",
     """
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     name = member_name or _current_member_name()
     try:
         if help_reason:
@@ -101,7 +102,7 @@ async def cancel_task(task_id: str) -> str:
     """取消一个 team 任务（leader 用）。"""
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     try:
         t = await team.task_store.cancel_task(task_id)
         return f"Cancelled task {t.id}."
@@ -114,7 +115,7 @@ async def list_tasks(status: str = "") -> str:
     """列出所有 team task。可按 status 过滤（pending/in_progress/completed/cancelled）。"""
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     tasks = await team.task_store.list_tasks(status=status or None)
     return _format_team_tasks(tasks)
 
@@ -124,7 +125,7 @@ async def get_task(task_id: str) -> str:
     """查看单个 team task 详情（含 result/owner/blocked_by/help_reason）。"""
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     t = await team.task_store.get_task(task_id)
     if t is None:
         return f"Task {task_id} not found."
@@ -141,7 +142,7 @@ async def send_member(member_name: str, message: str) -> str:
     """
     team = CURRENT_TEAM.get()
     if team is None:
-        return "[team unavailable]"
+        raise ToolError("team feature not initialized on this loop", kind="unavailable")
     try:
         return await team.send_member(member_name, message)
     except KeyError:

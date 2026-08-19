@@ -12,6 +12,7 @@ from .context import (
     get_subagent_parent_session_id,
 )
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.errors import ToolError
 from twinkle.agentserver.tools.builtin.subagent.models import (
     SubagentResult,
     SubagentTaskSpec,
@@ -54,7 +55,7 @@ async def spawn_subagent(objective: str, prompt: str = "") -> str:
     executor = get_subagent_executor()
     parent_session_id = get_subagent_parent_session_id()
     if executor is None or parent_session_id is None:
-        return "[subagent unavailable] executor not initialized on this loop"
+        raise ToolError("subagent executor not initialized on this loop", kind="unavailable")
     parent_request_id = get_subagent_parent_request_id() or parent_session_id
     task = SubagentTaskSpec(objective=objective, prompt=prompt)
     result = await executor.execute_subagent(

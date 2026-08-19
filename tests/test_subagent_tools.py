@@ -1,9 +1,12 @@
 import asyncio
 
+import pytest
+
 from twinkle.agentserver.tools.builtin.subagent.context import (
     SUBAGENT_EXECUTOR, SUBAGENT_PARENT_REQUEST_ID, SUBAGENT_PARENT_SESSION_ID,
 )
 from twinkle.agentserver.tools.builtin.subagent import SubagentResult
+from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeExecutor:
@@ -58,10 +61,10 @@ def test_spawn_subagent_failure_returns_error_plus_stop_hint(session_store):
 
 def test_spawn_subagent_no_executor_returns_unavailable():
     from twinkle.agentserver.tools.builtin.subagent import spawn_subagent
-    # no ContextVar set -> graceful string, no raise
-    out = asyncio.run(spawn_subagent.invoke(
-        {"objective": "x", "prompt": ""}))
-    assert "unavailable" in out.lower()
+    # no ContextVar set -> raises ToolError (unavailable)
+    with pytest.raises(ToolError, match="subagent executor not initialized"):
+        asyncio.run(spawn_subagent.invoke(
+            {"objective": "x", "prompt": ""}))
 
 
 def test_spawn_subagent_is_a_streaming_free_tool():

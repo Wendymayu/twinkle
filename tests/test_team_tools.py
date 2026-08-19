@@ -6,9 +6,12 @@ These tests exercise the happy path against a real Team + isolated todo store.
 
 import asyncio
 
+import pytest
+
 from twinkle.agentserver.team.context import CURRENT_TEAM
 from twinkle.agentserver.team.manager import Team, TeamManager
 from twinkle.agentserver.tools.builtin import team_tools
+from twinkle.agentserver.tools.errors import ToolError
 
 
 def _team(session_store):
@@ -21,8 +24,8 @@ def _team(session_store):
 
 def test_send_member_no_contextvar():
     CURRENT_TEAM.set(None)
-    out = asyncio.run(team_tools.send_member.func("researcher", "hi"))
-    assert "team unavailable" in out
+    with pytest.raises(ToolError, match="team feature not initialized"):
+        asyncio.run(team_tools.send_member.func("researcher", "hi"))
 
 
 def test_create_task_then_list(session_store, isolated_todo_store):
