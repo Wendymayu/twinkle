@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.errors import ToolError
 
 _DDG_HTML_URL = "https://html.duckduckgo.com/html/"
 _TAVILY_URL = "https://api.tavily.com/search"
@@ -225,7 +226,7 @@ async def web_search(query: str, max_results: int = 5) -> str:
     """
     query = (query or "").strip()
     if not query:
-        return "[error] empty query"
+        raise ToolError("empty query", kind="validation")
     max_results = max(1, min(int(max_results or 5), 20))
 
     errors: list[str] = []
@@ -239,4 +240,4 @@ async def web_search(query: str, max_results: int = 5) -> str:
     except Exception as exc:
         errors.append(f"duckduckgo: {exc}")
 
-    return f"[error] search engines unavailable: {' | '.join(errors)}"
+    raise ToolError(f"search engines unavailable: {' | '.join(errors)}", kind="unavailable")

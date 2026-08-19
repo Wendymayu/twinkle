@@ -2,8 +2,10 @@ import asyncio
 import os
 
 import httpx
+import pytest
 
 from twinkle.agentserver.tools.builtin import web_search
+from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeResp:
@@ -94,13 +96,10 @@ def test_no_key_ddg_challenge_returns_honest_error_not_no_results(monkeypatch) -
     )
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
-    out = asyncio.run(
-        web_search.web_search.invoke({"query": "anything", "max_results": 5})
-    )
-    assert out.strip() != "(no results)"
-    assert "(no results)" not in out
-    assert "[error]" in out.lower()
-    assert "challenge" in out.lower() or "unavailable" in out.lower()
+    with pytest.raises(ToolError, match="search engines unavailable"):
+        asyncio.run(
+            web_search.web_search.invoke({"query": "anything", "max_results": 5})
+        )
 
 
 def test_tavily_primary_when_key_set(monkeypatch) -> None:
@@ -144,5 +143,5 @@ def test_tavily_failure_falls_back_to_ddg(monkeypatch) -> None:
 
 def test_empty_query_returns_error(monkeypatch) -> None:
     _install_fake_http(monkeypatch, lambda *a, **k: _FakeResp(text=_DDG_HTML))
-    out = asyncio.run(web_search.web_search.invoke({"query": "  "}))
-    assert "[error]" in out.lower()
+    with pytest.raises(ToolError, match="empty query"):
+        asyncio.run(web_search.web_search.invoke({"query": "  "}))

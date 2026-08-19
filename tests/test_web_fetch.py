@@ -1,8 +1,10 @@
 import asyncio
 
 import httpx
+import pytest
 
 from twinkle.agentserver.tools.builtin import web_fetch
+from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeResp:
@@ -105,12 +107,10 @@ def test_403_no_key_returns_honest_error_with_hint(monkeypatch) -> None:
     )
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
-    out = asyncio.run(
-        web_fetch.web_fetch.invoke({"url": "https://en.wikipedia.org/wiki/Moon"})
-    )
-    assert "[error]" in out.lower()
-    assert "TAVILY_API_KEY" in out  # actionable hint
-    assert "denied" not in out  # don't leak the raw 403 body as if it were content
+    with pytest.raises(ToolError, match="TAVILY_API_KEY"):
+        asyncio.run(
+            web_fetch.web_fetch.invoke({"url": "https://en.wikipedia.org/wiki/Moon"})
+        )
 
 
 def test_tavily_failure_after_403_aggregates_errors(monkeypatch) -> None:
@@ -125,16 +125,13 @@ def test_tavily_failure_after_403_aggregates_errors(monkeypatch) -> None:
     _install_fake_http(monkeypatch, responder)
     monkeypatch.setenv("TAVILY_API_KEY", "test-key")
 
-    out = asyncio.run(
-        web_fetch.web_fetch.invoke({"url": "https://en.wikipedia.org/wiki/Moon"})
-    )
-    assert "[error]" in out.lower()
-    # both failure reasons surfaced
-    assert "403" in out
-    assert "tavily" in out.lower()
+    with pytest.raises(ToolError, match=r"(?i)(?=.*403)(?=.*tavily)"):
+        asyncio.run(
+            web_fetch.web_fetch.invoke({"url": "https://en.wikipedia.org/wiki/Moon"})
+        )
 
 
 def test_empty_url_returns_error(monkeypatch) -> None:
     _install_fake_http(monkeypatch, lambda *a, **k: _FakeResp(text=_HTML))
-    out = asyncio.run(web_fetch.web_fetch.invoke({"url": "   "}))
-    assert "[error]" in out.lower()
+    with pytest.raises(ToolError, match="empty url"):
+        asyncio.run(web_fetch.web_fetch.invoke({"url": "   "}))

@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.errors import ToolError
 
 _TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"
 _USER_AGENT = (
@@ -145,7 +146,7 @@ async def web_fetch(url: str, max_chars: int = 50000) -> str:
     """
     url = _normalize_url(url)
     if not url:
-        return "[error] empty url"
+        raise ToolError("empty url", kind="validation")
     try:
         max_chars = max(0, int(max_chars or 0))
     except (TypeError, ValueError):
@@ -176,4 +177,4 @@ async def web_fetch(url: str, max_chars: int = 50000) -> str:
     else:
         errors.append("no TAVILY_API_KEY for fallback")
 
-    return f"[error] fetch failed: {' | '.join(errors)}"
+    raise ToolError(f"fetch failed: {' | '.join(errors)}", kind="failed")
