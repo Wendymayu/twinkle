@@ -25,6 +25,7 @@ obs = [
     "opentelemetry-exporter-otlp-proto-grpc",
 ]
 memory = ["sqlite-vec", "jieba"]
+mcp = ["mcp>=1.26.0"]
 
 [tool.setuptools.packages.find]
 include = ["twinkle*"]

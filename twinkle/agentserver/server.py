@@ -83,6 +83,8 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
     tools = tool_manager()
+    from twinkle.agentserver.mcp import get_mcp_manager
+    get_mcp_manager().register_into(tools)
     from twinkle.agentserver.tools.builtin.subagent import create_subagent_executor
     from twinkle.agentserver.hooks.builtin import (
         SubagentContextHook, ContextCompressionHook,
@@ -234,9 +236,13 @@ async def main() -> None:
     from twinkle.agentserver.memory.dreaming import start_dreaming
     from twinkle.agentserver.permissions import permission_engine
     from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, PermissionHook, RetryHook, SkillHook
+    from twinkle.agentserver.mcp import get_mcp_manager
+    from twinkle.config import settings
     from twinkle.workspace import ensure_workspace_dir
 
     ensure_workspace_dir()
+    if settings.mcp.enabled:
+        await get_mcp_manager(settings.mcp).startup()
     store = session_store()
     engine = permission_engine()
     llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
@@ -246,5 +252,9 @@ async def main() -> None:
     if dreaming_task is not None:
         log.info("Dreaming background task started")
     log.info("AgentServer listening on %s:%s", AGENTSERVER_HOST, AGENTSERVER_PORT)
-    async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
-        await asyncio.Future()  # run forever
+    try:
+        async with serve(handler, AGENTSERVER_HOST, AGENTSERVER_PORT):
+            await asyncio.Future()  # run forever
+    finally:
+        if settings.mcp.enabled:
+            await get_mcp_manager().release()

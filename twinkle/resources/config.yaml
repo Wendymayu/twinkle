@@ -136,3 +136,16 @@ evolution:
     user_intent: false          # 默认关
 team:
   enabled: false                # 默认关；true = 开启 Team 协作（delegate_to_member 工具 + leader prompt 注入）
+mcp:
+  enabled: false                          # false = 不连任何 MCP server(零成本);true 才连 servers
+  connect_timeout: 30.0                   # 连接超时秒
+  call_timeout: 60.0                      # 调用超时秒(call_tool 兜底)
+  reconnect_attempts: 3                   # streamable-http 传输层错误重连次数
+  servers: []                             # MCP server 列表;示例见下
+  # - name: myserver                      # server 名,工具命名前缀 {name}.{tool}
+  #   transport: streamable-http
+  #   url: http://127.0.0.1:8080/mcp       # 本机 MCP server
+  # - name: fs
+  #   transport: stdio
+  #   command: npx
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

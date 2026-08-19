@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 SkillMode = Literal["all", "auto_list"]
 PermissionTier = Literal["allow", "require-approval", "deny"]
+McpTransport = Literal["stdio", "streamable-http"]
 
 
 class _StrictModel(BaseModel):
@@ -256,6 +257,36 @@ class TeamConfig(_StrictModel):
     enabled: bool = False
 
 
+class McpServerConfig(_StrictModel):
+    name: str
+    transport: McpTransport
+    # stdio
+    command: str = ""
+    args: list[str] = []
+    env: dict[str, str] = {}
+    # streamable-http
+    url: str = ""
+    auth_headers: dict[str, str] = {}
+    auth_query_params: dict[str, str] = {}
+    timeout: float = 60.0
+
+    @model_validator(mode="after")
+    def _validate_transport_fields(self) -> "McpServerConfig":
+        if self.transport == "stdio" and not self.command:
+            raise ValueError("stdio server requires 'command'")
+        if self.transport == "streamable-http" and not self.url:
+            raise ValueError("streamable-http server requires 'url'")
+        return self
+
+
+class McpConfig(_StrictModel):
+    enabled: bool = False
+    servers: list[McpServerConfig] = []
+    connect_timeout: float = 30.0
+    call_timeout: float = 60.0
+    reconnect_attempts: int = 3
+
+
 class TwinkleConfig(_StrictModel):
     agentserver: AgentserverConfig = AgentserverConfig()
     gateway: GatewayConfig = GatewayConfig()
@@ -275,6 +306,7 @@ class TwinkleConfig(_StrictModel):
     workflow: WorkflowConfig = WorkflowConfig()
     evolution: EvolutionConfig = EvolutionConfig()
     team: TeamConfig = TeamConfig()
+    mcp: McpConfig = McpConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":

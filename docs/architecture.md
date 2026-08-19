@@ -418,6 +418,8 @@ agent_loop 调用面 `self._tools.schemas()` / `self._tools.execute(name, args)`
 
 具体工具位于 `builtin/` 子包（`web_fetch` / `web_search` / `command_exec` / `file_tools` / `todo_tools`），`__init__.py` 的 `tool_manager()` 预注册全部 builtin 工具。**新增工具**：在 `builtin/` 下加 `*_tools.py` 写 `@tool` 函数，于 `tool_manager()` 中 `tm.register(it)`，agent_loop 经 `schemas()` / `execute()` 自动接入，无需改 loop。
 
+**MCP 外部工具接入（Phase 15）**：[twinkle/agentserver/mcp/](../twinkle/agentserver/mcp/) 以进程级 `McpManager` 单例（`get_mcp_manager`，lazy 构造、disabled 时 no-op）持有已连接的 `McpClient`（`StdioMcpClient` / `StreamableHttpMcpClient`，后者挂 `with_reconnect` 对可重试传输错误重连），其 `McpTool` 实现 `Tool` 协议（`card.name = {server}.{tool}`）。`create_agent` 无条件 `register_into(tools)` 注入；`main` 在 `create_agent` 前 eager `startup()`（逐 server 连接，失败 log+skip 不阻断），`serve` 包 `try/finally` 调 `release()` 清理。MCP 工具按 `{server}.{tool}` 名受 Phase 4 权限策略统一管控（`permissions.tools`，点号名为普通 dict 键匹配，不拆分）。
+
 ### 4.6 LongTermMemory — stub
 
 [memory.py](../twinkle/agentserver/memory.py) 是空实现：`recall()` 返回空列表，`store()` 不做事。接口形状钉死，将来换真实现不回炉。
@@ -1127,6 +1129,13 @@ twinkle/
         command_exec.py       # 跨平台 shell 执行（blocklist + workspace 收敛 + 超时 + 输出裁剪 + 非阻塞后台）
         file_tools.py         # @tool 文件工具：read_file / write_file / edit_file / list_files / glob（workspace 收敛 + 先读后写）
         todo_tools.py         # @tool todo 工具：create / complete / list
+    mcp/                  # MCP 外部工具接入（Phase 15）：进程级单例注入 ToolManager
+      __init__.py           # McpManager / get_mcp_manager / _set_mcp_manager re-export
+      client.py             # McpClient ABC + StdioMcpClient + StreamableHttpMcpClient
+      manager.py            # McpManager 单例 + startup/register_into/release
+      tool.py               # McpToolCard + McpTool（Tool 协议实现）
+      reconnect.py          # with_reconnect（streamable-http 可重试传输错误重连）
+      safety.py             # check_dangerous_args（stdio 参数黑名单 -e/-c/-i/-m 等）
     hooks/
       base.py                # AgentHook + HookContext + HookInterrupt + @hook decorator
       manager.py             # HookManager（生命周期分发）
@@ -1224,7 +1233,7 @@ scripts/
 | `gateway/channel_manager.py` | `gateway/channel_manager.py:57-239` | 基本对齐 |
 | `agentserver/server.py` | `agentserver/agent_ws_server.py` | 砺 legacy/heartbeat/cron |
 | `agentserver/agent_loop.py` | `agentserver/deep_agent/interface_deep.py` | 最小 ReAct；入口 set plan-todo ContextVar + 首次插入 todo system message（ReAct 主体未改；todo/command 已回补一部分，skill 仍砍） |
-| `tools/{base,local_function,decorator,schema_extractor,manager}` | openjiuwen foundation/tool/* + ability_manager.py | 四层最小子集，砍 MCP/Input/Output/触发器 |
+| `tools/{base,local_function,decorator,schema_extractor,manager}` | openjiuwen foundation/tool/* + ability_manager.py | 四层最小子集；MCP 已在 Phase 15 经 `mcp/` 包补回，仍砍 Input/Output/触发器 |
 | `schema/message.py` | `schema/message.py:141-249` | 只保留 4 个 EventType |
 | `observability/` | jiuwenswarm-instrumentor | OTel 自动插桩最小子集，砍跨进程 W3C / context-token 分桶 / CLI wrapper / logs |
 | `permissions/` | jiuwenswarm permissions/* + `resources/builtin_rules.yaml` | 权限档位 + DENY 单一真源 + 进程内 Future 挂起/恢复；砍 DB 审计（用 JSONL）、shell AST、三轴路径 |

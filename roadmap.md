@@ -51,7 +51,7 @@
 - **Phase 11（Workflow 引擎 = PlanNode 递归执行树）已落地**：`workflow/` 包（`PlanNode` ABC + `WorkflowExecutor` + `_SAFE_BUILTINS` + `PlanCodeValidator` + `_fallback_wrapper`→SubagentExecutor + HookInterrupt 透传）+ `execute_workflow` 工具 + `WorkflowContextHook` + 内置 `pptx-craft` 7 节点流水线 + seed 机制。对应里程碑 M15 ✅。
 - **Phase 14（Skill 自进化 v1）已落地**：`evolution/` 包（`ConversationSignalDetector`/`SkillExperienceOptimizer`/`OnlineEvolutionOrchestrator`/`EvolutionStore`/`ExperienceScorer`）+ `SkillEvolutionHook`（条件注册）+ 6 个 RPC + E/U/F 打分 + 反馈环 + 蒸馏。对应里程碑 M18 ✅。
 - **Phase 18（Team 编排 MVP）已落地**：`team/` 包（`TeamManager` + `Team`）+ `delegate_to_member` 工具 + `TeamContextHook` + Leader/Member 双白名单 + 共享 workspace。对应里程碑 M22 ✅。
-- **Phase 12–13、15–17、19 为后续规划**：Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 15（MCP 接入）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 19（Team 协作核心）。参考 jiuwenswarm 对应能力设计。
+- **Phase 12–13、16–17、19 为后续规划**：Phase 12（中断恢复）→ Phase 13（文件快照与撤销）→ Phase 16（DeepAgent 多轮外层循环）→ Phase 17（Deep Research）→ Phase 19（Team 协作核心）。参考 jiuwenswarm 对应能力设计。
 
 ---
 
@@ -281,16 +281,18 @@ spec `docs/superpowers/specs/2026-08-03-phase11a-workflow-engine.md` + `2026-08-
 
 ---
 
-### Phase 15 — MCP 工具接入
+### Phase 15 — MCP 工具接入  [已完成]
 **目标**：让 twinkle 能挂载标准 MCP（Model Context Protocol）server 的工具，补足工具生态。
 
 内容：
-- 从 config 读 `mcp.servers`，转 `McpServerConfig`（stdio / sse transport）。
+- 从 config 读 `mcp.servers`，转 `McpServerConfig`（stdio / streamable-http transport）。
 - 把 MCP server 暴露的工具注册进 `ToolManager`（复用现有 `schemas()` / `execute()` 面，`ReActAgent` 零改动）。
 - MCP 工具受 Phase 4 权限策略统一管控。
 - **为何后置**：MCP 是纯扩展性 nice-to-have（builtin 工具已覆盖读写/搜索/执行），优先级低于让 agent 自主跑起来的能力。
 
 **验收**：在 config 配一个 MCP server，agent 能像调 builtin 工具一样调其工具；权限策略对 MCP 工具同样生效。
+
+**已落地**：`mcp/` 包（`McpManager` 进程级单例 `get_mcp_manager`（lazy 构造、disabled 时 no-op）+ `McpTool` 实现 `Tool` 协议 + `StdioMcpClient`/`StreamableHttpMcpClient`（后者挂 `with_reconnect` 重连可重试传输错误）+ `safety.check_dangerous_args`）+ `create_agent` 无条件 `register_into(tools)` 注入 + `main` 在 `create_agent` 前 eager `startup()`（逐 server 连接，失败 log+skip 不阻断），`serve` 包 `try/finally` 调 `release()` 清理；MCP 工具按 `{server}.{tool}` 名受 Phase 4 权限策略统一管控（`permissions.tools`）。对应里程碑 M19 ✅。
 
 ---
 
@@ -428,7 +430,7 @@ Phase 4 引入最小钩子点后，逐步发展为完整的 Hook 框架：
 | M16 中断可恢复 | 中断标记 + `_sanitize_orphan_tool_calls` 升级 + 审批中断恢复 | |
 | M17 文件可撤销 | 文件快照 + undo_file + file_history | |
 | M18 skill 会进化 | 信号检测→经验生成→审批→sidecar 持久化（v1） | ✅ |
-| M19 能挂外部工具 | MCP server 工具接入并受策略管控 | |
+| M19 能挂外部工具 | MCP server 工具接入并受策略管控 | ✅ |
 | M20 多轮迭代 | DeepAgent 外层循环 + 停止条件链 | |
 | M21 深度研究 | 多步检索→分析→综合→报告 | |
 | M22 多 Agent 协作 MVP | leader + 动态 persona member 并发委派 | ✅ |
