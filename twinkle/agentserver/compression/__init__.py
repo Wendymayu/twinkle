@@ -8,7 +8,7 @@ history.json stays lossless; this only shapes what the LLM sees.
 """
 from __future__ import annotations
 
-from twinkle.agentserver.llm_client import Finish, LLMClient, TextDelta
+from twinkle.agentserver.llm_client import LLMClient, TextDelta
 from twinkle.config import (
     MICRO_COMPACT_TRIGGER_THRESHOLD,
     MICRO_COMPACT_KEEP_RECENT_PER_TOOL,

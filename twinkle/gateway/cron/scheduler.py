@@ -20,7 +20,6 @@ from twinkle.gateway.cron import cron_expr
 from twinkle.gateway.cron.models import CronJob, CronRunState, _Event
 from twinkle.gateway.cron.store import (
     CronJobStore,
-    default_cron_jobs_path,
     default_sidecar_path,
 )
 from twinkle.schema.message import EventType, Message

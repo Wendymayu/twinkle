@@ -16,7 +16,6 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from twinkle.agentserver.agent import AgentRequest, ReActAgent
 from twinkle.agentserver.hooks.base import AgentHook
-from twinkle.agentserver.hooks.builtin import LoggingHook
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.sessions import (
     SessionStore, session_store, dispatch_session_rpc, handles_session_rpc,
@@ -45,16 +44,6 @@ ACK_FRAME = {
     "event": EventType.CONNECTION_ACK.value,
     "payload": {"status": "ready"},
 }
-
-
-async def _safe_send(ws: ServerConnection, resp: E2AResponse) -> None:
-    """Send an E2AResponse; silently swallow ConnectionClosed (client gone)."""
-    try:
-        await ws.send(resp.model_dump_json())
-    except Exception:
-        # ConnectionClosedOK / ConnectionClosedError — client disconnected.
-        # No point logging at ERROR; this is a normal lifecycle event.
-        log.debug("send on closed connection, dropping %s", resp.request_id)
 
 
 def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm: LLMClient | None = None) -> ReActAgent:

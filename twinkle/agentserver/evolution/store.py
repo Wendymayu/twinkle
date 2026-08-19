@@ -157,7 +157,6 @@ class EvolutionStore:
         if not records:
             return
 
-        skill_dir = self._skill_dir(skill_name)
         evo_dir = self._evolution_dir(skill_name)
         scripts_dir = self._scripts_dir(skill_name)
         evo_dir.mkdir(parents=True, exist_ok=True)

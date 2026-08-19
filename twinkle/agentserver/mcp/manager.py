@@ -60,10 +60,6 @@ class McpManager:
         self._clients.clear()
         self._tools.clear()
 
-    @property
-    def tool_names(self) -> list[str]:
-        return list(self._tools.keys())
-
 
 _MCP_MANAGER: McpManager | None = None
 

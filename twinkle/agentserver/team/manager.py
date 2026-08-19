@@ -11,19 +11,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import (
     LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, RuntimeEnvHook, SkillHook)
-from twinkle.agentserver.team.context import CURRENT_TEAM
 from twinkle.agentserver.team.message_box import MessageBox
 from twinkle.agentserver.team.task_store import TeamTaskStore
-from twinkle.agentserver.team.workspace import ensure_team_workspace, team_workspace_dir
+from twinkle.agentserver.team.workspace import ensure_team_workspace
 from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.config import (
     SUBAGENT_ABORT_TIMEOUT,
-    SUBAGENT_HARD_TIMEOUT,
     SUBAGENT_MAX_RESULT_CHARS,
     SUBAGENT_MAX_STEPS,
     SUBAGENT_SOFT_TIMEOUT,

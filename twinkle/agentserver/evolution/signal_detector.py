@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from twinkle.agentserver.evolution.types import FAILURE_KEYWORDS, ConversationSignal
 

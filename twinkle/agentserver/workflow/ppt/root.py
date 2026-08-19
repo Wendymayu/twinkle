@@ -17,30 +17,6 @@ Agent 只需传入用户原话即可。
 """
 
 # ---------------------------------------------------------------------------
-# Input / Output schema
-# ---------------------------------------------------------------------------
-
-INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "text": {"type": "string", "description": "用户原始请求，描述PPT主题、受众、页数、风格等需求"},
-    },
-    "required": ["text"],
-}
-
-OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "node": {"type": "string", "description": "最后执行的节点"},
-        "status": {"type": "string", "description": "ok 或 error"},
-        "pptx_path": {"type": "string", "description": "生成的PPTX文件路径"},
-        "topic": {"type": "string", "description": "演示主题"},
-        "page_count": {"type": "integer", "description": "总页数"},
-    },
-}
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -106,7 +82,6 @@ class PipelineInitNode(PlanNode):
     """创建输出目录，产出 output_dir / pages_dir。"""
 
     async def _execute(self, inputs: dict):
-        text = _collect_user_text(inputs)
         print(f"[PipelineInit] creating output directory...")
 
         result = await self.call_tool(

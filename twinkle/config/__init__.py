@@ -57,7 +57,6 @@ MEMORY_FLUSH_ENABLED = settings.memory.flush.enabled
 MEMORY_DREAMING_ENABLED = settings.memory.dreaming.enabled
 MEMORY_DREAMING_INTERVAL_SECONDS = settings.memory.dreaming.interval_seconds
 MEMORY_DREAMING_START_DELAY_SECONDS = settings.memory.dreaming.start_delay_seconds
-MEMORY_DREAMING_TOP_K = settings.memory.dreaming.top_k
 MEMORY_DREAMING_MIN_DISTINCT_FILES = settings.memory.dreaming.min_distinct_files
 MEMORY_DREAMING_MAX_MEMORY_CHARS = settings.memory.dreaming.max_memory_chars
 MEMORY_DREAMING_MAX_DELETE_FRACTION = settings.memory.dreaming.max_delete_fraction
@@ -97,26 +96,10 @@ PERMISSION_AUDIT_FILE = settings.permissions.audit_file
 
 # --- subagent (Phase 8) ---
 SUBAGENT_MAX_STEPS = settings.subagent.max_steps
-SUBAGENT_HARD_TIMEOUT = settings.subagent.hard_timeout
 SUBAGENT_SOFT_TIMEOUT = settings.subagent.soft_timeout
 SUBAGENT_ABORT_TIMEOUT = settings.subagent.abort_timeout
-SUBAGENT_CHILD_PERMISSIONS = settings.subagent.child_permissions
 SUBAGENT_MAX_RESULT_CHARS = settings.subagent.max_result_chars
 SUBAGENT_LIST_SESSIONS_FILTER = settings.subagent.list_sessions_filter
-
-# --- overflow recovery (Phase 9) ---
-OVERFLOW_MAX_RECOVERY_ATTEMPTS = settings.overflow_recovery.max_recovery_attempts
-OVERFLOW_THRESHOLD_RATIO = settings.overflow_recovery.threshold_ratio
-OVERFLOW_AGGRESSIVE_KEEP_RECENT = settings.overflow_recovery.aggressive_keep_recent
-OVERFLOW_CONTEXT_WINDOW_LIMIT = settings.overflow_recovery.context_window_limit_tokens
-
-# --- repeat tool detection (Phase 9) ---
-REPEAT_TOOL_HISTORY_SIZE = settings.repeat_tool_detection.history_size
-REPEAT_TOOL_REPEAT_WARN = settings.repeat_tool_detection.repeat_warn
-REPEAT_TOOL_PINGPONG_WARN = settings.repeat_tool_detection.pingpong_warn
-REPEAT_TOOL_LOOP_BLOCK = settings.repeat_tool_detection.loop_block
-REPEAT_TOOL_GLOBAL_STOP = settings.repeat_tool_detection.global_stop
-REPEAT_TOOL_REMEDIATION_MAX_PER_MINUTE = settings.repeat_tool_detection.remediation_max_per_minute
 
 # --- skill evolution (Phase 10) ---
 EVOLUTION_ENABLED = settings.evolution.enabled

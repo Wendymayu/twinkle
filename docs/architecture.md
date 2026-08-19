@@ -356,10 +356,10 @@ LLMClient  SessionStore  ToolManager
 1. 新连接 → 发 `connection.ack` 帧（非 E2A 格式，是普通 event）
 2. 循环收帧 → `E2AEnvelope.model_validate_json(raw)` 解析
 3. 解析失败 → 发 `e2a.error` **终止帧**（`is_final=true`）
-4. 解析成功 → `async for frame in loop.run_stream(env): await _safe_send(ws, frame)`
+4. 解析成功 → `async for frame in loop.run_stream(env): await send(frame)`
 5. AgentLoop 异常 → 发 `e2a.error` **终止帧**（`is_final=true`）
 
-> 错误帧必须显式置 `is_final=true`——`E2AResponse.is_final` 默认 `false`，不置则 gateway demux 不终止、请求挂起。`_safe_send` 静默吞掉 `ConnectionClosed`（客户端断连是正常生命周期事件）。`ws_handler(loop, store)` 让测试注入假 loop + 共享 `SessionStore`，`agent_loop()` 用真实配置组建。
+> 错误帧必须显式置 `is_final=true`——`E2AResponse.is_final` 默认 `false`，不置则 gateway demux 不终止、请求挂起。`send`（handler 本地闭包）静默吞掉 `ConnectionClosed`（客户端断连是正常生命周期事件）。`ws_handler(loop, store)` 让测试注入假 loop + 共享 `SessionStore`，`agent_loop()` 用真实配置组建。
 
 ### 4.2 AgentLoop — ReAct 核心闭环
 
@@ -910,7 +910,7 @@ Message 在 Gateway 内流转时不带 `is_stream` 字段——所有请求隐�
                         body={result:{content:"你"}})
                       │
                       ▼
-⑦ AgentServer _safe_send → ws 发 E2AResponse JSON
+⑦ AgentServer send（本地闭包）→ ws 发 E2AResponse JSON
                       │
                       ▼
 ⑧ AgentClient._recv_loop → 按 request_id 投递到 asyncio.Queue
