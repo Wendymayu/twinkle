@@ -108,6 +108,11 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
     from twinkle.agentserver.hooks.builtin import TeamContextHook
     team_mgr = TeamManager(llm=llm, store=store, parent_tools=tools, config=settings.team)
     all_hooks.append(TeamContextHook(team_mgr))
+    # Progressive tool visibility (opt-in; default off = no-op)
+    from twinkle.agentserver.tools.progressive import apply_progressive_tools
+    progressive_hook = apply_progressive_tools(tools, settings.progressive_tool, settings.permissions)
+    if progressive_hook is not None:
+        all_hooks.append(progressive_hook)
     return ReActAgent(llm, store, tools, hooks=tuple(all_hooks))
 
 

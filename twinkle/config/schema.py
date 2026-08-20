@@ -287,6 +287,11 @@ class McpConfig(_StrictModel):
     reconnect_attempts: int = 3
 
 
+class ProgressiveToolConfig(_StrictModel):
+    enabled: bool = False            # 默认关:行为等同现状(全量塞)
+    eager_tools: list[str] = []      # 空=默认(33 内置全 + tools_search + invoke_tool)
+
+
 class TwinkleConfig(_StrictModel):
     agentserver: AgentserverConfig = AgentserverConfig()
     gateway: GatewayConfig = GatewayConfig()
@@ -307,6 +312,7 @@ class TwinkleConfig(_StrictModel):
     evolution: EvolutionConfig = EvolutionConfig()
     team: TeamConfig = TeamConfig()
     mcp: McpConfig = McpConfig()
+    progressive_tool: ProgressiveToolConfig = ProgressiveToolConfig()
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":

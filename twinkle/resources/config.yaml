@@ -149,3 +149,6 @@ mcp:
   #   transport: stdio
   #   command: npx
   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+progressive_tool:
+  enabled: false        # 默认关:全量工具 schema 塞模型;开 + MCP 开 → MCP 工具进 deferred
+  eager_tools: []       # 空=默认(33 内置全 + tools_search + invoke_tool);自定义则只列出的进 eager
