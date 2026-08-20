@@ -23,7 +23,8 @@ llm:
 agent:
   max_steps: 1000                         # ReAct 最大步数,超限 yield e2a.error(防不收敛硬上限,非目标)
 context_compression:
-  token_threshold: 60000                  # 估算 token(char//3,不精确)超此即压缩历史
+  token_threshold: 0                        # 0=动态(窗口×trigger_ratio,默认 128k→102400);>0=手动绝对覆盖(char//3 估算超此即压缩)
+  trigger_ratio: 0.8                      # 窗口×比例 动态触发阈值;A(413恢复)与B(预防压缩)共用
   keep_recent_pairs: 6                    # 保留最近 N 个 user/assistant 对
   summary_prompt: "你是对话上下文压缩器。把给定历史对话压成一段摘要，保留关键事实、用户偏好、已做决策、工具调用结果，丢弃寒暄与冗余。用中文。"
   summary_prompt_mode: structured         # structured(硬编码4节)/ free(用上面的 summary_prompt)
@@ -106,9 +107,8 @@ subagent:
   list_sessions_filter: true     # session.list 隐藏 __sub_ 前缀
 overflow_recovery:
   max_recovery_attempts: 3
-  threshold_ratio: 0.85
   aggressive_keep_recent: 3
-  context_window_limit_tokens: 0    # 0 = parse from 413 error; >0 = manual override
+  context_window_limit_tokens: 0    # 0=字典/128000 兜底;>0=手动覆盖窗口
 repeat_tool_detection:
   history_size: 30
   repeat_warn: 10

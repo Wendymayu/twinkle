@@ -1,5 +1,6 @@
 import asyncio
 
+import twinkle.agentserver.hooks.builtin.context_compression_hook as h
 from twinkle.agentserver.compression import estimate_tokens
 from twinkle.agentserver.hooks.base import ModelCallInputs
 from twinkle.agentserver.hooks.builtin import ContextCompressionHook
@@ -83,3 +84,19 @@ def test_uses_config_defaults_when_no_override(monkeypatch):
     asyncio.run(hook.before_model_call(ctx))
 
     assert any("[prior context summary]" in m.get("content", "") for m in ctx.inputs.messages)
+
+
+def test_dynamic_threshold_when_token_threshold_zero(monkeypatch):
+    """token_threshold=0 时用 resolved×trigger_ratio 动态阈值(替代固定 60000)。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "CONTEXT_TOKEN_THRESHOLD", 0)
+    monkeypatch.setattr(twinkle.config, "CONTEXT_TRIGGER_RATIO", 0.8)
+    monkeypatch.setattr(h, "resolve_context_window_limit", lambda: 128_000)
+    assert h._get_token_threshold() == int(128_000 * 0.8)  # 102400
+
+
+def test_absolute_threshold_still_wins(monkeypatch):
+    """token_threshold>0 仍优先(向后兼容手动绝对值)。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "CONTEXT_TOKEN_THRESHOLD", 999)
+    assert h._get_token_threshold() == 999

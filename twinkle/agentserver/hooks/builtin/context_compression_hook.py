@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from twinkle.agentserver.compression import compress_messages
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
+from twinkle.config.model_catalog import resolve_context_window_limit
 
 if TYPE_CHECKING:
     from twinkle.agentserver.llm_client import LLMClient
@@ -38,8 +39,10 @@ class ContextCompressionHook(AgentHook):
 
 
 def _get_token_threshold():
-    from twinkle.config import CONTEXT_TOKEN_THRESHOLD
-    return CONTEXT_TOKEN_THRESHOLD
+    from twinkle.config import CONTEXT_TOKEN_THRESHOLD, CONTEXT_TRIGGER_RATIO
+    if CONTEXT_TOKEN_THRESHOLD > 0:
+        return CONTEXT_TOKEN_THRESHOLD  # 手动绝对覆盖(向后兼容)
+    return int(resolve_context_window_limit() * CONTEXT_TRIGGER_RATIO)
 
 
 def _get_keep_recent_pairs():

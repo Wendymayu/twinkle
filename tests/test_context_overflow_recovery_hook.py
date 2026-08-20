@@ -122,10 +122,11 @@ def _big_messages():
 def test_compresses_and_requests_retry_on_413():
     hook = ContextOverflowRecoveryHook(
         llm=_FakeLLM(), max_recovery_attempts=3,
-        aggressive_keep_recent=2, threshold_ratio=0.85,
+        aggressive_keep_recent=2, trigger_ratio=0.8,
     )
     big = _big_messages()
-    ctx = _Ctx(big, exception=_Exc413("overflow"))
+    # 413 + 带 limit: limit=1000 → threshold=int(1000*0.8)=800 < ~1373 → 触发压缩
+    ctx = _Ctx(big, exception=_Exc413("prompt is too long: 10000 tokens > 1000"))
 
     asyncio.run(hook.on_model_exception(ctx))
 
@@ -148,7 +149,7 @@ def test_no_retry_on_non_overflow_error():
 def test_circuit_break_after_max_attempts():
     hook = ContextOverflowRecoveryHook(
         llm=_FakeLLM(), max_recovery_attempts=2,
-        aggressive_keep_recent=2, threshold_ratio=0.85,
+        aggressive_keep_recent=2, trigger_ratio=0.8,
     )
     # Simulate 2 consecutive overflow errors
     ctx1 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
@@ -180,15 +181,27 @@ def test_resets_count_on_success():
 def test_uses_parsed_limit_for_threshold():
     hook = ContextOverflowRecoveryHook(
         llm=_FakeLLM(), max_recovery_attempts=3,
-        aggressive_keep_recent=2, threshold_ratio=0.85,
+        aggressive_keep_recent=2, trigger_ratio=0.8,
     )
     big = _big_messages()
-    # Anthropic format with small limit: "prompt is too long: 10000 tokens > 1000"
-    # threshold_override = int(1000 * 0.85) = 850, which is below the ~1377 tokens
+    # "prompt is too long: 10000 tokens > 1000" → limit=1000 → threshold_override=int(1000*0.8)=800 < ~1373
     ctx = _Ctx(big, exception=_ExcNoStatus("prompt is too long: 10000 tokens > 1000"))
 
     asyncio.run(hook.on_model_exception(ctx))
 
     # Compression should have been applied (result is shorter)
+    assert estimate_tokens(ctx.inputs.messages) < estimate_tokens(big)
+    assert ctx._retry_request is not None
+
+
+def test_uses_resolved_window_when_limit_not_parsed(monkeypatch):
+    """413 没带 limit(N>M) → 用 resolved×0.8 兜底(替代旧的盲压 0)。"""
+    import twinkle.agentserver.hooks.builtin.context_overflow_recovery_hook as h
+    monkeypatch.setattr(h, "resolve_context_window_limit", lambda: 1000)
+    hook = ContextOverflowRecoveryHook(
+        llm=_FakeLLM(), max_recovery_attempts=3, aggressive_keep_recent=2)
+    big = _big_messages()  # ~1373 估算 token > 800(resolved 1000×0.8) → 触发压缩
+    ctx = _Ctx(big, exception=_Exc413("context_length_exceeded"))  # 无 N>M,解析不到 limit
+    asyncio.run(hook.on_model_exception(ctx))
     assert estimate_tokens(ctx.inputs.messages) < estimate_tokens(big)
     assert ctx._retry_request is not None

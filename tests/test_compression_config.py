@@ -29,3 +29,15 @@ def test_compression_config_nested_models_loaded():
     assert settings.context_compression.micro_compact.keep_recent_per_tool == 3
     assert settings.context_compression.tool_result_budget.protect_latest == 1
     assert settings.context_compression.summary_prompt_mode == "structured"
+
+
+def test_trigger_ratio_default():
+    from twinkle.config.schema import ContextCompressionConfig
+    assert ContextCompressionConfig().trigger_ratio == 0.8
+
+
+def test_token_threshold_default_is_zero():
+    """B 默认走动态 resolved×trigger_ratio;token_threshold=0(非老 60000)。
+    >0 才是手动绝对覆盖(opt-in)。"""
+    from twinkle.config.schema import ContextCompressionConfig
+    assert ContextCompressionConfig().token_threshold == 0

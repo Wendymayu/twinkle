@@ -80,7 +80,8 @@ class ToolResultBudgetConfig(_StrictModel):
 
 
 class ContextCompressionConfig(_StrictModel):
-    token_threshold: int = 60000
+    token_threshold: int = 0  # 0=动态(窗口×trigger_ratio,默认);>0=手动绝对覆盖(opt-in)
+    trigger_ratio: float = 0.8  # B: token_threshold=0 时按 窗口×trigger_ratio 动态触发(0.8=80%);A/B 共用
     keep_recent_pairs: int = 6
     summary_prompt: str = (
         "你是对话上下文压缩器。把给定历史对话压成一段摘要，保留关键事实、用户偏好、"
@@ -204,9 +205,8 @@ class SubagentConfig(_StrictModel):
 
 class OverflowRecoveryConfig(_StrictModel):
     max_recovery_attempts: int = 3          # consecutive overflow recovery max attempts
-    threshold_ratio: float = 0.85           # target ratio of model window after recovery
     aggressive_keep_recent: int = 3         # keep_recent_pairs reduced to this on overflow
-    context_window_limit_tokens: int = 0    # 0 = parse from 413 error; >0 = manual override
+    context_window_limit_tokens: int = 0    # >0 = 手动覆盖窗口(优先于字典);0 = 字典/128000 兜底
 
 
 class EvolutionScoringConfig(_StrictModel):

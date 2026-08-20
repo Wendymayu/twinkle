@@ -19,7 +19,7 @@ def test_constants_match_packaged_defaults(monkeypatch):
     assert cfg.AGENT_MAX_STEPS == 1000
     assert cfg.SKILL_MODE == "all"
     assert cfg.ENABLED_SKILLS == []
-    assert cfg.CONTEXT_TOKEN_THRESHOLD == 60000
+    assert cfg.CONTEXT_TOKEN_THRESHOLD == 0  # 0=动态(窗口×trigger_ratio);旧固定 60000 已废
     assert cfg.CONTEXT_KEEP_RECENT_PAIRS == 6
     assert cfg.CONTEXT_SUMMARY_PROMPT.startswith("你是对话上下文压缩器")
     assert cfg.PERMISSIONS_ENABLED is False

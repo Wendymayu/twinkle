@@ -72,6 +72,7 @@ AGENT_MAX_STEPS = settings.agent.max_steps
 
 # --- context compression (Phase 3) ---
 CONTEXT_TOKEN_THRESHOLD = settings.context_compression.token_threshold
+CONTEXT_TRIGGER_RATIO = settings.context_compression.trigger_ratio  # A/B 共用窗口比例
 CONTEXT_KEEP_RECENT_PAIRS = settings.context_compression.keep_recent_pairs
 CONTEXT_SUMMARY_PROMPT = settings.context_compression.summary_prompt
 CONTEXT_SUMMARY_PROMPT_MODE = settings.context_compression.summary_prompt_mode

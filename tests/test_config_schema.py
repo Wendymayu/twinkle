@@ -16,7 +16,7 @@ def test_defaults_match_packaged_yaml():
     assert c.llm.base_url == "https://api.openai.com/v1"
     assert c.llm.model == "gpt-4o-mini"
     assert c.agent.max_steps == 1000
-    assert c.context_compression.token_threshold == 60000
+    assert c.context_compression.token_threshold == 0  # 0=动态(窗口×trigger_ratio)
     assert c.context_compression.keep_recent_pairs == 6
     assert c.context_compression.summary_prompt.startswith("你是对话上下文压缩器")
     assert c.skills.mode == "all"

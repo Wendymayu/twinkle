@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from twinkle.agentserver.compression import compress_messages
 from twinkle.agentserver.hooks.base import AgentHook, HookContext
+from twinkle.config.model_catalog import resolve_context_window_limit
 
 if TYPE_CHECKING:
     from twinkle.agentserver.llm_client import LLMClient
@@ -84,12 +85,12 @@ class ContextOverflowRecoveryHook(AgentHook):
         *,
         max_recovery_attempts: int | None = None,
         aggressive_keep_recent: int | None = None,
-        threshold_ratio: float | None = None,
+        trigger_ratio: float | None = None,
     ) -> None:
         self._llm = llm
         self._max_recovery_attempts = max_recovery_attempts
         self._aggressive_keep_recent = aggressive_keep_recent
-        self._threshold_ratio = threshold_ratio
+        self._trigger_ratio = trigger_ratio
         # Per-session overflow counts — keyed by session_id
         self._overflow_counts: dict[str, int] = {}
 
@@ -117,23 +118,14 @@ class ContextOverflowRecoveryHook(AgentHook):
 
         # 计算激进压缩参数
         aggressive_keep = self._aggressive_keep_recent or _get_aggressive_keep_recent()
-        ratio = self._threshold_ratio or _get_threshold_ratio()
+        ratio = self._trigger_ratio or _get_trigger_ratio()
 
-        # 从 413 解析出 limit_tokens 时，动态算 threshold_override
-        threshold_override = None
+        # threshold_override：413 解析到 limit → limit×ratio(真实最准)；
+        # 解析不到 → resolved×ratio(字典/128000 兜底,消除旧的盲压 0 缺陷)。
         if limit_tokens is not None:
             threshold_override = int(limit_tokens * ratio)
         else:
-            config_limit = _get_config_context_limit()
-            if config_limit > 0:
-                threshold_override = int(config_limit * ratio)
-
-        # 激进压缩：更小的 keep_recent_pairs + 更低的 threshold
-        # 溢出恢复时必须强制压缩——已知上下文溢出，threshold 设 0 确保
-        # compress_messages 不跳过。仅在解析到 limit 或 config 手动设定时
-        # 才用 ratio * limit 作为目标。
-        if threshold_override is None:
-            threshold_override = 0
+            threshold_override = int(resolve_context_window_limit() * ratio)
         try:
             compressed = await compress_messages(
                 ctx.inputs.messages, self._llm,
@@ -187,14 +179,9 @@ def _get_aggressive_keep_recent() -> int:
     return settings.overflow_recovery.aggressive_keep_recent
 
 
-def _get_threshold_ratio() -> float:
-    from twinkle.config import settings
-    return settings.overflow_recovery.threshold_ratio
-
-
-def _get_config_context_limit() -> int:
-    from twinkle.config import settings
-    return settings.overflow_recovery.context_window_limit_tokens
+def _get_trigger_ratio() -> float:
+    from twinkle.config import CONTEXT_TRIGGER_RATIO
+    return CONTEXT_TRIGGER_RATIO
 
 
 def _get_summary_prompt() -> str:
