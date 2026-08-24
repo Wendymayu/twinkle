@@ -145,6 +145,7 @@ class MemoryDreamingConfig(_StrictModel):
     min_distinct_files: int = 2     # 晋升门：同一事实须出现在 ≥N 个不同 daily 文件才搬进 MEMORY.md
     max_memory_chars: int = 10000   # MEMORY.md 容量预算，超限 compact 丢最老提升行
     max_delete_fraction: float = 0.25  # 整合步单次删除行数上限比例（安全阀，防 LLM 误删）
+    max_infectious_fraction: float = 0.5  # 注入去毒单次剔除上限(安全阀,防 LLM 删空文件;不受 max_delete_fraction 25% 约束)
     # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；见 docs/design/dreaming-redesign.md §9
 
 

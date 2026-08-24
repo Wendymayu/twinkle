@@ -60,6 +60,7 @@ MEMORY_DREAMING_START_DELAY_SECONDS = settings.memory.dreaming.start_delay_secon
 MEMORY_DREAMING_MIN_DISTINCT_FILES = settings.memory.dreaming.min_distinct_files
 MEMORY_DREAMING_MAX_MEMORY_CHARS = settings.memory.dreaming.max_memory_chars
 MEMORY_DREAMING_MAX_DELETE_FRACTION = settings.memory.dreaming.max_delete_fraction
+MEMORY_DREAMING_MAX_INFECTIOUS_FRACTION = settings.memory.dreaming.max_infectious_fraction
 
 # --- LLM (OpenAI-compatible) ---
 LLM_BASE_URL = settings.llm.base_url

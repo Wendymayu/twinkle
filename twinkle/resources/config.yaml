@@ -77,6 +77,7 @@ memory:
     min_distinct_files: 2          # 晋升门:同一事实须出现在 ≥N 个不同 daily 文件才搬进 MEMORY.md
     max_memory_chars: 10000       # MEMORY.md 容量预算,超限 compact 丢最老提升行
     max_delete_fraction: 0.25     # 整合步单次删除行数上限比例(安全阀,防 LLM 误删)
+    max_infectious_fraction: 0.5    # 注入去毒单次剔除上限(安全阀,防删空文件;不受冗余 25% 约束)
 permissions:
   enabled: false                          # false = 系统关(全 ALLOW,无审计/无 ASK;command_exec 仍走 builtin_rules)
   enabled_channels: [web]
