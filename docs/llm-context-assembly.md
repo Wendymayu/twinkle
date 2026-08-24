@@ -424,7 +424,7 @@ tools:
 | `context_compression.summary_prompt` | `config.yaml` | 中文压缩器 prompt | 摘要 LLM 调用的 system prompt |
 | `skills.mode` | `config.yaml` | `"all"` | `"all"`=每步注入完整清单；`"auto_list"`=只注入提示 |
 | `skills.enabled` | `config.yaml` | `[]`（全开） | 白名单；空=所有 skill 可用 |
-| `agent.max_steps` | `config.yaml` | 1000 | ReAct 最大步数 |
+| `agent.max_steps` | `config.yaml` | 1000 | DEPRECATED:已无步数上限,代码忽略 |
 | `permissions.enabled` | `config.yaml` | false | false=全 ALLOW，无审计 |
 | `permissions.tools.command_exec` | `config.yaml` | require-approval | command_exec 需人机审批 |
 

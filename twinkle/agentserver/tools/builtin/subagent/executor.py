@@ -92,7 +92,6 @@ class SubagentExecutor:
             PromptSection("subagent_addendum", _SUBAGENT_ADDENDUM, priority=15)]
         return ReActAgent(self._llm, self._store, tool_manager,
                           hooks=tuple(self._hook_list()),
-                          max_steps=self._config.max_steps,
                           base_sections=base_sections)
 
     async def _drive_child(self, child_loop: "ReActAgent", child_request: "AgentRequest") -> str:

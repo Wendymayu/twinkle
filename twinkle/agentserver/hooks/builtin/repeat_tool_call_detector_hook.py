@@ -109,10 +109,31 @@ class RepeatToolCallDetectorHook(AgentHook):
         self._record_and_classify(ctx, outcome)
 
     async def before_model_call(self, ctx: HookContext) -> None:
-        """Inject remediation message in before_model_call if loop detected."""
+        """Hard-stop on CRITICAL loops; inject remediation nudge on MEDIUM/HIGH.
+
+        CRITICAL (trailing identical call+outcome >= global_stop) means the
+        agent is making zero progress — force_finish the run instead of nudging.
+        This bypasses the remediation rate-limiter: a stuck loop must stop,
+        not be warned at. MEDIUM/HIGH stay soft remediation (model still has
+        a chance to change strategy).
+        """
         state = self._get_state(ctx)
         if state.fired_severity is None or state.fired_severity < Severity.MEDIUM:
             return
+        # CRITICAL: hard-stop the loop.
+        if state.fired_severity >= Severity.CRITICAL:
+            ctx.request_force_finish(
+                result=(
+                    "agent stopped: repeated tool-call loop detected (CRITICAL) "
+                    "— the agent was making no progress. Please rephrase the task or add detail."
+                )
+            )
+            log.warning(
+                "[RepeatToolDetection] CRITICAL loop -> force_finish (hard stop), call_key=%s",
+                (state.history[-1][0][:8] if state.history else "?"),
+            )
+            return
+        # MEDIUM/HIGH: soft remediation nudge (rate-limited).
         if not self._check_remediation_budget(state):
             return
         severity_label = state.fired_severity.name

@@ -8,6 +8,7 @@ Twinkle is stream-only; unary has been removed.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import sys
@@ -41,7 +42,6 @@ from twinkle.agentserver.hooks.manager import HookManager
 from twinkle.agentserver.prompts import PromptSection, SystemPromptBuilder
 from twinkle.e2a.models import E2AResponse
 from twinkle.config import (
-    AGENT_MAX_STEPS as MAX_STEPS,
     MEMORY_DIR,
     SKILLS_DIR,
     WORKSPACE_DIR,
@@ -382,7 +382,6 @@ class ReActAgent:
         tools: ToolManager,
         *,
         hooks: tuple[AgentHook, ...] = (),
-        max_steps: int | None = None,
         inbox: _Inbox | None = None,
         base_sections: list[PromptSection] | None = None,
     ) -> None:
@@ -392,7 +391,6 @@ class ReActAgent:
         self._hook_manager = HookManager()
         for h in hooks:
             self._hook_manager.register_hook(h)
-        self._max_steps = max_steps if max_steps is not None else MAX_STEPS
         self._inbox = inbox
         self._base_sections = base_sections  # None → normal/leader by mode; list → member/subagent
 
@@ -502,7 +500,7 @@ class ReActAgent:
         if is_team_mode:
             tool_schemas = [t for t in tool_schemas
                            if t["function"]["name"] in _TEAM_LEADER_TOOL_WHITELIST]
-        for _step in range(self._max_steps):
+        for _step in itertools.count():
             msgs = self._session_store.get_messages(session_id)
             if self._inbox is not None:
                 new_messages = self._inbox.drain()
@@ -725,16 +723,6 @@ class ReActAgent:
                     raise
             if should_reask:
                 continue
-
-        # exceeded max_steps
-        yield E2AResponse(
-            request_id=request_id,
-            sequence=seq,
-            is_final=True,
-            status="failed",
-            response_kind="e2a.error",
-            body={"error": f"agent loop exceeded max_steps={self._max_steps}"},
-        )
 
     # -- Parallel tool execution --------------------------------------------
 

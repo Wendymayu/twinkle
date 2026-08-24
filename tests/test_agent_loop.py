@@ -133,26 +133,32 @@ def test_cross_turn_remembers_context(session_store) -> None:
     assert seen_messages[1][3]["content"] == "turn2"
 
 
-def test_max_steps_emits_error(session_store, monkeypatch) -> None:
+def test_unbounded_loop_stops_via_critical_not_step_cap(session_store) -> None:
+    """Unbounded main agent (no max_steps) + a CRITICAL repeating-tool loop
+    stops via loop-detection force_finish — NOT via a step cap. Proves the new
+    brake (CRITICAL hard-stop) replaces the removed 1000-step cap."""
+    from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
+        RepeatToolCallDetectorHook)
     store = session_store
     reg = _reg_with_echo_tool()
-    # every turn asks for a tool call -> never converges
     tool_finish = Finish("tool_calls", {
         "role": "assistant", "content": None,
         "tool_calls": [{"id": "c", "type": "function",
                         "function": {"name": "echo", "arguments": '{"text": "x"}'}}]})
-    llm = _ScriptedLLM([ [tool_finish] for _ in range(20) ])
-    # default-independent: force a small cap so 20 scripted turns always exceed it
-    monkeypatch.setattr("twinkle.agentserver.agent.MAX_STEPS", 2)
-    loop = AgentLoop(llm, store, reg)
+    llm = _ScriptedLLM([[tool_finish] for _ in range(20)])
+    agent = AgentLoop(llm, store, reg, hooks=(RepeatToolCallDetectorHook(
+        repeat_warn=10, pingpong_warn=10, loop_block=2, global_stop=3),))
 
     async def run():
-        frames = [f async for f in loop.run(_env("loop"))]
-        return frames
+        return [f async for f in agent.run(_env("loop"))]
 
     frames = asyncio.run(run())
-    assert frames[-1].response_kind == "e2a.error"
-    assert frames[-1].status == "failed"
+    final = frames[-1]
+    # Stopped by loop detection (force_finish -> e2a.complete with loop msg),
+    # not by a step cap (no "exceeded max_steps" anywhere).
+    assert final.response_kind == "e2a.complete"
+    assert "loop" in final.body["result"]["content"].lower()
+    assert not any("exceeded max_steps" in str(f.body) for f in frames)
 
 
 def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store) -> None:
@@ -231,23 +237,14 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
     assert frames[-1].response_kind == "e2a.complete"
 
 
-def test_max_steps_instance_param_emits_error(session_store) -> None:
-    """max_steps passed at construction (not via monkeypatch) caps the loop."""
-    store = session_store
-    reg = _reg_with_echo_tool()
-    tool_finish = Finish("tool_calls", {
-        "role": "assistant", "content": None,
-        "tool_calls": [{"id": "c", "type": "function",
-                        "function": {"name": "echo", "arguments": '{"text": "x"}'}}]})
-    llm = _ScriptedLLM([[tool_finish] for _ in range(20)])
-    loop = AgentLoop(llm, store, reg, max_steps=2)   # instance param, no monkeypatch
-
-    async def run():
-        return [f async for f in loop.run(_env("loop"))]
-
-    frames = asyncio.run(run())
-    assert frames[-1].response_kind == "e2a.error"
-    assert "max_steps=2" in frames[-1].body["error"]
+def test_react_agent_has_no_step_cap_parameter() -> None:
+    """ReActAgent has no max_steps parameter — the step cap is removed for
+    ALL agents (main + subagent + team member). Unbounded loops stop via
+    CRITICAL loop-detection force_finish (main/team member) or the
+    subagent's hard_timeout, never a step count."""
+    import inspect
+    params = inspect.signature(AgentLoop.__init__).parameters
+    assert "max_steps" not in params
 
 
 # --- Parallel tool call tests --- #

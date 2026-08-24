@@ -14,7 +14,8 @@ import uuid
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import (
-    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, RuntimeEnvHook, SkillHook)
+    LoggingHook, MemoryFlushHook, MemoryHook, RepeatToolCallDetectorHook, RetryHook,
+    RuntimeEnvHook, SkillHook)
 from twinkle.agentserver.team.message_box import MessageBox
 from twinkle.agentserver.team.task_store import TeamTaskStore
 from twinkle.agentserver.team.workspace import ensure_team_workspace
@@ -22,7 +23,6 @@ from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.config import (
     SUBAGENT_ABORT_TIMEOUT,
     SUBAGENT_MAX_RESULT_CHARS,
-    SUBAGENT_MAX_STEPS,
     SUBAGENT_SOFT_TIMEOUT,
 )
 
@@ -132,11 +132,10 @@ class Team:
             self._inboxes[member_name] = MessageBox()
         inbox = self._inboxes[member_name]
         hooks = [SkillHook(), MemoryHook(), MemoryFlushHook(llm=self._llm),
-                 LoggingHook(), RetryHook(), RuntimeEnvHook()]
+                 LoggingHook(), RepeatToolCallDetectorHook(), RetryHook(), RuntimeEnvHook()]
         return ReActAgent(
             self._llm, self._store, tm,
             hooks=tuple(hooks),
-            max_steps=SUBAGENT_MAX_STEPS,
             inbox=inbox,
             base_sections=member_base_sections(
                 persona=persona, workspace=str(self.workspace), member_name=member_name),

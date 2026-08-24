@@ -36,7 +36,6 @@ def _make_agent(store, *, base_sections=None, hooks=()):
         _FinishLLM(), store, _TM(),
         hooks=tuple(hooks),
         base_sections=base_sections,
-        max_steps=2,
     )
 
 
@@ -158,7 +157,7 @@ def test_frozen_sections_byte_stable_across_steps(tmp_path):
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
     agent = ReActAgent(llm, store, reg, hooks=(_MarkerHook(),),
-                       base_sections=normal_base_sections(), max_steps=3)
+                       base_sections=normal_base_sections())
     req = AgentRequest(session_id="s1", request_id="r1", query="call echo")
 
     async def _run():
@@ -183,7 +182,7 @@ def test_tool_schemas_frozen_once_per_invoke(tmp_path):
                               "function": {"name": "echo", "arguments": '{"text": "hi"}'}}]})],
         [Finish("stop", {"role": "assistant", "content": "done", "tool_calls": None})],
     ])
-    agent = ReActAgent(llm, store, tm, base_sections=normal_base_sections(), max_steps=3)
+    agent = ReActAgent(llm, store, tm, base_sections=normal_base_sections())
     req = AgentRequest(session_id="s1", request_id="r1", query="call echo")
 
     async def _run():
@@ -232,7 +231,7 @@ def test_skill_and_memory_hooks_cooperate_through_loop(tmp_path, monkeypatch):
         ])
         agent = ReActAgent(llm, store, reg,
                            hooks=[SkillHook(mode="all"), MemoryHook()],
-                           base_sections=normal_base_sections(), max_steps=3)
+                           base_sections=normal_base_sections())
         req = AgentRequest(session_id="s1", request_id="r1", query="call echo")
 
         async def _run():

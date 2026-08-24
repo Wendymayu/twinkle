@@ -339,7 +339,7 @@ AgentServer 的核心是 `AgentLoop`，但 `server.py` 是 ws 接口层：
           │         re-decide      │
           │                        │
           │  yield E2AResponse     │  每个 TextDelta → e2a.chunk；工具执行后 → e2a.todo_update
-          │  最终 → e2a.complete   │  或 e2a.error（超过 max_steps）
+          │  最终 → e2a.complete   │  或 e2a.error（异常,非步数上限）
           └───┬────────────────────┘
               │
     ┌─────────┼───────────┐
@@ -369,7 +369,7 @@ LLMClient  SessionStore  ToolManager
 入口：set plan-todo ContextVar → reset_todo_events → [会话首次] store.append(TODO_SYSTEM_PROMPT)
 用户 query → store.append(user) → memory.recall(stub空) → msgs = store.get_messages()
     │
-    ▼  ReAct 循环（max_steps 守护）
+    ▼  ReAct 循环（无界;CRITICAL 死循环 force_finish 守护）
     │
     ├── llm.stream(msgs, tools)  # 返回 TextDelta | Finish
     │   ├── TextDelta → yield E2AResponse(e2a.chunk)
@@ -378,13 +378,13 @@ LLMClient  SessionStore  ToolManager
     │       │     → [若有快照] yield e2a.todo_update → store.append(tool) → continue
     │       └── finish_reason=="stop" → yield e2a.complete → return
     │
-    └── 超过 max_steps → yield e2a.error(is_final=true) → 生成器正常返回（非异常）
+    └── CRITICAL 死循环(连续≥30 次相同调用+结果) → force_finish → yield e2a.complete → return
 ```
 
 关键设计：
 - `run_stream` 是 **async generator**，yield E2AResponse — loop 对 ws 零依赖，单测无需起 ws
 - 工具结果回灌是命门：`{role:"tool", tool_call_id, content:result}` append 进 store，下一轮 `get_messages` 自然带上
-- `max_steps` 防止工具循环不收敛；触顶是"正常 yield `e2a.error` 后返回"，**非异常**——异常才走 §4.1 步骤 5
+- 无步数上限(`itertools.count()` 无界,对齐 openclaw;`max_steps` 参数已从 `ReActAgent` 移除);死循环由 `RepeatToolCallDetectorHook` CRITICAL(trailing identical ≥30)→`force_finish` 硬停——异常才走 §4.1 步骤 5
 - 入口设 plan-todo ContextVar + `reset_todo_events`，会话首次插入 `TODO_SYSTEM_PROMPT`；工具执行后 `flush_todo_events` 产 `e2a.todo_update` 侧信道（结构化快照 `{tasks, remaining, total}`）
 
 ### 4.3 SessionStore — 会话记忆（磁盘落盘 + 内存缓存）

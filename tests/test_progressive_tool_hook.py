@@ -185,7 +185,7 @@ def test_end_to_end_eager_filter_plus_navigation_and_invoke(tmp_path):
     store = SessionStore(str(tmp_path / "sessions"))
     asyncio.run(store.create_session("s1"))
     agent = ReActAgent(llm, store, tm, hooks=(hook,),
-                      base_sections=normal_base_sections(), max_steps=5)
+                      base_sections=normal_base_sections())
     req = AgentRequest(session_id="s1", request_id="r1", query="query db")
 
     async def _run():
@@ -224,7 +224,7 @@ def test_end_to_end_progressive_off_is_status_quo(tmp_path):
     store = SessionStore(str(tmp_path / "sessions"))
     asyncio.run(store.create_session("s1"))
     agent = ReActAgent(llm, store, tm, hooks=(),
-                      base_sections=normal_base_sections(), max_steps=2)
+                      base_sections=normal_base_sections())
     req = AgentRequest(session_id="s1", request_id="r1", query="hi")
 
     async def _run():

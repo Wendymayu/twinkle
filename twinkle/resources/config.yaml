@@ -21,7 +21,7 @@ llm:
   api_key: ${TWINKLE_LLM_API_KEY:-}       # 机密:放 .env,别 commit
   timeout: 120.0                          # 单次读超时秒;模型 hang 住→APITimeoutError(瞬时,会被重试)
 agent:
-  max_steps: 1000                         # ReAct 最大步数,超限 yield e2a.error(防不收敛硬上限,非目标)
+  max_steps: 1000                         # DEPRECATED: 全部 agent(主/子)已无步数上限(itertools.count() 无界,靠 CRITICAL 死循环检测 force_finish / subagent hard_timeout 兜底);本值保留向后兼容,代码忽略
 context_compression:
   token_threshold: 0                        # 0=动态(窗口×trigger_ratio,默认 128k→102400);>0=手动绝对覆盖(char//3 估算超此即压缩)
   trigger_ratio: 0.8                      # 窗口×比例 动态触发阈值;A(413恢复)与B(预防压缩)共用
@@ -98,7 +98,7 @@ permissions:
   overrides_file: ${TWINKLE_PERMISSION_OVERRIDES_FILE:-}   # 空 → <workspace>/.twinkle_data/permission_overrides.json
   audit_file: ${TWINKLE_PERMISSION_AUDIT_FILE:-}          # 空 → <workspace>/logs/audit/permission_audit.jsonl
 subagent:
-  max_steps: 50                  # 子 ReAct 上限（紧于 agent.max_steps=1000）
+  max_steps: 50                  # DEPRECATED: 子 agent(subagent+team member)已无步数上限(itertools.count() 无界);subagent 靠 hard_timeout=300s,team member 靠 CRITICAL 死循环检测 force_finish 兜底。本值保留向后兼容,代码忽略
   hard_timeout: 300             # 硬超时秒
   soft_timeout: 120             # 软超时（无活动）秒
   abort_timeout: 30              # 取消卡死子秒

@@ -241,3 +241,61 @@ def test_different_results_not_counted_as_loop():
     # trailing_identical should be 0 (different outcomes), so no HIGH
     state = hook._states.get(_SESSION_ID)
     assert state.fired_severity is None
+
+
+# --- CRITICAL hard-stop tests ---
+
+def test_critical_requests_force_finish_hard_stop():
+    """CRITICAL severity -> before_model_call requests force_finish to hard-stop
+    the loop, not just a soft remediation nudge."""
+    hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=3)
+    calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
+    asyncio.run(_simulate_tool_call_sequence(hook, calls))
+    assert hook._states[_SESSION_ID].fired_severity == Severity.CRITICAL
+
+    ctx = _make_model_ctx([{"role": "system", "content": "s"}])
+    asyncio.run(hook.before_model_call(ctx))
+
+    ff = ctx.consume_force_finish_request()
+    assert ff is not None, "CRITICAL must request force_finish to hard-stop the loop"
+    assert "loop" in str(ff.result).lower()
+
+
+def test_critical_force_finish_bypasses_remediation_rate_limit():
+    """CRITICAL hard-stop must not be subject to the remediation rate-limiter —
+    even with remediation_max_per_minute=0, CRITICAL still force_finishes."""
+    hook = RepeatToolCallDetectorHook(
+        repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=3,
+        remediation_max_per_minute=0,
+    )
+    calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
+    asyncio.run(_simulate_tool_call_sequence(hook, calls))
+
+    ctx = _make_model_ctx([{"role": "system", "content": "s"}])
+    asyncio.run(hook.before_model_call(ctx))
+
+    ff = ctx.consume_force_finish_request()
+    assert ff is not None, "CRITICAL force_finish must bypass remediation rate limit"
+
+
+def test_medium_still_soft_remediation_not_force_finish():
+    """MEDIUM severity stays a soft remediation nudge — must NOT force_finish."""
+    hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=4, loop_block=20, global_stop=30)
+    calls = [
+        ("read_file", {"path": "a.txt"}, "result_a"),
+        ("read_file", {"path": "b.txt"}, "result_b"),
+        ("read_file", {"path": "a.txt"}, "result_a"),
+        ("read_file", {"path": "b.txt"}, "result_b"),
+        ("read_file", {"path": "a.txt"}, "result_a"),
+        ("read_file", {"path": "b.txt"}, "result_b"),
+        ("read_file", {"path": "a.txt"}, "result_a"),
+        ("read_file", {"path": "b.txt"}, "result_b"),
+    ]
+    asyncio.run(_simulate_tool_call_sequence(hook, calls))
+    assert hook._states[_SESSION_ID].fired_severity == Severity.MEDIUM
+
+    ctx = _make_model_ctx([{"role": "system", "content": "s"}])
+    asyncio.run(hook.before_model_call(ctx))
+
+    assert ctx.consume_force_finish_request() is None, "MEDIUM must not force_finish"
+    assert any("[DETECTION]" in m.get("content", "") for m in ctx.inputs.messages)

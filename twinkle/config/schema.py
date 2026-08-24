@@ -61,7 +61,7 @@ class LLMConfig(_StrictModel):
 
 
 class AgentConfig(_StrictModel):
-    max_steps: int = 1000
+    max_steps: int = 1000              # DEPRECATED: 已无步数上限(itertools.count() 无界);值保留,代码忽略
 
 
 class MicroCompactConfig(_StrictModel):
@@ -185,7 +185,7 @@ class PermissionsConfig(_StrictModel):
 
 
 class SubagentConfig(_StrictModel):
-    max_steps: int = 50                 # child ReAct cap (tighter than agent.max_steps=1000)
+    max_steps: int = 50                 # DEPRECATED: child ReAct 已无步数上限(主/子全 itertools.count() 无界);值保留,代码忽略
     hard_timeout: float = 300.0         # absolute cap (asyncio.wait_for on the whole child run)
     soft_timeout: float = 120.0         # no-streaming-activity reset
     abort_timeout: float = 30.0          # cancel-a-stuck-child window

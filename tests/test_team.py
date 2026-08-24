@@ -162,6 +162,27 @@ def test_build_member_workspace_in_prompt(session_store):
     assert "workspace" in built.lower() or team.workspace.name in built
 
 
+def test_build_member_registers_repeat_detector_hook(session_store):
+    """Team member runs unbounded (no step cap), so it must register
+    RepeatToolCallDetectorHook — its CRITICAL force_finish backfills the
+    missing hard step cap, aligning team member with the main agent's
+    loop-detection fallback. (Subagent instead keeps hard_timeout=300s as
+    its whole-execution cap and need not register it.)"""
+    from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
+        RepeatToolCallDetectorHook)
+    mgr = _team_manager(session_store)
+    mgr._llm = _ScriptedLLM([])
+    team = mgr.ensure_team("s1")
+    team._llm = _ScriptedLLM([])
+
+    async def _run():
+        return await team._build_member("tester", "tester persona")
+    member = asyncio.run(_run())
+
+    hook_types = {type(h) for h in member._hook_manager._hooks}
+    assert RepeatToolCallDetectorHook in hook_types
+
+
 # ── delegate ──────────────────────────────────────────────────
 
 def test_delegate_runs_member_to_completion(session_store):

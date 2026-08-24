@@ -61,9 +61,10 @@ class LLMClient:
         timeout: float | None = None,
     ) -> None:
         self._model = model
-        # timeout -> AsyncOpenAI read timeout: a hung model (no chunk for N
-        # seconds) raises APITimeoutError (transient -> retried by RetryHook)
-        # instead of blocking the request forever. None = SDK default.
+        # timeout -> AsyncOpenAI httpx read timeout: per-chunk idle — a model
+        # that stops sending chunks for N seconds raises APITimeoutError
+        # (transient -> retried by RetryHook); steady streams (chunks < N apart)
+        # never time out, so long answers are safe. None = SDK default.
         self._client = AsyncOpenAI(
             base_url=base_url, api_key=api_key, timeout=timeout
         )
