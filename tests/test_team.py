@@ -166,7 +166,7 @@ def test_build_member_registers_repeat_detector_hook(session_store):
     """Team member runs unbounded (no step cap), so it must register
     RepeatToolCallDetectorHook — its CRITICAL force_finish backfills the
     missing hard step cap, aligning team member with the main agent's
-    loop-detection fallback. (Subagent instead keeps hard_timeout=300s as
+    loop-detection fallback. (Subagent instead keeps hard_timeout=3000s as
     its whole-execution cap and need not register it.)"""
     from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
         RepeatToolCallDetectorHook)

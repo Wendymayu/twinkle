@@ -196,3 +196,47 @@ def test_soft_timeout_returns_failure(session_store):
         SubagentTaskSpec(objective="o"), parent_session_id="p1", parent_request_id="r1"))
     assert result.success is False
     assert "soft timeout" in (result.error or "")
+
+
+def test_child_registers_repeat_detector_hook(session_store):
+    """Child ReAct must register RepeatToolCallDetectorHook — its CRITICAL
+    force_finish backfills the busy-runaway gap (a child that keeps emitting
+    frames but never converges slips past soft_timeout; hard_timeout is loose at
+    3000s after the jiuwenswarm alignment). Mirrors team member registration
+    (manager.py); before this the subagent was the only agent without it."""
+    from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
+        RepeatToolCallDetectorHook)
+    ex = _make_executor(session_store, child_hooks=None)   # default hook list
+    child = ex._build_child_agent()
+    hook_types = {type(h) for h in child._hook_manager._hooks}
+    assert RepeatToolCallDetectorHook in hook_types
+
+
+def test_reap_logs_warning_when_child_cleanup_outlasts_abort_window(session_store, caplog):
+    """A child whose cancellation cleanup takes longer than abort_timeout makes
+    the reap wait_for time out. That must be logged (orphan risk), not silently
+    swallowed — and must not mask the original failure reason (soft timeout)."""
+    import logging
+    from twinkle.agentserver.tools.builtin.subagent import SubagentTaskSpec
+
+    class _SlowCleanupLLM:
+        async def stream(self, messages, tools):
+            try:
+                await asyncio.sleep(1000)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.5)   # cleanup > abort_timeout(0.1)
+                raise
+            yield  # noqa: makes it an async generator
+
+    ex = _make_executor(session_store, child_hooks=[],
+                        config=SubagentConfig(hard_timeout=5.0, soft_timeout=0.1, abort_timeout=0.1))
+    ex._llm = _SlowCleanupLLM()
+    with caplog.at_level(logging.WARNING, logger="twinkle.subagent"):
+        result = asyncio.run(ex.execute_subagent(
+            SubagentTaskSpec(objective="o"), parent_session_id="p1", parent_request_id="r1"))
+    # original failure reason still surfaces (reap didn't mask it)
+    assert result.success is False
+    assert "soft timeout" in (result.error or "")
+    # reap timeout was logged, not silently swallowed
+    assert any("reap" in r.message.lower() for r in caplog.records), \
+        f"expected a reap warning, got: {[r.message for r in caplog.records]}"

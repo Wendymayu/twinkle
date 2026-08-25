@@ -2,8 +2,9 @@
 
 execute_subagent: fresh child session, trimmed ToolManager (no spawn_subagent /
 memory-writes), reused LLMClient/SessionStore (the child always uses the
-parent's llm — no per-subagent model override), tighter max_steps; runs child
-run_stream in a child asyncio task (ContextVar isolation) with soft/hard
+parent's llm — no per-subagent model override), no step cap (busy-runaway
+backstopped by RepeatToolCallDetector CRITICAL force_finish + hard_timeout);
+runs child run_stream in a child asyncio task (ContextVar isolation) with soft/hard
 timeouts; returns the child's e2a.complete content as a SubagentResult.
 """
 from __future__ import annotations
@@ -14,7 +15,8 @@ import uuid
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import (
-    LoggingHook, MemoryFlushHook, MemoryHook, RetryHook, RuntimeEnvHook, SkillHook)
+    LoggingHook, MemoryFlushHook, MemoryHook, RepeatToolCallDetectorHook,
+    RetryHook, RuntimeEnvHook, SkillHook)
 from twinkle.agentserver.prompts import PromptSection
 from twinkle.agentserver.llm_client import LLMClient
 from twinkle.agentserver.tools.manager import ToolManager
@@ -80,7 +82,7 @@ class SubagentExecutor:
         if self._child_hooks is not None:
             return self._child_hooks
         return [SkillHook(), MemoryHook(), MemoryFlushHook(llm=self._llm),
-                LoggingHook(), RetryHook(), RuntimeEnvHook()]
+                LoggingHook(), RepeatToolCallDetectorHook(), RetryHook(), RuntimeEnvHook()]
 
     # --- build + run ---
 
@@ -135,8 +137,23 @@ class SubagentExecutor:
                 runner.cancel()
             try:
                 await asyncio.wait_for(runner, timeout=self._config.abort_timeout)
-            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+            except asyncio.CancelledError:
+                # expected: cancelling the runner propagates CancelledError back here.
+                # Any outer cancellation (e.g. hard_timeout) still resumes after this finally.
                 pass
+            except asyncio.TimeoutError:
+                # cooperative-but-slow cleanup outlasted the window; the runner may be
+                # stuck in non-cancellable code (orphan risk). NOTE: a runner that swallows
+                # CancelledError hangs wait_for entirely — abort_timeout does NOT bound that;
+                # the real guarantee is the child's awaits being cancellable.
+                log.warning(
+                    "subagent reap: runner did not finish cancellation within %.0fs "
+                    "(orphan risk: stuck in non-cancellable code?)",
+                    self._config.abort_timeout)
+            except Exception as exc:
+                # defensive: _run forwards all Exception into frames, so this arm is rarely
+                # hit; log it rather than silently swallow a real bug in the reap path.
+                log.warning("subagent reap: runner raised unexpected error: %r", exc)
 
     async def execute_subagent(
         self,

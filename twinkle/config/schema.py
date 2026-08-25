@@ -187,9 +187,9 @@ class PermissionsConfig(_StrictModel):
 
 class SubagentConfig(_StrictModel):
     max_steps: int = 50                 # DEPRECATED: child ReAct 已无步数上限(主/子全 itertools.count() 无界);值保留,代码忽略
-    hard_timeout: float = 300.0         # absolute cap (asyncio.wait_for on the whole child run)
-    soft_timeout: float = 120.0         # no-streaming-activity reset
-    abort_timeout: float = 30.0          # cancel-a-stuck-child window
+    hard_timeout: float = 3000.0        # absolute cap (asyncio.wait_for on the whole child run); 对齐 jiuwenswarm 3000
+    soft_timeout: float = 600.0         # no-streaming-activity reset; 对齐 jiuwenswarm 600
+    abort_timeout: float = 30.0          # grace window for a cooperative child to finish cancellation cleanup; does NOT bound a non-cooperative child (one that swallows CancelledError hangs wait_for — real guarantee is the child's awaits being cancellable)
     child_permissions: bool = False      # v1 MUST be false (true needs streaming -> startup reject)
     max_result_chars: int = 8000         # truncate child final to protect parent context
     list_sessions_filter: bool = True    # hide __sub_ sessions from session.list
