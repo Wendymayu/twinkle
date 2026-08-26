@@ -1,3 +1,4 @@
+from twinkle.agentserver.hooks.builtin.audit_hook import AuditHook
 from twinkle.agentserver.hooks.builtin.context_compression_hook import ContextCompressionHook
 from twinkle.agentserver.hooks.builtin.context_overflow_recovery_hook import ContextOverflowRecoveryHook
 from twinkle.agentserver.hooks.builtin.evolution_hook import SkillEvolutionHook
@@ -14,6 +15,7 @@ from twinkle.agentserver.hooks.builtin.subagent_context_hook import SubagentCont
 from twinkle.agentserver.hooks.builtin.team_context_hook import TeamContextHook
 
 __all__ = [
+    "AuditHook",
     "ContextCompressionHook", "ContextOverflowRecoveryHook",
     "LoggingHook", "MemoryFlushHook", "MemoryHook", "PermissionHook",
     "ProgressiveToolHook", "RepeatToolCallDetectorHook", "RetryHook", "RuntimeEnvHook", "SkillHook",

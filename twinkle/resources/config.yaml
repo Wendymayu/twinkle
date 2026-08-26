@@ -98,6 +98,12 @@ permissions:
   approval_overrides: {}
   overrides_file: ${TWINKLE_PERMISSION_OVERRIDES_FILE:-}   # 空 → <workspace>/.twinkle_data/permission_overrides.json
   audit_file: ${TWINKLE_PERMISSION_AUDIT_FILE:-}          # 空 → <workspace>/logs/audit/permission_audit.jsonl
+audit:
+  tool_execution:
+    enabled: true                       # always-on 工具执行审计(与 permissions.enabled 解耦;关权限也记每次工具调用的 name/args/result/outcome)
+    file: ${TWINKLE_TOOL_AUDIT_FILE:-}  # 空 → <workspace>/logs/audit/tool_audit.jsonl
+    max_arg_chars: 2000                 # 单行 args 截断上限
+    max_result_chars: 2000             # 单行 result/error 截断上限
 subagent:
   max_steps: 50                  # DEPRECATED: 子 agent(subagent+team member)已无步数上限(itertools.count() 无界);subagent 靠 hard_timeout=3000s,team member 靠 CRITICAL 死循环检测 force_finish 兜底。本值保留向后兼容,代码忽略
   hard_timeout: 3000            # 硬超时秒(对齐 jiuwenswarm _DEFAULT_TIMEOUT_SECONDS=3000)

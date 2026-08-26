@@ -213,3 +213,13 @@ class HookContext:
         req = self._force_finish_request
         self._force_finish_request = None
         return req
+
+    def is_force_finish_requested(self) -> bool:
+        """只读窥探 force_finish(不清空)。
+
+        供 before 链中低 priority hook 观察跳过意图:高 priority hook(如
+        PermissionHook 权限 deny)已 request_force_finish 后,低 priority hook 可
+        在 before 里据此审计"工具将被跳过"(@hook 跳过方法体,after/on_exception
+        都不触发)。只读,绝不在此 consume——清空信号会让 @hook 拿不到 force_finish。
+        """
+        return self._force_finish_request is not None

@@ -15,7 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.hooks.builtin import (
-    LoggingHook, MemoryFlushHook, MemoryHook, RepeatToolCallDetectorHook,
+    AuditHook, LoggingHook, MemoryFlushHook, MemoryHook, RepeatToolCallDetectorHook,
     RetryHook, RuntimeEnvHook, SkillHook)
 from twinkle.agentserver.prompts import PromptSection
 from twinkle.agentserver.llm_client import LLMClient
@@ -82,7 +82,8 @@ class SubagentExecutor:
         if self._child_hooks is not None:
             return self._child_hooks
         return [SkillHook(), MemoryHook(), MemoryFlushHook(llm=self._llm),
-                LoggingHook(), RepeatToolCallDetectorHook(), RetryHook(), RuntimeEnvHook()]
+                LoggingHook(), RepeatToolCallDetectorHook(), RetryHook(), RuntimeEnvHook(),
+                AuditHook()]
 
     # --- build + run ---
 

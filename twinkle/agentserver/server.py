@@ -229,7 +229,8 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
 async def main() -> None:
     from twinkle.agentserver.memory.dreaming import start_dreaming
     from twinkle.agentserver.permissions import permission_engine
-    from twinkle.agentserver.hooks.builtin import LoggingHook, MemoryHook, PermissionHook, RetryHook, SkillHook
+    from twinkle.agentserver.hooks.builtin import (
+        AuditHook, LoggingHook, MemoryHook, PermissionHook, RetryHook, SkillHook)
     from twinkle.agentserver.mcp import get_mcp_manager
     from twinkle.config import settings
     from twinkle.workspace import ensure_workspace_dir
@@ -240,7 +241,7 @@ async def main() -> None:
     store = session_store()
     engine = permission_engine()
     llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
-    agent = create_agent(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook()], llm=llm)
+    agent = create_agent(store, hooks=[PermissionHook(engine), SkillHook(), MemoryHook(), LoggingHook(), RetryHook(), AuditHook()], llm=llm)
     handler = ws_handler(agent)
     dreaming_task = start_dreaming(llm, _get_inflight_count)  # 后台记忆整理（opt-in 默认关）
     if dreaming_task is not None:

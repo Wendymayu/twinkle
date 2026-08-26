@@ -36,3 +36,23 @@ class ToolPermissionLogEntry:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class ToolExecutionAuditEntry:
+    """Always-on 工具执行审计条目(与 permissions.enabled 解耦)。
+
+    outcome: success | denied(权限拒绝) | <ToolError.kind>(denied/validation/failed) | error
+    """
+    tool: str
+    outcome: str
+    args: str = ""        # JSON 串,已截断
+    result: str = ""     # 已截断(success 才有)
+    error: str = ""      # 异常消息,已截断(error/exception 才有)
+    tool_call_id: str = ""
+    session_id: str | None = None
+    request_id: str | None = None
+    ts: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

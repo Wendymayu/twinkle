@@ -185,6 +185,17 @@ class PermissionsConfig(_StrictModel):
     audit_file: str = ""  # "" -> <logging.dir>/audit/permission_audit.jsonl
 
 
+class AuditToolExecutionConfig(_StrictModel):
+    enabled: bool = True            # always-on 工具执行审计(与 permissions.enabled 解耦)
+    file: str = ""                  # "" -> <logging.dir>/audit/tool_audit.jsonl
+    max_arg_chars: int = 2000       # 单行 args 截断上限
+    max_result_chars: int = 2000   # 单行 result/error 截断上限
+
+
+class AuditConfig(_StrictModel):
+    tool_execution: AuditToolExecutionConfig = AuditToolExecutionConfig()
+
+
 class SubagentConfig(_StrictModel):
     max_steps: int = 50                 # DEPRECATED: child ReAct 已无步数上限(主/子全 itertools.count() 无界);值保留,代码忽略
     hard_timeout: float = 3000.0        # absolute cap (asyncio.wait_for on the whole child run); 对齐 jiuwenswarm 3000
@@ -307,6 +318,7 @@ class TwinkleConfig(_StrictModel):
     skills: SkillsConfig = SkillsConfig()
     memory: MemoryConfig = MemoryConfig()
     permissions: PermissionsConfig = PermissionsConfig()
+    audit: AuditConfig = AuditConfig()
     subagent: SubagentConfig = SubagentConfig()
     overflow_recovery: OverflowRecoveryConfig = OverflowRecoveryConfig()
     repeat_tool_detection: RepeatToolDetectionConfig = RepeatToolDetectionConfig()
@@ -355,4 +367,10 @@ class TwinkleConfig(_StrictModel):
         else:
             self.permissions.audit_file = os.path.expanduser(
                 self.permissions.audit_file)
+        if not self.audit.tool_execution.file:
+            self.audit.tool_execution.file = str(
+                Path(self.logging.dir) / "audit" / "tool_audit.jsonl")
+        else:
+            self.audit.tool_execution.file = os.path.expanduser(
+                self.audit.tool_execution.file)
         return self
