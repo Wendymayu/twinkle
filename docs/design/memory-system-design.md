@@ -390,7 +390,7 @@ MEMORY.md 超 `max_memory_chars`（默认 10000）时，dreaming 的 `_compact_i
 
 ### 8.2 兜底 ≠ 抽取
 
-LLM 读 middle 全文（**含其中的 `write_memory` tool_call 历史**），输出"重要且**未被 `write_memory` 覆盖**的信息"——已写的排除，避免二次抽取。输出 JSON 数组，程序 `mgr.write` 落盘（path 白名单由 `store.write` 把）：
+LLM 读 middle 全文（**含其中的 `write_memory` tool_call 历史**），输出"重要且**未被 `write_memory` 覆盖**的信息"——已写的排除，避免二次抽取。输出 JSON 数组，程序 `mgr.write` 落盘（path 白名单由 `store.write` 把关）：
 
 ```json
 [{"path":"MEMORY.md","content":"...","append":true}]
@@ -468,7 +468,7 @@ while True:
 3. `json.loads(raw)` → `{"infectious":[...], "redundant":[...]}`。解析失败 → return。
 4. 校验（`_validate`，对每类独立）：是 int 列表；每个号 ∈ [1, len(lines)]；坏号/非 list → 放弃该类（保守不部分应用）。
    - `infectious`（注入去毒，§10）：`len/len(lines) ≤ max_infectious_fraction(0.5)`，超 → 放弃该类。**不受 redundant 的 25% 约束**。
-   - `redundant`（冗余/矛盾）：`len/len(lines) ≤ max_delete_fraction(0.25)`，超 → 放弃该类；向后兼容旧 `delete` 字段。
+   - `redundant`（冗余/矛盾）：`len/len(lines) ≤ max_delete_fraction(0.25)`，超 → 放弃该类。
 5. 合并删行集 `delete_set = infectious ∪ redundant`。无 → return。
 6. 保留行 = `[line for i, line in enumerate(lines,1) if i not in delete_set]`。
 7. `mgr.replace("MEMORY.md", "\n".join(kept) + "\n")`（全量原子写回）。
