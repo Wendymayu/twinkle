@@ -1,7 +1,7 @@
-"""WorkflowExecutor — orchestration core that wires validation, sandbox, and fallback.
+"""WorkflowExecutor — 编排核心，串联校验、sandbox 和 fallback。
 
-Validates plan_code, loads it in a sandboxed namespace, extracts the root PlanNode,
-binds runtime callbacks, and executes with timeout/fallback support.
+校验 plan_code、在沙箱 namespace 中加载它、提取 root PlanNode、
+绑定运行时回调，并带超时/fallback 支持执行。
 """
 from __future__ import annotations
 
@@ -23,30 +23,29 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Exceptions
+# 异常
 # ---------------------------------------------------------------------------
 
 class PlanCodeValidationError(Exception):
-    """plan_code fails validation."""
+    """plan_code 校验失败。"""
 
 
 class ExecutionTimeoutError(Exception):
-    """Execution exceeds timeout."""
+    """执行超过超时。"""
 
 
 class FallbackLimitExceededError(Exception):
-    """Fallback count exceeds limit."""
+    """fallback 次数超过上限。"""
 
 
 # ---------------------------------------------------------------------------
-# Infrastructure-error detection
+# 基础设施错误检测
 # ---------------------------------------------------------------------------
 
-# Infrastructure errors (LLM API down / auth / rate-limit / timeout) cannot be
-# salvaged by a subagent fallback — the subagent calls the same LLM API and will
-# fail the same way, burning tokens for nothing. Matched against the exception's
-# class-hierarchy names (NOT the message) to avoid false positives on node-logic
-# errors that merely mention "connection" in their text.
+# 基础设施错误（LLM API 宕机 / 鉴权 / 限流 / 超时）无法被 subagent fallback
+# 挽救 — subagent 调用同一 LLM API，会以同样方式失败，白白浪费 token。
+# 按异常的类层级名匹配（而非 message），以避免对仅在文本中提到 "connection"
+# 的节点逻辑错误产生误报。
 _INFRA_KEYWORDS: tuple[str, ...] = (
     "Connection",
     "Auth",
@@ -58,11 +57,11 @@ _INFRA_KEYWORDS: tuple[str, ...] = (
 
 
 def _is_infrastructure_error(exc: BaseException) -> bool:
-    """True if ``exc`` is an infra-class error (network/auth/rate-limit/timeout).
+    """若 ``exc`` 是基础设施类错误（网络/鉴权/限流/超时）则返回 True。
 
-    Walks ``type(exc).__mro__`` so subclasses of openai/httpx/asyncio errors
-    (e.g. ``openai.APIConnectionError``) are recognized without importing
-    those SDKs — keeps the workflow layer decoupled from any LLM SDK.
+    遍历 ``type(exc).__mro__``，使 openai/httpx/asyncio 错误的子类
+    （如 ``openai.APIConnectionError``）无需 import 那些 SDK 即可识别 —
+    保持 workflow 层与任何 LLM SDK 解耦。
     """
     for cls in type(exc).__mro__:
         if any(keyword in cls.__name__ for keyword in _INFRA_KEYWORDS):
@@ -75,7 +74,7 @@ def _is_infrastructure_error(exc: BaseException) -> bool:
 # ---------------------------------------------------------------------------
 
 class WorkflowExecutor:
-    """Orchestration core: validate → load → bind callbacks → execute (with timeout)."""
+    """编排核心：校验 → 加载 → 绑定回调 → 执行（带超时）。"""
 
     def __init__(
         self,
@@ -91,11 +90,11 @@ class WorkflowExecutor:
         self._fallback_count = 0
 
     # ------------------------------------------------------------------
-    # Public API
+    # 公共 API
     # ------------------------------------------------------------------
 
     async def execute_workflow(self, plan_code: str, inputs: dict) -> Any:
-        """Validate → load → bind callbacks → execute with timeout."""
+        """校验 → 加载 → 绑定回调 → 带超时执行。"""
         root = self._prepare_root_node(plan_code)
 
         self._fallback_count = 0
@@ -110,11 +109,11 @@ class WorkflowExecutor:
             ) from exc
 
     # ------------------------------------------------------------------
-    # Internal pipeline
+    # 内部流水线
     # ------------------------------------------------------------------
 
     def _prepare_root_node(self, plan_code: str) -> PlanNode:
-        """Validate → load → extract root → deep copy → bind callbacks."""
+        """校验 → 加载 → 提取 root → 深拷贝 → 绑定回调。"""
         errors = PlanCodeValidator().validate(plan_code)
         if errors:
             raise PlanCodeValidationError(
@@ -128,13 +127,13 @@ class WorkflowExecutor:
         return root
 
     def _load_plan_namespace(self, plan_code: str) -> dict:
-        """exec(plan_code, sandboxed_namespace) and return the namespace."""
+        """exec(plan_code, sandboxed_namespace) 并返回该 namespace。"""
         namespace = build_namespace()
         exec(plan_code, namespace)
         return namespace
 
     def _extract_root_node(self, namespace: dict) -> PlanNode:
-        """Extract 'root' PlanNode from namespace."""
+        """从 namespace 中提取 'root' PlanNode。"""
         root = namespace.get("root")
         if root is None:
             raise PlanCodeValidationError(
@@ -147,7 +146,7 @@ class WorkflowExecutor:
         return root
 
     def _bind_node_callbacks(self, root: PlanNode) -> None:
-        """Inject all runtime callbacks into the root node (and sub_plans)."""
+        """把所有运行时回调注入 root 节点（及 sub_plans）。"""
         root.set_runtime_callbacks(
             has_tool=self._has_tool_wrapper,
             call_tool=self._call_tool_wrapper,
@@ -157,17 +156,17 @@ class WorkflowExecutor:
         )
 
     # ------------------------------------------------------------------
-    # Callback wrappers
+    # 回调 wrapper
     # ------------------------------------------------------------------
 
     def _has_tool_wrapper(self, tool_name: str) -> bool:
-        """Delegate to ToolManager.get()."""
+        """委托给 ToolManager.get()。"""
         if self._tools is None:
             return False
         return self._tools.get(tool_name) is not None
 
     async def _call_tool_wrapper(self, tool_name: str, **kwargs: Any) -> Any:
-        """Delegate to ToolManager.execute(), try JSON parse."""
+        """委托给 ToolManager.execute()，尝试 JSON 解析。"""
         if self._tools is None:
             raise RuntimeError(f"ToolManager not available for tool: {tool_name}")
         result = await self._tools.execute(tool_name, kwargs)
@@ -177,7 +176,7 @@ class WorkflowExecutor:
             return result
 
     async def _call_llm_wrapper(self, prompt: str, system_prompt: str = "") -> str:
-        """LLMClient.stream() + collect TextDelta."""
+        """LLMClient.stream() + 收集 TextDelta。"""
         if self._llm is None:
             raise RuntimeError("LLMClient not available")
         messages: list[dict] = []
@@ -187,7 +186,7 @@ class WorkflowExecutor:
 
         collected: list[str] = []
         async for event in self._llm.stream(messages, tools=[]):
-            # Import locally to avoid circular at module level
+            # 局部 import 以避免模块级循环引用
             from twinkle.agentserver.llm_client import TextDelta
             if isinstance(event, TextDelta):
                 collected.append(event.content)
@@ -196,14 +195,13 @@ class WorkflowExecutor:
     async def _fallback_wrapper(
         self, node: PlanNode, inputs: dict[str, Any], exc: Exception
     ) -> Any:
-        """Delegate to SubagentExecutor, track count."""
+        """委托给 SubagentExecutor，跟踪计数。"""
         if not self._config.enable_fallback:
             raise exc
 
-        # Infrastructure errors (LLM API connection/auth/rate-limit/timeout)
-        # can't be salvaged by a subagent — it calls the same API and fails the
-        # same way. Re-raise so the error reaches the main agent loop (ReAct),
-        # which can retry the whole workflow after the infra recovers.
+        # 基础设施错误（LLM API 连接/鉴权/限流/超时）无法被 subagent 挽救 —
+        # 它调用同一 API 会以同样方式失败。重新抛出，使错误到达主 agent 循环
+        # （ReAct），后者可在基础设施恢复后重试整个 workflow。
         if _is_infrastructure_error(exc):
             raise exc
 
@@ -233,5 +231,5 @@ class WorkflowExecutor:
         raise RuntimeError(f"Subagent fallback failed: {result.error}") from exc
 
     def _extract_json_wrapper(self, raw: Any, expected_type: type = dict) -> Any:
-        """Delegate to extract_llm_json."""
+        """委托给 extract_llm_json。"""
         return extract_llm_json(raw, expected_type)

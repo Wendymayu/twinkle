@@ -27,19 +27,19 @@ TODO_EVENTS: contextvars.ContextVar[list[dict] | None] = contextvars.ContextVar(
 
 
 def reset_todo_events() -> None:
-    """Arm a fresh per-request event bus (called at run_stream entry)."""
+    """启用一个全新的 per-request event bus(在 run_stream 入口调用)。"""
     TODO_EVENTS.set([])
 
 
 def append_todo_event(snapshot: dict) -> None:
-    """Append a structured todo snapshot to the per-request event buffer.
+    """向 per-request event buffer 追加一个结构化的 todo 快照。
 
-    No-op when the buffer is uninitialized (None) — e.g. when a todo tool is
-    invoked directly outside of run_stream (tests, ad-hoc calls). This keeps
-    the tool's return value (markdown string for the model) unchanged.
+    buffer 未初始化(None)时是 no-op —— 比如在 run_stream 之外
+    直接调用 todo 工具(测试、临时调用)时。这保证
+    工具的返回值(给模型的 markdown 字符串)不变。
 
-    The actual publish happens in agent_loop when flush_todo_events() yields
-    e2a.todo_update frames.
+    真正的发布发生在 agent_loop,由 flush_todo_events() yield
+    e2a.todo_update 帧时进行。
     """
     todo_events = TODO_EVENTS.get()
     if todo_events is None:
@@ -48,11 +48,10 @@ def append_todo_event(snapshot: dict) -> None:
 
 
 def flush_todo_events() -> list[dict]:
-    """Flush the per-request event buffer: return pending snapshots and clear.
+    """排空 per-request event buffer：返回待发快照并清空。
 
-    Returns the accumulated snapshots for the caller (agent_loop) to yield
-    as e2a.todo_update frames. Empty list when the buffer is uninitialized
-    or already empty.
+    返回累积的快照供调用方(agent_loop)yield
+    为 e2a.todo_update 帧。buffer 未初始化或已空时返回空列表。
     """
     todo_events = TODO_EVENTS.get()
     if not todo_events:

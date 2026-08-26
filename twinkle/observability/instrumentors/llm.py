@@ -1,4 +1,4 @@
-"""Instrument LLMClient.stream -> gen_ai.chat span."""
+"""Instrument LLMClient.stream -> gen_ai.chat span。"""
 from __future__ import annotations
 
 import json
@@ -16,12 +16,12 @@ _DEFAULT_ATTR_LIMIT = 0  # 0 = no truncation (full capture) by default
 
 
 def _attr_limit() -> int:
-    """Span-attribute truncation limit, from TWINKLE_OBS_ATTR_LIMIT (default 0 = full).
+    """Span-attribute 截断上限，来自 TWINKLE_OBS_ATTR_LIMIT（默认 0 = 全量）。
 
-    Default is no truncation so trace input/output are fully visible during
-    debugging; set a positive int (e.g. 4096) to cap each of gen_ai.input.messages
-    / tool.definitions / output.messages / tool.arguments / tool.result. Read
-    lazily so env changes (and tests) take effect without re-import.
+    默认不截断，使调试时 trace 的 input/output 完全可见；设为正整数
+    （如 4096）可分别限制 gen_ai.input.messages / tool.definitions /
+    output.messages / tool.arguments / tool.result。懒读取，使 env 变更
+    （及测试）无需重新 import 即生效。
     """
     raw = os.getenv("TWINKLE_OBS_ATTR_LIMIT", str(_DEFAULT_ATTR_LIMIT))
     try:
@@ -51,10 +51,10 @@ def _stamp_ctx(span) -> None:
 def _record_usage_attrs(span, usage) -> None:
     if not usage:
         return
-    # usage may be a dict (fakes/tests) or a pydantic object (real openai SDK
-    # CompletionUsage has no .get); read_usage_token handles both — using
-    # usage.get() here used to raise AttributeError mid-span and break the
-    # whole agent invoke.
+    # usage 可能是 dict（fakes/tests）或 pydantic 对象（真实 openai SDK
+    # CompletionUsage 无 .get）；read_usage_token 兼顾两者——此处用
+    # usage.get() 曾经会在 span 中途抛 AttributeError 并中断整个
+    # agent invoke。
     inp = read_usage_token(usage, "prompt_tokens", "input_tokens")
     out = read_usage_token(usage, "completion_tokens", "output_tokens")
     tot = read_usage_token(usage, "total_tokens")
@@ -94,12 +94,10 @@ def instrument_llm(tracer, metrics, cfg, *, llm_cls=None) -> bool:
                         if first_token_ts is None:
                             first_token_ts = time.perf_counter()
                     elif isinstance(ev, Finish):
-                        # Finish is the terminal event. End the span NOW
-                        # (before yielding) so it's exported even if the
-                        # caller abandons the generator — the agent loop
-                        # returns from inside its `async for` on the final
-                        # turn, which would otherwise leave this span
-                        # unended and unexported.
+                        # Finish 是终止事件。立即结束 span（在 yield
+                        # 之前），使其即便 caller 放弃 generator 也会被
+                        # 导出——agent loop 在最后一轮从其 `async for`
+                        # 内部 return，否则会令此 span 未结束、未导出。
                         if first_token_ts is not None:
                             span.set_attribute(
                                 A.GEN_AI_STREAMING_FIRST_TOKEN_MS,

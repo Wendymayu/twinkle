@@ -20,7 +20,7 @@ function grouped(tasks: TodoTask[]) {
       <span class="todo-count" v-if="todo">{{ completedCount }}/{{ todo.total }}</span>
     </div>
     <div v-if="todo && todo.tasks.length" class="todo-list">
-      <!-- In Progress -->
+      <!-- 进行中 -->
       <div v-if="grouped(todo.tasks).inProgress.length" class="todo-group">
         <div class="todo-group-label"><span class="dot in-progress"></span>进行中</div>
         <div v-for="t in grouped(todo.tasks).inProgress" :key="t.id" :class="['todo-item', t.status]">
@@ -30,7 +30,7 @@ function grouped(tasks: TodoTask[]) {
           <span class="todo-owner" v-if="t.owner">@{{ t.owner }}</span>
         </div>
       </div>
-      <!-- Pending -->
+      <!-- 待处理 -->
       <div v-if="grouped(todo.tasks).pending.length" class="todo-group">
         <div class="todo-group-label"><span class="dot pending"></span>待处理</div>
         <div v-for="t in grouped(todo.tasks).pending" :key="t.id" :class="['todo-item', t.status]">
@@ -40,7 +40,7 @@ function grouped(tasks: TodoTask[]) {
           <span class="todo-owner" v-if="t.owner">@{{ t.owner }}</span>
         </div>
       </div>
-      <!-- Completed -->
+      <!-- 已完成 -->
       <div v-if="grouped(todo.tasks).completed.length" class="todo-group">
         <div class="todo-group-label"><span class="dot completed"></span>已完成</div>
         <div v-for="t in grouped(todo.tasks).completed" :key="t.id" :class="['todo-item', t.status]">
@@ -49,7 +49,7 @@ function grouped(tasks: TodoTask[]) {
           <span class="todo-result" v-if="t.result">{{ t.result }}</span>
         </div>
       </div>
-      <!-- Cancelled -->
+      <!-- 已取消 -->
       <div v-if="grouped(todo.tasks).cancelled.length" class="todo-group">
         <div class="todo-group-label"><span class="dot cancelled"></span>已取消</div>
         <div v-for="t in grouped(todo.tasks).cancelled" :key="t.id" :class="['todo-item', t.status]">

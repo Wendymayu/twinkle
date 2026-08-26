@@ -59,12 +59,12 @@ def test_read_skill_relative_file(isolated_skills):
 def test_read_skill_traversal_blocked(isolated_skills):
     from twinkle.agentserver.tools.builtin.skill_tools import read_skill
     out = asyncio.run(read_skill.func("a", "../../etc/passwd"))
-    assert "escapes" in out.lower()  # blocked, not a read attempt
+    assert "escapes" in out.lower()  # 已拦截,非读取尝试
 
 
 def test_read_skill_non_utf8(isolated_skills, tmp_path):
-    # write a non-UTF-8 file in skill a's dir
+    # 在 skill a 目录下写一个非 UTF-8 文件
     (tmp_path / "a" / "bad.bin").write_bytes(b"\xff\xfe\x00\x01")
     from twinkle.agentserver.tools.builtin.skill_tools import read_skill
     out = asyncio.run(read_skill.func("a", "bad.bin"))
-    assert "error" in out.lower()  # caught, not a raise
+    assert "error" in out.lower()  # 已捕获,非抛异常

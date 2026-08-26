@@ -28,6 +28,6 @@ def test_log_makes_parent_dir(tmp_path):
 
 
 def test_log_is_fail_soft(tmp_path):
-    # a bad path must not raise
+    # 坏路径不得抛异常
     ToolPermissionLog("/nonexistent-root/x/audit.jsonl").log(ToolPermissionLogEntry(
-        tool="echo", decision="allow", source="tier"))  # no exception
+        tool="echo", decision="allow", source="tier"))  # 无异常

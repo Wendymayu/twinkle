@@ -1,11 +1,10 @@
-"""Span/metric attribute key constants.
+"""Span/metric 的 attribute key 常量。
 
-Aligned with OpenTelemetry GenAI semantic conventions (gen_ai.*) plus
-twinkle-specific dimensions (twinkle.*). Centralized so instrumentors
-never hardcode string keys.
+对齐 OpenTelemetry GenAI 语义约定（gen_ai.*）加 twinkle 专属维度
+（twinkle.*）。集中放置，使 instrumentor 不硬编码字符串 key。
 """
 
-# --- span names ---
+# --- span 名称 ---
 SPAN_AGENT_INVOKE = "twinkle.agent.invoke"
 SPAN_GEN_AI_CHAT = "gen_ai.chat"
 SPAN_GEN_AI_TOOL = "gen_ai.tool"
@@ -31,7 +30,7 @@ GEN_AI_TOOL_ARGUMENTS = "gen_ai.tool.arguments"
 GEN_AI_TOOL_RESULT = "gen_ai.tool.result"
 GEN_AI_TOKEN_TYPE = "gen_ai.token.type"
 
-# --- twinkle.* (custom) ---
+# --- twinkle.*（自定义）---
 TWINKLE_REQUEST_ID = "twinkle.request.id"
 TWINKLE_SESSION_ID = "twinkle.session.id"
 TWINKLE_AGENT_ITERATIONS = "twinkle.agent.iterations"
@@ -50,12 +49,12 @@ TWINKLE_SKILL_NAME = "twinkle.skill.name"
 TWINKLE_EVOLUTION_STATUS = "twinkle.evolution.status"
 TWINKLE_EVOLUTION_MESSAGE = "twinkle.evolution.message"
 
-# --- metric names ---
+# --- metric 名称 ---
 METRIC_TOKEN_USAGE = "gen_ai.client.token.usage"
 METRIC_TOOL_COUNT = "gen_ai.tool.count"
 METRIC_LLM_DURATION = "gen_ai.client.operation.duration"
 METRIC_TOOL_DURATION = "gen_ai.tool.duration"
 METRIC_AGENT_DURATION = "twinkle.agent.duration"
 
-# --- misc ---
+# --- 杂项 ---
 TOOL_ERROR_PREFIX = "[tool error]"

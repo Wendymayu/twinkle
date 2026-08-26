@@ -14,13 +14,13 @@ const props = defineProps<{
 const { webClient, inputDisabled, markApprovalDecided } = useSessions()
 
 async function decide(d: ApprovalDecision) {
-  // respond() does NOT touch lastRequestId — the resumed chat.delta/final
-  // arrive on the original request_id and stay associated with it.
+  // respond() 不碰 lastRequestId——恢复后的 chat.delta/final
+  // 到达时携带原始 request_id 并保持与之关联。
   try {
     await webClient.respond(props.approvalId, d, props.requestId)
   } catch (e) {
-    // approval already expired/cancelled (e.g. session switched) — still flip
-    // the card to decided so the user can't keep clicking.
+    // approval 已过期/取消（如 session 切换）——仍把
+    // card 翻到已决策，使用户不能继续点击。
     console.error('approval.respond failed', e)
   }
   markApprovalDecided(props.approvalId, d)

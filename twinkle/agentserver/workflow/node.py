@@ -1,16 +1,16 @@
-"""PlanNode ABC — recursive execution node with fallback and HookInterrupt.
+"""PlanNode ABC — 带 fallback 和 HookInterrupt 的递归执行节点。
 
-PlanNode contract (v1):
+PlanNode 契约（v1）：
 
-1. Each node must inherit PlanNode and implement async _execute(inputs: dict) -> Any.
-2. Subclasses must not override run(); run() is the template method with fallback.
-3. Node init must provide plan_name (str), instruction (str), sub_plans (list[PlanNode]).
-4. Node input is dict[str, Any]; output recommended as dict with at least node/status/result.
-5. Composite nodes dispatch children via self.sub_plans and await child.run(ctx).
-6. External capabilities accessed only via self.has_tool / self.call_tool / self.call_llm / self.extract_json.
-7. On failure, raise the exception; the framework triggers fallback automatically.
-8. Each skill_code must expose root: PlanNode.
-9. plan_name should be unique within a skill for logging, trace, and fallback targeting.
+1. 每个节点必须继承 PlanNode 并实现 async _execute(inputs: dict) -> Any。
+2. 子类不得覆盖 run()；run() 是带 fallback 的模板方法。
+3. 节点初始化必须提供 plan_name (str)、instruction (str)、sub_plans (list[PlanNode])。
+4. 节点输入是 dict[str, Any]；输出建议为 dict，至少含 node/status/result。
+5. 组合节点通过 self.sub_plans 分发子节点并 await child.run(ctx)。
+6. 外部能力只能通过 self.has_tool / self.call_tool / self.call_llm / self.extract_json 访问。
+7. 失败时抛出异常；框架自动触发 fallback。
+8. 每个 skill_code 必须暴露 root: PlanNode。
+9. plan_name 在一个 skill 内应唯一，用于日志、trace 和 fallback 定位。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ __all__ = ["PlanNode"]
 
 
 class PlanNode(ABC):
-    """Recursive execution node — subclass implements _execute, run has fallback."""
+    """递归执行节点 — 子类实现 _execute，run 带 fallback。"""
 
     def __init__(
         self,
@@ -41,7 +41,7 @@ class PlanNode(ABC):
 
         self._update_subplans_depth()
 
-        # Callbacks — injected by Executor via set_runtime_callbacks
+        # 回调 — 由 Executor 通过 set_runtime_callbacks 注入
         self._has_tool_callback: Callable[[str], bool] | None = None
         self._call_tool_callback: Callable[..., Awaitable[Any]] | None = None
         self._call_llm_callback: Callable[..., Awaitable[str]] | None = None
@@ -57,10 +57,10 @@ class PlanNode(ABC):
         ) = None
 
     def _update_subplans_depth(self) -> None:
-        """Recursively update depth for all descendant nodes.
+        """递归更新所有后代节点的 depth。
 
-        Uses iterative traversal over public attributes depth/sub_plans,
-        avoiding calling protected methods on other instances.
+        通过对公开属性 depth/sub_plans 做迭代遍历，
+        避免调用其他实例的受保护方法。
         """
         pending = [(sub, self.depth + 1) for sub in self.sub_plans]
         while pending:
@@ -79,7 +79,7 @@ class PlanNode(ABC):
         before_subplan_execute: Callable[[PlanNode, dict[str, Any]], Awaitable[None]] | None = None,
         after_subplan_execute: Callable[[PlanNode, dict[str, Any], Any], Awaitable[None]] | None = None,
     ) -> None:
-        """Inject runtime callbacks and propagate to all sub_plans."""
+        """注入运行时回调并传播到所有 sub_plans。"""
         if has_tool is not None:
             self._has_tool_callback = has_tool
         if call_tool is not None:
@@ -106,43 +106,43 @@ class PlanNode(ABC):
                 after_subplan_execute=after_subplan_execute,
             )
 
-    # --- Capability methods (delegate to callbacks) ---
+    # --- 能力方法（委托给回调）---
 
     def has_tool(self, tool_name: str) -> bool:
-        """Check if a tool is available. Raises RuntimeError if callback not set."""
+        """检查某 tool 是否可用。回调未设置时抛 RuntimeError。"""
         if self._has_tool_callback is None:
             raise RuntimeError("PlanNode has_tool callback not initialized")
         return self._has_tool_callback(tool_name)
 
     async def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
-        """Call a tool by name. Raises RuntimeError if callback not set."""
+        """按名字调用 tool。回调未设置时抛 RuntimeError。"""
         if self._call_tool_callback is None:
             raise RuntimeError("PlanNode call_tool callback not initialized")
         return await self._call_tool_callback(tool_name, **kwargs)
 
     async def call_llm(self, prompt: str, system_prompt: str = "") -> str:
-        """Call LLM. Raises RuntimeError if callback not set."""
+        """调用 LLM。回调未设置时抛 RuntimeError。"""
         if self._call_llm_callback is None:
             raise RuntimeError("PlanNode call_llm callback not initialized")
         return await self._call_llm_callback(prompt, system_prompt=system_prompt)
 
     def extract_json(self, raw: Union[str, dict, list], expected_type: type = dict) -> Any:
-        """Extract JSON from LLM output. Raises RuntimeError if callback not set."""
+        """从 LLM 输出中提取 JSON。回调未设置时抛 RuntimeError。"""
         if self._extract_json_callback is None:
             raise RuntimeError("PlanNode extract_json callback not initialized")
         return self._extract_json_callback(raw, expected_type)
 
-    # --- Abstract execution ---
+    # --- 抽象执行 ---
 
     @abstractmethod
     async def _execute(self, inputs: dict[str, Any]) -> Any:
-        """Subclass must implement this with the node's core logic."""
+        """子类必须用节点的核心逻辑实现它。"""
         ...
 
-    # --- Template method ---
+    # --- 模板方法 ---
 
     async def run(self, inputs: dict[str, Any]) -> Any:
-        """Execute with fallback. HookInterrupt is never caught by fallback."""
+        """带 fallback 执行。HookInterrupt 永远不会被 fallback 捕获。"""
         try:
             return await self._execute(inputs)
         except HookInterrupt:
@@ -152,10 +152,10 @@ class PlanNode(ABC):
                 raise
             return await self._fallback_callback(self, inputs, exc)
 
-    # --- Sub-plan execution ---
+    # --- 子计划执行 ---
 
     async def execute_subplan(self, subplan: PlanNode, inputs: dict[str, Any]) -> Any:
-        """Execute a child node with before/after callbacks."""
+        """带 before/after 回调执行子节点。"""
         if self._before_subplan_execute is not None:
             await self._before_subplan_execute(subplan, inputs)
 
@@ -167,7 +167,7 @@ class PlanNode(ABC):
 
             return result
         except HookInterrupt:
-            # HITL interrupt: do not call after_subplan_execute
+            # HITL 中断：不调用 after_subplan_execute
             raise
         except Exception as exc:
             if self._after_subplan_execute is not None:

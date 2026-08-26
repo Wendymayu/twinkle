@@ -1,4 +1,4 @@
-"""Tests for AuditHook — always-on 工具执行审计(success/denied/error + 截断)。
+"""AuditHook 测试 — always-on 工具执行审计(success/denied/error + 截断)。
 
 不依赖 pytest-asyncio:用 asyncio.run() + tmp_path,对齐项目 conftest 风格。
 直接构造 HookContext 调 hook 方法,避开完整 agent loop。
@@ -17,7 +17,7 @@ from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeAgent:
-    """Minimal agent shell exposing _hook_manager (what @hook reads)."""
+    """最小 agent 壳,暴露 _hook_manager(@hook 读的就是它)。"""
 
     def __init__(self, hm: HookManager):
         self._hook_manager = hm
@@ -137,7 +137,7 @@ def test_non_serializable_args_does_not_raise(tmp_path):
     ctx = _ctx()
     ctx.inputs = ToolCallInputs(
         name="echo", args={"obj": object()}, tool_call_id="tc1")
-    # default=str fallback handles non-serializable args
+    # default=str 兜底处理不可序列化的 args
     asyncio.run(hook.after_tool_call(ctx))
 
     row = _read_jsonl(tmp_path / "tool_audit.jsonl")[0]
@@ -146,9 +146,9 @@ def test_non_serializable_args_does_not_raise(tmp_path):
 
 
 def test_integration_through_real_hook_decorator(tmp_path):
-    """End-to-end: AuditHook registered in a HookManager; a @hook-decorated
-    _tool_call writes _tool_result (decorator) which AuditHook.after reads and
-    persists. On exception, on_tool_exception fires and AuditHook records it."""
+    """端到端:AuditHook 注册到 HookManager;被 @hook 装饰的
+    _tool_call 写入 _tool_result(decorator 干的),AuditHook.after 读取并
+    落盘。异常时 on_tool_exception 触发,AuditHook 记录它。"""
     audit = _hook(tmp_path)
     agent = _FakeAgent(HookManager())
     agent._hook_manager.register_hook(audit)
@@ -167,7 +167,7 @@ def test_integration_through_real_hook_decorator(tmp_path):
     assert rows[0]["outcome"] == "success"
     assert rows[0]["result"] == "real-output"
 
-    # exception path: on_tool_exception fires, decorator sets ctx.exception
+    # 异常路径:on_tool_exception 触发,decorator 设置 ctx.exception
     @hook(HookEvent.BEFORE_TOOL_CALL, HookEvent.AFTER_TOOL_CALL,
           on_exception=HookEvent.ON_TOOL_EXCEPTION)
     async def failing_tool(self, ctx):

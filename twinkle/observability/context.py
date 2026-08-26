@@ -1,8 +1,8 @@
-"""Request-scoped context for stamping ids onto child spans.
+"""请求级 context，用于把 id 盖到 child span 上。
 
-set_request_context(...) returns a token whose reset() goes in finally;
-_llm_call_counter is reset by the agent wrap and incremented by the llm
-wrap so the agent wrap can stamp twinkle.agent.iterations at span end.
+set_request_context(...) 返回一个 token，其 reset() 放在 finally；
+_llm_call_counter 由 agent wrap 重置、由 llm wrap 递增，使 agent wrap
+能在 span 结束时盖 twinkle.agent.iterations。
 """
 from __future__ import annotations
 

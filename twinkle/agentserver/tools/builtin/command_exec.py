@@ -1,15 +1,14 @@
-"""command_exec — run a shell command in the workspace, return output.
+"""command_exec —— 在 workspace 中运行 shell 命令,返回输出。
 
-Slim rewrite of jiuwenclaw/agentserver/tools/command_tools.py (353 lines).
-Keeps the load-bearing bits: cross-platform shell (PowerShell on Windows,
-bash/sh on Unix), dangerous-command blocklist, workspace-confined workdir,
-output clipping, timeout, and non-blocking background mode. Drops the
-shell_type selector + token-sniffing auto-detection (one shell per OS is
-enough for a local learning tool), the runtime-venv/pip-env machinery, and
-the `env` extra param.
+jiuwenclaw/agentserver/tools/command_tools.py(353 行)的精简重写。
+保留关键部分:跨平台 shell(Windows 上用 PowerShell,Unix 上用
+bash/sh)、危险命令黑名单、workspace 受限 workdir、输出截断、超时、
+非阻塞后台模式。去掉 shell_type 选择器 + token 嗅探自动检测(本地
+学习工具一个 OS 一种 shell 足够)、runtime-venv/pip-env 机制,以及
+`env` 额外参数。
 
-NOT read-only — blocklist + workspace confinement are the only safety rails
-today; an approval flow is deferred (roadmap `permissions/`).
+非只读 —— 黑名单 + workspace 限制是当前唯一的安全护栏;
+审批流程延后(roadmap `permissions/`)。
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ from twinkle.agentserver.tools.decorator import tool
 from twinkle.agentserver.tools.errors import ToolError
 from twinkle.config import WORKSPACE_DIR
 
-# --- Safety: deny patterns live in the single source of truth. ---
+# --- 安全:deny 模式统一定义在唯一真源。 ---
 from twinkle.agentserver.permissions.builtin_rules import matches as _command_deny_matches
 
 
@@ -37,14 +36,13 @@ def _clip_text(value: str, max_chars: int) -> str:
 
 
 def _check_command_safety(command: str) -> str | None:
-    """Defense-in-depth: when the permission system is disabled (or the hook
-    is bypassed), this still rejects dangerous commands using the shared
-    builtin_rules table (single source of truth)."""
+    """纵深防御:当权限系统关闭(或 hook 被绕过)时,这里仍用共享的
+    builtin_rules 表(唯一真源)拒绝危险命令。"""
     return _command_deny_matches(command)
 
 
 def _resolve_workdir(workdir: str) -> Path:
-    """Resolve `workdir` against WORKSPACE_DIR; reject paths escaping it."""
+    """把 `workdir` 相对 WORKSPACE_DIR 解析;拒绝逃逸出 workspace 的路径。"""
     root = Path(WORKSPACE_DIR).resolve()
     candidate = Path(workdir) if workdir else root
     if not candidate.is_absolute():
@@ -55,7 +53,7 @@ def _resolve_workdir(workdir: str) -> Path:
 
 
 def _resolve_execution_plan(command: str) -> tuple[Sequence[str], str]:
-    """Pick the platform shell. Returns (argv, resolved_shell_name)."""
+    """选择平台 shell。返回 (argv, resolved_shell_name)。"""
     if os.name == "nt":
         exe = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
         return [exe, "-NoProfile", "-NonInteractive", "-Command", command], "powershell"
@@ -66,10 +64,10 @@ def _resolve_execution_plan(command: str) -> tuple[Sequence[str], str]:
 def _run_command_sync(
     command: str, timeout_seconds: int, workdir: Path
 ) -> tuple[subprocess.CompletedProcess, str]:
-    """Thin subprocess hook — tests monkeypatch this to avoid real execution."""
+    """薄 subprocess 钩子 —— 测试 monkeypatch 它以避免真实执行。"""
     plan, resolved_shell = _resolve_execution_plan(command)
-    # Windows cmd/PS output is often the system codepage (CP936/GBK); decoding
-    # as UTF-8 would mojibake non-ASCII. Fall back to the preferred encoding.
+    # Windows cmd/PS 输出常是系统代码页(CP936/GBK);按 UTF-8 解码
+    # 非 ASCII 会乱码。回退到首选编码。
     encoding = locale.getpreferredencoding(False) or "utf-8"
     result = subprocess.run(
         plan,
@@ -86,7 +84,7 @@ def _run_command_sync(
 def _run_command_background(
     command: str, workdir: Path, grace_seconds: float = 5.0
 ) -> tuple[int, str, str | None]:
-    """Start command detached; return (pid, resolved_shell, error_msg)."""
+    """分离启动命令;返回 (pid, resolved_shell, error_msg)。"""
     plan, resolved_shell = _resolve_execution_plan(command)
     proc = subprocess.Popen(
         plan,
@@ -101,7 +99,7 @@ def _run_command_background(
         if exit_code != 0:
             return proc.pid, resolved_shell, f"Process exited with code {exit_code}"
     except subprocess.TimeoutExpired:
-        pass  # still running after grace period -> considered started
+        pass  # 宽限期后仍在运行 -> 视为已启动
     return proc.pid, resolved_shell, None
 
 
@@ -113,12 +111,12 @@ async def command_exec(
     max_output_chars: int = 20000,
     background: bool = False,
 ) -> str:
-    """Run a shell command in the workspace and return its output as JSON.
+    """在 workspace 中运行 shell 命令,以 JSON 返回其输出。
 
-    Cross-platform: PowerShell on Windows, bash/sh on Unix. The `workdir` is
-    confined under the project workspace root. Set `background=True` to start
-    non-blocking (returns a pid). Output beyond `max_output_chars` is clipped
-    (0 = no limit).
+    跨平台:Windows 上用 PowerShell,Unix 上用 bash/sh。`workdir` 被限制在
+    项目 workspace 根目录下。设 `background=True` 以非阻塞方式启动
+    (返回一个 pid)。超过 `max_output_chars` 的输出会被截断
+    (0 = 不限量)。
     """
     command = (command or "").strip()
     if not command:

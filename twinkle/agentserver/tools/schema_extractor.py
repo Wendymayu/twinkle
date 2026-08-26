@@ -1,15 +1,15 @@
-"""Minimal hand-written schema extractor.
+"""手写的最小 schema 提取器。
 
-Turns a Python function's signature + docstring into the OpenAI
-function-calling `parameters` JSON schema. Pure stdlib, ~50 lines.
+把 Python 函数的签名 + docstring 转成 OpenAI function-calling 的
+`parameters` JSON schema。纯标准库,约 50 行。
 
-Supported type mapping:
+支持的类型映射:
   str -> string, int -> integer, float -> number, bool -> boolean,
-  list/List[...] -> array, dict/Dict[...] -> object (no properties).
-  Optional[X] / X | None -> unwrap X, mark non-required.
-Unknown types fall back to {"type": "string"}.
+  list/List[...] -> array, dict/Dict[...] -> object(无 properties)。
+  Optional[X] / X | None -> 解包 X,标记为非必需。
+未知类型回退为 {"type": "string"}。
 
-No per-param description parsing (YAGNI). Override via @tool(input_params=...).
+不做逐参数 description 解析(YAGNI)。需要覆盖时用 @tool(input_params=...)。
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ _TYPES_NONE = (type(None),)
 
 
 def _unwrap_optional(type_: Any) -> tuple[Any, bool]:
-    """Return (inner_type, is_optional). Detects Optional[X] / X | None."""
+    """返回 (inner_type, is_optional)。识别 Optional[X] / X | None。"""
     origin = get_origin(type_)
     if origin is typing.Union or origin is types.UnionType:
         args = [arg for arg in get_args(type_) if arg not in _TYPES_NONE]
@@ -52,7 +52,7 @@ def _type_to_schema(type_: Any) -> dict:
         return {"type": "object"}
     if inner is list:
         return {"type": "array"}
-    return {"type": "string"}  # unknown -> safe fallback
+    return {"type": "string"}  # 未知 -> 安全回退
 
 
 def _description_from_docstring(func: Callable) -> str:
@@ -60,12 +60,12 @@ def _description_from_docstring(func: Callable) -> str:
     if not doc:
         return ""
     first_para = doc.split("\n\n")[0].strip()
-    # collapse internal newlines to spaces
+    # 把内部换行折叠成空格
     return " ".join(first_para.split())
 
 
 def extract(func: Callable) -> tuple[str, str, dict]:
-    """Return (name, description, parameters) extracted from `func`."""
+    """返回从 `func` 提取的 (name, description, parameters)。"""
     name = func.__name__
     description = _description_from_docstring(func)
 
@@ -84,7 +84,7 @@ def extract(func: Callable) -> tuple[str, str, dict]:
         if param.default is not inspect.Parameter.empty and param.default is not None:
             schema["default"] = param.default
         else:
-            # Optional types (Optional[X] with no default) are not required.
+            # 无默认值的 Optional 类型(Optional[X])不是必需参数。
             _, is_optional = _unwrap_optional(type_)
             if not is_optional:
                 required.append(param_name)

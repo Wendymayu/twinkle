@@ -27,9 +27,9 @@ from twinkle.agentserver.permissions.models import ToolExecutionAuditEntry
 
 
 class AuditHook(AgentHook):
-    """Records every tool call's name/args/result/outcome to a JSONL audit file."""
+    """把每个 tool call 的 name/args/result/outcome 记入 JSONL 审计文件。"""
 
-    priority = 95  # after PermissionHook(100), before LoggingHook(10)
+    priority = 95  # 在 PermissionHook(100) 之后，LoggingHook(10) 之前
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class AuditHook(AgentHook):
         self._write(self._entry(
             ctx, outcome=outcome, error=self._truncate(str(exc), self._max_result())))
 
-    # --- config resolve (lazy,对齐 RepeatToolCallDetectorHook) ---
+    # --- config 解析（懒读，对齐 RepeatToolCallDetectorHook）---
 
     def _enabled(self) -> bool:
         # bool 字段不能 `or`(False or fallback 会误读 config),显式 None 判断。
@@ -83,7 +83,7 @@ class AuditHook(AgentHook):
     def _max_result(self) -> int:
         return self._max_result_override or _get_max_result_chars()
 
-    # --- helpers ---
+    # --- 辅助方法 ---
 
     def _entry(
         self,
@@ -121,7 +121,7 @@ class AuditHook(AgentHook):
         _append_jsonl(self._path(), entry.to_dict())
 
 
-# --- Config lazy reads (对齐 RepeatToolCallDetectorHook 的 _get_* 模式) ---
+# --- config 懒读（对齐 RepeatToolCallDetectorHook 的 _get_* 模式）---
 
 def _get_enabled() -> bool:
     from twinkle.config import settings

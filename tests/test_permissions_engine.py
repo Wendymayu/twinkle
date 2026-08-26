@@ -45,8 +45,8 @@ def test_persist_delegates(tmp_path):
     import asyncio
     asyncio.run(e.persist_allow_always(
         {"tool": "command_exec", "args": {"command": "git status"}}))
-    # Policy persists a "head + ' *'" glob pattern ("git status *"); a bare
-    # "git status" has no trailing argument and won't match, so check a
-    # command carrying an argument (policy.py is out of scope to change).
+    # Policy 持久化 "head + ' *'" glob 模式（"git status *"）；bare 的 "git status"
+    # 和带参数命令都会被 bless（policy.py 用 rstrip(" *") 精确匹配 bare head）。这里
+    # 用带参数的命令验证 override 生效（policy.py 不在本测试改动范围）。
     assert e.check("command_exec", {"command": "git status --short"},
                    "web", "s1", "r1").level == "allow"

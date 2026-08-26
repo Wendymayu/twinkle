@@ -1,6 +1,6 @@
-"""Team subsystem — TeamManager + Team + MEMBER_TOOL_WHITELIST.
+"""Team subsystem — TeamManager + Team + MEMBER_TOOL_WHITELIST。
 
-Phase 18: 1 leader + dynamic-role members, hardcoded tool whitelist, shared workspace.
+Phase 18：1 个 leader + 动态角色 member，硬编码 tool 白名单，共享 workspace。
 """
 
 from twinkle.agentserver.team.context import CURRENT_TEAM

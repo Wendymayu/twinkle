@@ -1,11 +1,11 @@
-"""SubagentExecutor — builds + runs an isolated child ReActAgent (black-box).
+"""SubagentExecutor —— 构建 + 运行一个隔离子 ReActAgent(黑盒)。
 
-execute_subagent: fresh child session, trimmed ToolManager (no spawn_subagent /
-memory-writes), reused LLMClient/SessionStore (the child always uses the
-parent's llm — no per-subagent model override), no step cap (busy-runaway
-backstopped by RepeatToolCallDetector CRITICAL force_finish + hard_timeout);
-runs child run_stream in a child asyncio task (ContextVar isolation) with soft/hard
-timeouts; returns the child's e2a.complete content as a SubagentResult.
+execute_subagent:全新子 session,裁剪过的 ToolManager(无 spawn_subagent /
+memory 写入),复用 LLMClient/SessionStore(子始终用父的 llm —— 无
+per-subagent 模型覆盖),无 step cap(忙跑由 RepeatToolCallDetector
+CRITICAL force_finish + hard_timeout 兜底);在子 asyncio task 中
+运行子的 run_stream(ContextVar 隔离),带 soft/hard 超时;把子的
+e2a.complete content 作为 SubagentResult 返回。
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from twinkle.agentserver.tools.builtin.subagent.models import (
     SubagentResult,
     SubagentTaskSpec,
 )
-# AgentRequest imported lazily inside methods to avoid circular import:
+# AgentRequest 在方法内延迟导入以避免循环 import:
 #   agent -> ToolManager -> subagent -> executor -> agent
 
 if TYPE_CHECKING:
@@ -60,11 +60,11 @@ class SubagentExecutor:
         config: "SubagentConfig",
         child_hooks: list["AgentHook"] | None = None,
     ) -> None:
-        self._llm = llm                    # child reuses the parent's LLMClient
+        self._llm = llm                    # 子复用父的 LLMClient
         self._store = store
         self._parent_tools = parent_tools
         self._config = config
-        self._child_hooks = child_hooks    # None -> default fresh list per child
+        self._child_hooks = child_hooks    # None -> 每个子用全新默认列表
 
     def _build_tool_manager(self) -> ToolManager:
         tool_manager = ToolManager()
@@ -85,12 +85,12 @@ class SubagentExecutor:
                 LoggingHook(), RepeatToolCallDetectorHook(), RetryHook(), RuntimeEnvHook(),
                 AuditHook()]
 
-    # --- build + run ---
+    # --- 构建 + 运行 ---
 
     def _build_child_agent(self) -> "ReActAgent":
-        from twinkle.agentserver.agent import ReActAgent, normal_base_sections  # lazy: avoid circular
+        from twinkle.agentserver.agent import ReActAgent, normal_base_sections  # 延迟:避免循环
         tool_manager = self._build_tool_manager()
-        # child identity = parent's base prompt (priority 10) + sub-agent addendum (priority 15)
+        # 子身份 = 父的 base prompt(priority 10)+ 子 agent 补充段(priority 15)
         base_sections = normal_base_sections() + [
             PromptSection("subagent_addendum", _SUBAGENT_ADDENDUM, priority=15)]
         return ReActAgent(self._llm, self._store, tool_manager,
@@ -98,21 +98,21 @@ class SubagentExecutor:
                           base_sections=base_sections)
 
     async def _drive_child(self, child_loop: "ReActAgent", child_request: "AgentRequest") -> str:
-        """Run child agent in a child task (ContextVar isolation); drain
-        frames via a queue; return the e2a.complete content. Black-box: chunk /
-        todo_update frames are discarded."""
+        """在子 task 中运行子 agent(ContextVar 隔离);经 queue
+        汇集 frame;返回 e2a.complete content。黑盒:chunk /
+        todo_update frame 被丢弃。"""
         queue: asyncio.Queue = asyncio.Queue()
 
         async def _run():
             try:
                 async for frame in child_loop.run(child_request):
                     await queue.put(frame)
-            except Exception as exc:       # child raised -> forward as a frame
+            except Exception as exc:       # 子抛异常 -> 作为 frame 转发
                 await queue.put(exc)
             finally:
-                await queue.put(None)       # sentinel
+                await queue.put(None)       # 哨兵
 
-        runner = asyncio.create_task(_run())   # context copy -> child's ContextVar.set don't leak
+        runner = asyncio.create_task(_run())   # context 副本 -> 子的 ContextVar.set 不外泄
         final = ""
         try:
             while True:
@@ -129,7 +129,7 @@ class SubagentExecutor:
                     final = frame.body.get("result", {}).get("content", "") or ""
                 elif frame.response_kind == "e2a.error":
                     raise RuntimeError(frame.body.get("error", "child agent error"))
-                # e2a.chunk / e2a.todo_update / e2a.ask -> discarded (black-box)
+                # e2a.chunk / e2a.todo_update / e2a.ask -> 丢弃(黑盒)
             if len(final) > self._config.max_result_chars:
                 final = final[: self._config.max_result_chars] + "\n…[truncated]"
             return final
@@ -139,21 +139,21 @@ class SubagentExecutor:
             try:
                 await asyncio.wait_for(runner, timeout=self._config.abort_timeout)
             except asyncio.CancelledError:
-                # expected: cancelling the runner propagates CancelledError back here.
-                # Any outer cancellation (e.g. hard_timeout) still resumes after this finally.
+                # 预期:取消 runner 会把 CancelledError 传回这里。
+                # 任何外部取消(如 hard_timeout)在此 finally 后仍会继续。
                 pass
             except asyncio.TimeoutError:
-                # cooperative-but-slow cleanup outlasted the window; the runner may be
-                # stuck in non-cancellable code (orphan risk). NOTE: a runner that swallows
-                # CancelledError hangs wait_for entirely — abort_timeout does NOT bound that;
-                # the real guarantee is the child's awaits being cancellable.
+                # 协作但缓慢的清理超出窗口;runner 可能卡在不可取消的
+                # 代码里(孤儿风险)。注意:吞掉 CancelledError 的 runner 会让
+                # wait_for 完全挂起 —— abort_timeout 并不约束这种情况;
+                # 真正的保证在于子的 await 是可取消的。
                 log.warning(
                     "subagent reap: runner did not finish cancellation within %.0fs "
                     "(orphan risk: stuck in non-cancellable code?)",
                     self._config.abort_timeout)
             except Exception as exc:
-                # defensive: _run forwards all Exception into frames, so this arm is rarely
-                # hit; log it rather than silently swallow a real bug in the reap path.
+                # 防御性:_run 把所有 Exception 转成 frame 转发,故此分支极少
+                # 命中;记日志而非静默吞掉 reap 路径里的真实 bug。
                 log.warning("subagent reap: runner raised unexpected error: %r", exc)
 
     async def execute_subagent(
@@ -165,7 +165,7 @@ class SubagentExecutor:
         session_id = f"{parent_session_id}__sub_{uuid.uuid4().hex[:8]}"
         await self._store.create_session(session_id)
         child_agent = self._build_child_agent()
-        from twinkle.agentserver.agent import AgentRequest  # lazy: avoid circular
+        from twinkle.agentserver.agent import AgentRequest  # 延迟:避免循环
         child_request = AgentRequest(
             session_id=session_id,
             request_id=f"{parent_request_id}__sub_{uuid.uuid4().hex[:8]}",

@@ -1,7 +1,6 @@
-"""End-to-end smoke: connect to the running gateway (:19000), send a
-multi-step query that should trigger todo_create, and print every event
-(chat.delta / chat.final / todo.update) received. Proves the full
-backend->gateway->browser wire for todo progress."""
+"""端到端冒烟测试：连接运行中的 gateway (:19000)，发送一个应触发 todo_create 的
+多步 query，并打印收到的每个事件（chat.delta / chat.final / todo.update）。
+验证 todo 进度的完整 backend->gateway->browser 链路。"""
 import asyncio
 import json
 import time

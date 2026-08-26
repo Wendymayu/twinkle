@@ -1,23 +1,23 @@
-"""Integration test: ppt workflow with mock LLM."""
+"""集成测试：用 mock LLM 跑 ppt workflow。"""
 import asyncio
 import json
 import pytest
 from pathlib import Path
 
 
-# Bundled workflow lives inside the engine package at
-# twinkle/agentserver/workflow/ppt/root.py (seeded into
-# <WORKSPACE>/workflows/ppt/root.py by ensure_workspace_dir at startup).
+# 内置 workflow 位于 engine 包内
+# twinkle/agentserver/workflow/ppt/root.py（启动时由 ensure_workspace_dir 播种到
+# <WORKSPACE>/workflows/ppt/root.py）。
 _BUNDLED_ROOT_PY = (
     Path(__file__).resolve().parent.parent
     / "twinkle" / "agentserver" / "workflow" / "ppt" / "root.py"
 )
 
 
-# --- Mock LLM that returns context-aware responses ---
+# --- 按上下文返回响应的 mock LLM ---
 
 async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
-    """Mock LLM: returns structured responses based on prompt content."""
+    """Mock LLM：根据 prompt 内容返回结构化响应。"""
     import json as _json
     import re as _re
 
@@ -55,7 +55,7 @@ async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
 
 
 class FakeLLM:
-    """Duck-type LLMClient — just enough for _call_llm_wrapper."""
+    """鸭子类型的 LLMClient —— 仅满足 _call_llm_wrapper 的需要。"""
     async def stream(self, messages, tools=None):
         from twinkle.agentserver.llm_client import TextDelta
         prompt = messages[-1]["content"]
@@ -75,21 +75,21 @@ def _make_executor():
 
 
 def _load_pptx_workflow():
-    """Load the ppt root.py from the bundled package location
-    (twinkle/agentserver/workflow/ppt/root.py). Seeded into
-    <WORKSPACE>/workflows/ppt/root.py at startup; tests read the bundled source
-    directly so they run on a fresh machine / CI without install."""
+    """从内置包路径加载 ppt root.py
+    （twinkle/agentserver/workflow/ppt/root.py）。启动时播种到
+    <WORKSPACE>/workflows/ppt/root.py；测试直接读内置源码，这样在全新机器 / CI
+    上无需安装即可运行。"""
     assert _BUNDLED_ROOT_PY.is_file(), f"bundled workflow missing: {_BUNDLED_ROOT_PY}"
     return _BUNDLED_ROOT_PY.read_text(encoding="utf-8")
 
 
 def test_seed_bundled_workflows_copies_ppt(tmp_path):
-    """ensure_workspace_dir's workflow seeder copies the bundled ppt workflow
-    (twinkle/agentserver/workflow/ppt/) -> <ws>/workflows/ppt/."""
+    """ensure_workspace_dir 的 workflow seeder 会把内置 ppt workflow
+    （twinkle/agentserver/workflow/ppt/）复制到 <ws>/workflows/ppt/。"""
     from twinkle.workspace import _seed_bundled_workflows
     workflows_dir = tmp_path / "workflows"
     workflows_dir.mkdir()
-    # Fresh target: ppt is copied from the bundled package workflow/ppt/.
+    # 全新目标：ppt 从内置包 workflow/ppt/ 复制过来。
     _seed_bundled_workflows(str(workflows_dir))
     seeded = workflows_dir / "ppt" / "root.py"
     assert seeded.is_file()
@@ -97,7 +97,7 @@ def test_seed_bundled_workflows_copies_ppt(tmp_path):
 
 
 def test_seed_bundled_workflows_skips_existing(tmp_path):
-    """If <ws>/workflows/ppt/ already exists, seeder must NOT overwrite (preserve user edits)."""
+    """若 <ws>/workflows/ppt/ 已存在，seeder 不得覆盖（保留用户改动）。"""
     from twinkle.workspace import _seed_bundled_workflows
     workflows_dir = tmp_path / "workflows"
     (workflows_dir / "ppt").mkdir(parents=True)
@@ -108,7 +108,7 @@ def test_seed_bundled_workflows_skips_existing(tmp_path):
 
 
 def test_pptx_workflow_validates():
-    """The ppt root.py should pass AST validation."""
+    """ppt 的 root.py 应通过 AST 校验。"""
     from twinkle.agentserver.workflow.validator import PlanCodeValidator
     plan_code = _load_pptx_workflow()
     errors = PlanCodeValidator().validate(plan_code)
@@ -116,7 +116,7 @@ def test_pptx_workflow_validates():
 
 
 def test_pptx_workflow_sandbox_loads():
-    """The ppt root.py should load in the sandbox namespace."""
+    """ppt 的 root.py 应能在 sandbox namespace 中加载。"""
     from twinkle.agentserver.workflow.sandbox import build_namespace
     plan_code = _load_pptx_workflow()
     namespace = build_namespace()
@@ -131,11 +131,11 @@ def test_pptx_workflow_sandbox_loads():
 
 
 def test_pptx_workflow_e2e_no_export():
-    """Full pipeline — mock LLM for content, real tools for file I/O and export."""
+    """完整管道 —— 用 mock LLM 生成内容，用真实 tools 做文件 I/O 和导出。"""
     plan_code = _load_pptx_workflow()
     executor = _make_executor()
 
-    # Wire up real ToolManager so command_exec + write_file work
+    # 接上真实 ToolManager，让 command_exec + write_file 可用
     from twinkle.agentserver.tools import tool_manager
     executor._tools = tool_manager()
 
@@ -148,7 +148,7 @@ def test_pptx_workflow_e2e_no_export():
 
 
 def test_pptx_workflow_extract_json():
-    """Verify all stages produce correct output with different inputs."""
+    """验证各阶段在不同输入下都能产出正确结果。"""
     plan_code = _load_pptx_workflow()
     executor = _make_executor()
 
@@ -163,11 +163,11 @@ def test_pptx_workflow_extract_json():
 
 
 def test_pptx_workflow_spec_mode():
-    """Spec-mode: agent passes structured inputs (topic/audience/page_count/outline)
-    with NO 'text' key. Workflow must honor them, skip LLM extraction, and produce
-    a non-empty topic + a real (non-dotfile) pptx filename.
+    """Spec 模式：agent 传入结构化输入（topic/audience/page_count/outline），
+    不含 'text' 键。Workflow 必须遵从这些输入、跳过 LLM 抽取，并产出
+    非空 topic + 真实（非 dotfile）的 pptx 文件名。
 
-    Regression for the empty-topic / '.pptx' hidden-dotfile bug.
+    这是空 topic / '.pptx' 隐藏 dotfile bug 的回归测试。
     """
     plan_code = _load_pptx_workflow()
     executor = _make_executor()
@@ -192,7 +192,7 @@ def test_pptx_workflow_spec_mode():
     assert result["topic"] == "AI Agent 从入门到精通", f"topic lost: {result.get('topic')!r}"
     pptx_path = result["pptx_path"]
     assert pptx_path, "pptx_path missing"
-    # No empty/hidden dotfile basename — must have a real name before .pptx
+    # 文件名不得为空或隐藏 dotfile —— .pptx 前必须有真实名字
     import os as _os
     basename = _os.path.basename(pptx_path)
     assert basename not in (".pptx", ""), f"empty/hidden filename: {pptx_path!r}"
@@ -201,7 +201,7 @@ def test_pptx_workflow_spec_mode():
 
 
 def test_pptx_workflow_exported_file_exists():
-    """End-to-end: the .pptx file is actually written to disk and non-empty."""
+    """端到端：.pptx 文件确实写到了磁盘且非空。"""
     import os as _os
     plan_code = _load_pptx_workflow()
     executor = _make_executor()

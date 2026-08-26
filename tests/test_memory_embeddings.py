@@ -43,7 +43,7 @@ def test_openai_compatible_parses_response(monkeypatch):
         base_url="https://api.example.com/v1", api_key="sk-x",
         model="text-embedding-3-small", dims=3)
     out = p.embed(["foo", "bar"])
-    assert out == [[0.4, 0.5, 0.6], [0.1, 0.2, 0.3]]  # sorted by index
+    assert out == [[0.4, 0.5, 0.6], [0.1, 0.2, 0.3]]  # 按 index 排序
     assert calls["url"] == "https://api.example.com/v1/embeddings"
     assert calls["headers"]["Authorization"] == "Bearer sk-x"
     assert calls["json"]["model"] == "text-embedding-3-small"

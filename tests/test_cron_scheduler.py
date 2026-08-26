@@ -1,4 +1,4 @@
-"""CronSchedulerService tests (skeleton + wake/push/loop)."""
+"""CronSchedulerService 测试（骨架 + wake/push/loop）。"""
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +18,7 @@ def run(coro):
 
 
 class FakeAgentClient:
-    """Records envelopes; returns scripted E2AResponse stream per request_id."""
+    """记录 envelope；按 request_id 返回脚本化的 E2AResponse 流。"""
     def __init__(self):
         self.sent = []          # 所有发出的 envelope
         self._scripts = {}      # request_id -> list[E2AResponse]
@@ -40,7 +40,7 @@ class FakeAgentClient:
 
 
 class FakeMessageHandler:
-    """Captures enqueue_outbound messages."""
+    """捕获 enqueue_outbound 消息。"""
     def __init__(self):
         self.outbound = []
 

@@ -17,7 +17,7 @@ def _fn_optional(a: str, b: Optional[int] = None) -> str:
 
 
 def _fn_list_optional(a: str, tags: Optional[list] = None) -> str:
-    """Has a list param."""
+    """带一个 list 参数。"""
     return ""
 
 
@@ -26,7 +26,7 @@ def _fn_nodecs(x: str) -> str:
 
 
 def _fn_floats(rate: float, enabled: bool = False) -> str:
-    """A float and a bool."""
+    """一个 float 和一个 bool。"""
     return ""
 
 
@@ -70,7 +70,7 @@ def test_optional_unwrapped_and_not_required() -> None:
     _, _, params = extract(_fn_optional)
     props = params["properties"]
     assert props["a"] == {"type": "string"}
-    assert props["b"] == {"type": "integer"}  # Optional[int] -> integer, no default here
+    assert props["b"] == {"type": "integer"}  # Optional[int] -> integer，此处无 default
     assert params["required"] == ["a"]
 
 
@@ -90,7 +90,7 @@ def test_float_and_bool_types() -> None:
 
 def test_pep604_union_none_unwrapped_and_not_required() -> None:
     def _fn(a: str, b: int | None = None) -> str:
-        """pep 604 optional"""
+        """pep 604 可选参数"""
         return ""
 
     _, _, params = extract(_fn)

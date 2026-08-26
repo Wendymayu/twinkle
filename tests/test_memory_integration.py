@@ -15,28 +15,28 @@ def memory_enabled(tmp_path):
 
 
 def test_cross_session_recall_via_toolmanager(memory_enabled):
-    """Session A writes a fact; Session B searches and the tool returns the hit.
-    Mirrors the spec acceptance: A.write -> B.search hits."""
+    """Session A 写入一条事实；Session B 搜索，tool 返回命中。
+    对齐 spec 验收：A.write -> B.search 命中。"""
     tm = tool_manager()
-    # Session A: write
+    # Session A：写入
     out = asyncio.run(tm.execute("write_memory",
                                  {"path": "MEMORY.md",
                                   "content": "用户偏好用中文交流。",
                                   "append": True}))
     assert "Stored" in out
 
-    # Session B (separate process would share the same MEMORY_DIR on disk): search
-    # Query is a substring of the stored fact (FTS-only fixture: no vector leg,
-    # so recall is substring/exact-match, not semantic — jiuwenswarm's vector
-    # leg handles semantic CJK recall; the FTS-only degrade path can't).
+    # Session B（独立进程会共享同一 MEMORY_DIR 磁盘）：搜索
+    # query 是所存事实的子串（FTS-only fixture：无 vector 腿，故召回靠
+    # 子串/精确匹配，非语义——jiuwenswarm 的 vector 腿负责语义 CJK 召回；
+    # FTS-only 降级路径做不到）。
     hits = asyncio.run(tm.execute("memory_search", {"query": "用户偏好"}))
-    assert "偏好" in hits  # the fact is recalled as a tool_result string
+    assert "偏好" in hits  # 事实作为 tool_result 字符串被召回
 
 
 def test_hook_injects_then_tool_answers(memory_enabled):
-    """MemoryHook.before_invoke stashes the strategy section to frozen_sections
-    (loop applies it to the prefix); the memory_search tool then returns a hit —
-    proving hook + tool cooperate end-to-end under the per-invoke design."""
+    """MemoryHook.before_invoke 把策略 section stash 到 frozen_sections
+    （loop 会把它应用到 prefix）；memory_search tool 随后返回命中——
+    证明 hook + tool 在 per-invoke 设计下端到端协作。"""
     tm = tool_manager()
     asyncio.run(tm.execute("write_memory",
                            {"path": "MEMORY.md",
@@ -46,12 +46,12 @@ def test_hook_injects_then_tool_answers(memory_enabled):
                       inputs=InvokeInputs(query="上次说的架构是啥", mode=""),
                       session_id="s", request_id="r")
     asyncio.run(MemoryHook().before_invoke(ctx))
-    # hook stashed the strategy section (contains memory_search hint) to frozen_sections
+    # hook 把策略 section（含 memory_search 提示）stash 到 frozen_sections
     sections = ctx.extra.get("frozen_sections", [])
     strat = next((s for s in sections if s.name == "memory_strategy"), None)
     assert strat is not None
     assert "memory_search" in strat.content
-    # and the tool actually returns a hit for the populated store
+    # 且 tool 对有数据的 store 确实返回命中
     hits = asyncio.run(tm.execute("memory_search", {"query": "架构"}))
     assert "WebSocket" in hits
 
@@ -62,4 +62,4 @@ def test_empty_store_hook_noop(memory_enabled):
                       inputs=InvokeInputs(query="hi", mode=""),
                       session_id="s", request_id="r")
     asyncio.run(MemoryHook().before_invoke(ctx))
-    assert "frozen_sections" not in ctx.extra  # empty store → no-op,不创建 key
+    assert "frozen_sections" not in ctx.extra  # 空 store → no-op，不创建 key

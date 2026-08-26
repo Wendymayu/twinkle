@@ -8,7 +8,7 @@ from twinkle.agentserver.tools.manager import ToolManager
 
 
 class _RecordingLLM:
-    """Scripted LLM that records the messages it received per call."""
+    """脚本式 LLM,记录每次调用收到的 messages。"""
 
     def __init__(self, scripts):
         self._scripts = scripts

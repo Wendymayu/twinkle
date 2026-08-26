@@ -1,7 +1,6 @@
-// Minimal WebSocket client: sends {type:req,id,method,params}, correlates
-// streamed chat.delta / chat.final events by request_id, surfaces
-// todo.update events, and resolves session/history RPCs via a `request()`
-// promise that awaits the matching `result` event.
+// 精简 WebSocket client：发送 {type:req,id,method,params}，按 request_id 关联
+// 流式 chat.delta / chat.final 事件，上报 todo.update 事件，并通过 `request()`
+// promise 解析 session/history RPC——该 promise 等待匹配的 `result` 事件。
 
 export type DeltaHandler = (delta: string, requestId: string) => void
 export type FinalHandler = (text: string, requestId: string) => void
@@ -49,8 +48,8 @@ export class WebClient {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     this.ws = new WebSocket(`${proto}://${location.host}/ws`)
     this.ws.onopen = () => {
-      // sticky session id: reuse the one from localStorage so a page reload
-      // reattaches to the same session (backend cache or cold-start hydration).
+      // sticky session id：复用 localStorage 中的值，使页面刷新后
+      // 重新挂接到同一 session（后端缓存或冷启动补水）。
       const saved = localStorage.getItem(SESSION_KEY)
       this.sessionId = saved && saved.startsWith('sess_') ? saved : 'sess_' + crypto.randomUUID()
       localStorage.setItem(SESSION_KEY, this.sessionId)
@@ -80,7 +79,7 @@ export class WebClient {
 
   private handle(frame: any): void {
     if (frame.type === 'event' && frame.event === 'connection.ack') return
-    if (frame.type === 'res') return // immediate ack — nothing to surface
+    if (frame.type === 'res') return // 即时 ack——无需上报
     if (frame.type === 'event') {
       const rid = frame.request_id
       const content = frame.payload?.content ?? ''
@@ -118,7 +117,7 @@ export class WebClient {
     return id
   }
 
-  /** Fire an RPC (session.* / history.get) and resolve with the `result` payload. */
+  /** 发起 RPC（session.* / history.get）并以 `result` payload 解析。 */
   request(method: string, params: Record<string, any> = {}, timeoutMs: number = 15000): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = this.send(method, params)
@@ -134,12 +133,11 @@ export class WebClient {
     })
   }
 
-  /** Send an approval response without polluting lastRequestId. The resumed
-   * chat.delta / chat.final frames carry the ORIGINAL request_id R; if this
-   * method updated lastRequestId to its own id (R2), those frames would be
-   * dropped by the rid !== getLastRequestId() guard in the delta/final
-   * handlers. So we bypass send(), build our own id, and register a pending
-   * resolver keyed by R2 — the gateway returns an e2a.result ack on R2. */
+  /** 发送 approval 响应而不污染 lastRequestId。恢复后的
+   * chat.delta / chat.final 帧携带原始 request_id R；若此方法把
+   * lastRequestId 更新为自己的 id（R2），这些帧会被 delta/final
+   * handler 中 rid !== getLastRequestId() 守卫丢弃。因此绕过 send()，自建 id，
+   * 并注册以 R2 为键的 pending resolver——gateway 在 R2 上返回 e2a.result ack。 */
   respond(
     approvalId: string,
     decision: ApprovalDecision,
@@ -166,7 +164,7 @@ export class WebClient {
     })
   }
 
-  /** Check for pending approvals on the current session (used after reconnection). */
+  /** 检查当前 session 的待处理 approval（用于重连后）。 */
   async checkPendingApprovals(sessionId: string): Promise<any> {
     return this.request('approval.check_pending', { session_id: sessionId })
   }

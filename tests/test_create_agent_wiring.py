@@ -1,11 +1,11 @@
-"""create_agent wires PermissionHook when explicitly passed."""
+"""create_agent 在显式传入时装配 PermissionHook。"""
 def test_create_agent_wires_permission(monkeypatch):
     import importlib
     import twinkle.config as cfg
 
     importlib.reload(cfg)
-    # Enable via the config constant (TWINKLE_PERMISSIONS env was removed in v1;
-    # permission_engine() reads PERMISSIONS_ENABLED fresh at call time).
+    # 经 config 常量开启（TWINKLE_PERMISSIONS env 在 v1 已移除；
+    # permission_engine() 在调用时现读 PERMISSIONS_ENABLED）。
     monkeypatch.setattr(cfg, "PERMISSIONS_ENABLED", True)
     from twinkle.agentserver.sessions import SessionStore, session_store
     from twinkle.agentserver.server import create_agent
@@ -20,14 +20,13 @@ def test_create_agent_wires_permission(monkeypatch):
 
 
 def test_create_agent_auto_wires_subagent_and_compression():
-    """Minimal AgentLoop (no explicit hooks) auto-wires:
+    """最小 AgentLoop（无显式 hooks）自动装配：
     - SubagentContextHook (BEFORE_INVOKE)
     - ContextCompressionHook (BEFORE_MODEL_CALL)
     - MemoryFlushHook (BEFORE_MODEL_CALL)
     - ContextOverflowRecoveryHook (ON_MODEL_EXCEPTION, AFTER_MODEL_CALL)
     - RepeatToolCallDetectorHook (ON_TOOL_EXCEPTION, BEFORE_MODEL_CALL)
-    The rest (retry/permission/skill/memory/logging) are caller-passed (no deps),
-    not auto-wired."""
+    其余（retry/permission/skill/memory/logging）由调用方传入（无依赖），不自动装配。"""
     from twinkle.agentserver.sessions import session_store
     from twinkle.agentserver.server import create_agent
     from twinkle.agentserver.hooks.base import HookEvent
@@ -52,9 +51,8 @@ def test_create_agent_auto_wires_subagent_and_compression():
 
 
 def test_create_agent_wires_retry_when_caller_passed():
-    """RetryHook has no deps (like PermissionHook/SkillHook) so it's
-    caller-passed; create_agent wires it when passed, registering
-    ON_MODEL_EXCEPTION + ON_TOOL_EXCEPTION."""
+    """RetryHook 无依赖（同 PermissionHook/SkillHook）故由调用方传入；
+    create_agent 在传入时装配它，注册 ON_MODEL_EXCEPTION + ON_TOOL_EXCEPTION。"""
     from twinkle.agentserver.sessions import session_store
     from twinkle.agentserver.server import create_agent
     from twinkle.agentserver.hooks.builtin import RetryHook

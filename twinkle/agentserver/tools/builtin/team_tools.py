@@ -1,11 +1,10 @@
-"""team tools — thin wrappers that read the Team from ContextVar.
+"""team tools —— 读 Team(来自 ContextVar)的薄封装。
 
-Each tool: reads CURRENT_TEAM → calls a Team/TeamTaskStore method → formats.
-delegate_to_member delegates to a member agent (independent, no shared history);
-the 7 task/message tools wrap TeamTaskStore + member inbox for shared-queue
-coordination. member_name for claim/complete auto-derives from
-CURRENT_MEMBER_NAME (set in _drive_member, Task 7); before that, callers pass
-it explicitly.
+每个 tool:读 CURRENT_TEAM → 调一个 Team/TeamTaskStore 方法 → 格式化。
+delegate_to_member 委派给一个 member agent(独立,无共享历史);
+7 个 task/消息工具包在 TeamTaskStore + member 信箱之上做共享 queue
+协作。claim/complete 的 member_name 自动取自 CURRENT_MEMBER_NAME
+(在 _drive_member 中设置,Task 7);在那之前,调用方显式传入。
 """
 
 from __future__ import annotations

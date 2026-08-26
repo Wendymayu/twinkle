@@ -1,4 +1,4 @@
-"""Tests for HookManager — register, unregister, priority ordering, execute."""
+"""HookManager 测试 — register、unregister、priority 排序、execute。"""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +13,7 @@ from twinkle.agentserver.hooks.manager import HookManager
 
 
 class _RecorderHook(AgentHook):
-    """Hook that records which events it received, in order."""
+    """记录收到的事件及其顺序的 hook。"""
     priority = 50
 
     def __init__(self):
@@ -60,7 +60,7 @@ def test_register_hook_adds_callbacks():
     assert mgr.has_callbacks_for(HookEvent.AFTER_INVOKE)
     assert mgr.has_callbacks_for(HookEvent.BEFORE_MODEL_CALL)
     assert mgr.has_callbacks_for(HookEvent.AFTER_TOOL_CALL)
-    # Events the hook doesn't override — no callbacks
+    # hook 未重写的事件 — 无 callbacks
     assert not mgr.has_callbacks_for(HookEvent.BEFORE_TOOL_CALL)
 
 
@@ -98,7 +98,7 @@ def test_unregister_hook_calls_uninit():
 
 
 def test_execute_calls_hooks_in_priority_order():
-    """Higher priority runs first."""
+    """高 priority 先执行。"""
     mgr = HookManager()
     high = _HighPriHook()
     low = _LowPriHook()
@@ -112,13 +112,13 @@ def test_execute_calls_hooks_in_priority_order():
         request_id="r1",
     )
     asyncio.run(mgr.execute(HookEvent.BEFORE_INVOKE, ctx))
-    # high(90) should run before low(10)
+    # high(90) 应在 low(10) 之前执行
     assert high.calls == ["high:before_invoke"]
     assert low.calls == ["low:before_invoke"]
 
 
 def test_execute_no_hooks_is_noop():
-    """Executing an event with no registered hooks should not error."""
+    """执行没有注册 hook 的事件不应报错。"""
     mgr = HookManager()
     ctx = HookContext(
         agent=None,
@@ -128,28 +128,28 @@ def test_execute_no_hooks_is_noop():
         request_id="r1",
     )
     asyncio.run(mgr.execute(HookEvent.BEFORE_INVOKE, ctx))
-    # No error, ctx unchanged
+    # 无报错,ctx 不变
 
 
 def test_execute_updates_ctx_event():
-    """execute() should set ctx.event to the event being triggered."""
+    """execute() 应把 ctx.event 设为正在触发的事件。"""
     mgr = HookManager()
     h = _RecorderHook()
     mgr.register_hook(h)  # sync
     ctx = HookContext(
         agent=None,
-        event=HookEvent.BEFORE_INVOKE,  # initial event
+        event=HookEvent.BEFORE_INVOKE,  # 初始 event
         inputs=InvokeInputs(query="hi", envelope=None),
         session_id="s1",
         request_id="r1",
     )
     asyncio.run(mgr.execute(HookEvent.BEFORE_MODEL_CALL, ctx))
-    # The hook's before_model_call should have been called
+    # hook 的 before_model_call 应已被调用
     assert h.calls == ["before_model_call"]
 
 
 def test_execute_fail_soft_continues_after_exception():
-    """One failing callback should not stop others from running."""
+    """一个失败的 callback 不应阻止其他 callback 执行。"""
     class FailingHook(AgentHook):
         priority = 90
 
@@ -177,5 +177,5 @@ def test_execute_fail_soft_continues_after_exception():
         request_id="r1",
     )
     asyncio.run(mgr.execute(HookEvent.BEFORE_INVOKE, ctx))
-    # Safe hook should still have been called despite failing hook
+    # 尽管有 hook 失败,safe hook 仍应被调用
     assert safe.calls == ["safe:before_invoke"]

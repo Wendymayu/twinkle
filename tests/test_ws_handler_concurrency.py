@@ -13,7 +13,7 @@ from twinkle.e2a.models import E2AEnvelope, E2AResponse
 
 
 class _SuspendingLoop:
-    """Yields e2a.ask, awaits the registry Future, then yields e2a.complete."""
+    """yield e2a.ask，await registry 的 Future，再 yield e2a.complete。"""
     def __init__(self):
         self.requests = []
         self.session_store = None
@@ -41,23 +41,23 @@ def test_approval_respond_resumes_suspended_stream(free_port):
         try:
             uri = f"ws://127.0.0.1:{free_port}"
             async with connect(uri) as ws:
-                await ws.recv()  # connection.ack first
-                # 1. send chat.send
+                await ws.recv()  # 先收 connection.ack
+                # 1. 发送 chat.send
                 await ws.send(json.dumps({
                     "protocol_version": "1.0", "request_id": "R", "channel": "web",
                     "session_id": "s1", "method": "chat.send",
                     "params": {"query": "hi"}, "timestamp": 0.0}))
-                # 2. expect e2a.ask (is_final=false)
+                # 2. 期望 e2a.ask (is_final=false)
                 frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                 assert frame["response_kind"] == "e2a.ask"
                 aid = frame["body"]["approval_id"]
-                # 3. send approval.respond (R2) while R is suspended
+                # 3. 在 R 挂起期间发送 approval.respond (R2)
                 await ws.send(json.dumps({
                     "protocol_version": "1.0", "request_id": "R2", "channel": "web",
                     "session_id": "s1", "method": "approval.respond",
                     "params": {"approval_id": aid, "decision": "allow",
                                "original_request_id": "R"}, "timestamp": 0.0}))
-                # 4. expect ack (R2, e2a.result) then resumed complete (R)
+                # 4. 期望 ack (R2, e2a.result) 随后是恢复后的 complete (R)
                 frames = []
                 while len(frames) < 2:
                     raw = await asyncio.wait_for(ws.recv(), timeout=10)

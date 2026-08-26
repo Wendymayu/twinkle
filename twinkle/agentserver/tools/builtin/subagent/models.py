@@ -1,8 +1,8 @@
-"""Subagent data models + excluded-tool set + soft-timeout marker.
+"""Subagent 数据模型 + 排除工具集 + 软超时标记。
 
-EXCLUDED_TOOLS is the recursion + capability guard: the child's ToolManager
-copies the parent's tools minus this set. spawn_subagent => no recursion
-(single layer); write_memory/edit_memory => child memory is read-only.
+EXCLUDED_TOOLS 是递归 + 能力守卫:子的 ToolManager 从父的工具中
+减去此集合。spawn_subagent => 无递归(单层);write_memory/edit_memory
+=> 子的 memory 只读。
 """
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from pydantic import BaseModel
 
 
 class SoftTimeoutError(Exception):
-    """No child streaming activity for soft_timeout seconds."""
+    """子 agent 流式活动静默已 soft_timeout 秒。"""
 
 
 EXCLUDED_TOOLS: set[str] = {
-    "spawn_subagent",          # recursion guard: child cannot delegate
-    "write_memory",            # child memory is read-only
+    "spawn_subagent",          # 递归守卫:子不能再委派
+    "write_memory",            # 子的 memory 只读
     "edit_memory",
 }
 

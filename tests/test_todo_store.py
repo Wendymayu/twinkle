@@ -31,7 +31,7 @@ def test_create_then_list(todo_store) -> None:
     assert len(listed) == 2
     assert [t.subject for t in listed] == ["a", "b"]
     assert all(t.status == "pending" for t in listed)
-    assert all(t.id for t in listed)  # non-empty UUIDs
+    assert all(t.id for t in listed)  # UUID 非空
 
 
 def test_create_returns_tasks_with_ids(todo_store) -> None:
@@ -41,7 +41,7 @@ def test_create_returns_tasks_with_ids(todo_store) -> None:
     tasks = asyncio.run(run())
     assert len(tasks) == 2
     assert tasks[0].subject == "alpha"
-    assert tasks[0].id  # UUID assigned
+    assert tasks[0].id  # UUID 已分配
     assert tasks[0].created_at > 0
 
 
@@ -122,7 +122,7 @@ def test_update_metadata_merge_style(todo_store) -> None:
 def test_update_blocked_by_warning(todo_store) -> None:
     async def run():
         tasks = await todo_store.create("s1", ["a", "b"], sequential=True)
-        # b is blocked by a; marking b as in_progress should warn
+        # b 被 a blocked;把 b 标为 in_progress 应给出 warning
         task, warning = await todo_store.update("s1", tasks[1].id, status="in_progress")
         return task, warning
 

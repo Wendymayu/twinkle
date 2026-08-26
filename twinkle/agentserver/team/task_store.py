@@ -33,7 +33,7 @@ class TeamTaskStore:
         return self._store._find_by_id(tasks, task_id)
 
     def _met_blocked_by(self, tasks: list[TodoTask], task_id: str) -> TodoTask | None:
-        """return the task if it's completed, else None(用于依赖校验)。"""
+        """若该 task 已完成则返回它，否则返回 None（用于依赖校验）。"""
         t = self._find(tasks, task_id)
         return t if (t is not None and t.status == "completed") else None
 
@@ -51,7 +51,7 @@ class TeamTaskStore:
             visited.discard(dep)
         return False
 
-    # ── public API ──
+    # ── 公共 API ──
 
     async def create_task(self, subject: str,
                           blocked_by: list[str] | None = None) -> TodoTask:

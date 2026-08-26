@@ -1,11 +1,11 @@
-"""Workflow tool — execute_workflow entry point + WorkflowContextHook.
+"""Workflow tool — execute_workflow 入口 + WorkflowContextHook。
 
-The @tool function reads the WorkflowExecutor from the workflow_executor_ctx
-ContextVar (set by WorkflowContextHook before each ReAct iteration). The hook
-is auto-wired in build_agent_loop, mirroring SubagentContextHook/SubagentExecutor.
+@tool 函数从 workflow_executor_ctx ContextVar 读取 WorkflowExecutor
+（由 WorkflowContextHook 在每次 ReAct 迭代前设置）。该 hook 在
+build_agent_loop 中自动接入，对照 SubagentContextHook/SubagentExecutor。
 
-The tool description is dynamically generated at registration time to list
-available workflows, so the LLM knows which ones it can call.
+tool 描述在注册时动态生成，列出可用 workflow，
+以便 LLM 知道可以调用哪些。
 """
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ if TYPE_CHECKING:
 
 
 def _scan_workflows() -> dict[str, str]:
-    """Scan <WORKSPACE>/workflows/*/root.py for available workflows.
+    """扫描 <WORKSPACE>/workflows/*/root.py 获取可用 workflow。
 
-    Returns: {workflow_name: description_line} for tool description.
+    返回 {workflow_name: description_line}，用于 tool 描述。
     """
     try:
         from twinkle.config import settings
@@ -43,8 +43,8 @@ def _scan_workflows() -> dict[str, str]:
         root_py = d / "root.py"
         if not root_py.is_file():
             continue
-        # Extract first non-empty, non-comment line as description
-        # Skips """ lines (module docstring delimiters) but keeps the docstring content
+        # 提取第一个非空、非注释行作为描述
+        # 跳过 """ 行（模块 docstring 定界符），但保留 docstring 内容
         desc = d.name
         try:
             first_line = ""
@@ -52,16 +52,16 @@ def _scan_workflows() -> dict[str, str]:
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
                     continue
-                # Skip docstring delimiters (""" or '''), keep content lines
+                # 跳过 docstring 定界符（""" 或 '''），保留内容行
                 if stripped.startswith('"""') or stripped.startswith("'''"):
-                    # Line like """Description text""" — extract the inner text
+                    # 形如 """描述文本""" 的行 — 提取内部文本
                     inner = stripped[3:]
                     if inner.endswith('"""') or inner.endswith("'''"):
                         inner = inner[:-3]
                     inner = inner.strip()
                     if inner:
                         first_line = inner
-                    # else: bare opening """ — skip, next line is content
+                    # 否则：裸 """ 开头 — 跳过，下一行是内容
                     break
                 first_line = stripped
                 break
@@ -74,7 +74,7 @@ def _scan_workflows() -> dict[str, str]:
 
 
 def _build_tool_description() -> str:
-    """Build dynamic tool description listing available workflows."""
+    """构建动态 tool 描述，列出可用 workflow。"""
     workflows = _scan_workflows()
     if not workflows:
         return "执行预定义的 Workflow，用于结构化多步骤任务。（当前无可用 workflow）"
@@ -109,16 +109,16 @@ def _build_tool_description() -> str:
     },
 )
 async def execute_workflow(workflow_name: str, inputs: str = "{}") -> str:
-    """Dynamically replaced — see _build_tool_description()."""
+    """动态替换 — 见 _build_tool_description()。"""
     executor = workflow_executor_ctx.get()
     if executor is None:
         return "Error: WorkflowExecutor 未初始化"
 
-    # Validate workflow_name — prevent path traversal
+    # 校验 workflow_name — 防止路径穿越
     if not re.match(r"^[a-zA-Z0-9_-]+$", workflow_name):
         return f"Error: invalid workflow name: {workflow_name}"
 
-    # Load plan_code from <WORKSPACE>/workflows/<workflow_name>/root.py
+    # 从 <WORKSPACE>/workflows/<workflow_name>/root.py 加载 plan_code
     from twinkle.config import settings
     workspace_dir = settings.workspace.dir
     workflows_root = (Path(workspace_dir) / "workflows").resolve()
@@ -130,13 +130,13 @@ async def execute_workflow(workflow_name: str, inputs: str = "{}") -> str:
 
     plan_code = plan_path.read_text(encoding="utf-8")
 
-    # Parse inputs from JSON string
+    # 从 JSON 字符串解析 inputs
     try:
         parsed_inputs = json.loads(inputs)
     except json.JSONDecodeError as exc:
         return f"Error: invalid inputs JSON: {exc}"
 
-    # Execute
+    # 执行
     try:
         result = await executor.execute_workflow(plan_code, parsed_inputs)
         return json.dumps(result, ensure_ascii=False, default=str)
@@ -145,7 +145,7 @@ async def execute_workflow(workflow_name: str, inputs: str = "{}") -> str:
 
 
 class WorkflowContextHook(AgentHook):
-    """Sets workflow_executor_ctx ContextVar before each ReAct iteration."""
+    """在每次 ReAct 迭代前设置 workflow_executor_ctx ContextVar。"""
 
     priority = 50
 

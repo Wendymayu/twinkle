@@ -1,9 +1,9 @@
-"""twinkle.observability — agentserver observability (OTel + monkey-patch).
+"""twinkle.observability —— agentserver 可观测性（OTel + monkey-patch）。
 
-setup() is the single entry point: reads config, and if OTEL_ENABLED,
-initializes OTel providers and monkey-patches the 3 agentserver choke
-points (AgentLoop.run_stream / LLMClient.stream / ToolManager.execute).
-Idempotent + fail-soft; OTEL_ENABLED=false (default) is a zero-cost no-op.
+setup() 是唯一入口：读 config，若 OTEL_ENABLED，则初始化 OTel providers
+并 monkey-patch 3 个 agentserver 咽喉点（ReActAgent.run / LLMClient.stream /
+ToolManager.execute）。幂等 + fail-soft；OTEL_ENABLED=false（默认）是零开销
+no-op。
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def setup() -> bool:
         from twinkle.observability.instrumentors import apply_instrumentors
         from twinkle.observability.metrics import Metrics
 
-        # Metrics(None) is a silent no-op, so traces-on + metrics-off won't crash.
+        # Metrics(None) 是静默 no-op，故 traces 开 + metrics 关不会崩。
         metrics = Metrics(meter)
         apply_instrumentors(tracer, metrics, cfg)
         _APPLIED = True

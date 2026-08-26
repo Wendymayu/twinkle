@@ -9,7 +9,7 @@ def _mgr(tmp_path, **kw):
 
 def test_schema_creates_six_tables(tmp_path):
     mgr = _mgr(tmp_path)
-    db = mgr._db  # noqa: SLF001 — test inspects internal handle
+    db = mgr._db  # noqa: SLF001 — 测试探查内部句柄
     names = {r[0] for r in db.execute(
         "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
     for t in ("chunks", "chunks_fts", "embedding_cache", "files", "meta"):
@@ -32,9 +32,9 @@ def test_list_files_empty(tmp_path):
 
 
 def test_list_files_filters_non_whitelist(tmp_path):
-    """list_files only returns whitelist paths (USER.md/MEMORY.md/daily_memory/
-    YYYY-MM-DD.md) — a stray .md elsewhere in the dir must not surface, else
-    MemoryHook would inject on a non-memory file."""
+    """list_files 只返回白名单路径（USER.md/MEMORY.md/daily_memory/
+    YYYY-MM-DD.md）——目录里散落的 .md 不应出现，否则 MemoryHook 会
+    在非 memory 文件上注入。"""
     mgr = _mgr(tmp_path)
     mgr.write("MEMORY.md", "a fact", append=True)
     (tmp_path / "notes.md").write_text("stray", encoding="utf-8")
@@ -112,7 +112,7 @@ def test_write_does_not_index_until_flush(tmp_path):
 
 
 def test_search_fts_only_hits_written_fact(tmp_path):
-    """No embed_provider → FTS-only; write a fact, search by keyword, hit."""
+    """无 embed_provider → FTS-only；写一条事实，按关键词搜索，命中。"""
     mgr = _mgr(tmp_path)  # embed_provider=None
     mgr.write("MEMORY.md", "用户偏好用中文回答问题。", append=True)
     mgr.write("MEMORY.md", "项目架构是两进程 WebSocket。", append=True)
@@ -177,10 +177,10 @@ def test_search_logs(tmp_path, caplog):
 
 
 def test_write_round_trips_via_nonclean_path():
-    """Regression: _resolve_relative_path compared a resolve()'d path against an
-    un-resolved self._dir, breaking write/read on Windows short-name paths
-    (e.g. C:/Users/WANGGU~1/... from tempfile.mkdtemp). __init__ now stores
-    self._dir resolved so is_relative_to stays consistent."""
+    """Regression：_resolve_relative_path 拿 resolve() 后的路径去比未 resolve 的
+    self._dir，导致 Windows 短名路径（如 tempfile.mkdtemp 产生的
+    C:/Users/WANGGU~1/...）上 write/read 失效。__init__ 现在存的是 resolved 后的
+    self._dir，使 is_relative_to 保持一致。"""
     import tempfile
     d = tempfile.mkdtemp()
     mgr = MemoryManager(str(d), embed_provider=None)
@@ -199,18 +199,18 @@ def test_hybrid_search_runs_with_sqlite_vec(tmp_path):
     mgr.write("MEMORY.md", "用户偏好用中文回答问题。", append=True)
     mgr.write("MEMORY.md", "项目架构是两进程 WebSocket。", append=True)
     hits = mgr.search("偏好")
-    # FTS leg guarantees the right chunk ranks; hybrid fusion doesn't break it
+    # FTS 腿保证正确 chunk 排前；hybrid 融合不破坏它
     assert any("偏好" in h["text"] for h in hits)
 
 
 def test_mtv_degrades_to_fts_only_when_no_provider(tmp_path):
-    """sqlite-vec installed but no provider (no API key) -> FTS-only, no vector leg."""
+    """装了 sqlite-vec 但无 provider（无 API key）→ FTS-only，无 vector 腿。"""
     pytest.importorskip("sqlite_vec")
     mgr = MemoryManager(str(tmp_path), embed_provider=None)  # no provider
     assert mgr._vec_enabled  # noqa: SLF001 — extension loaded
     mgr.write("MEMORY.md", "用户偏好中文。", append=True)
     hits = mgr.search("偏好")
-    assert any("偏好" in h["text"] for h in hits)  # FTS still works
+    assert any("偏好" in h["text"] for h in hits)  # FTS 仍可用
 
 
 def test_edit_replaces_and_reindexes(tmp_path):
@@ -219,7 +219,7 @@ def test_edit_replaces_and_reindexes(tmp_path):
     mgr.edit("MEMORY.md", "英文", "中文")
     assert "用户偏好中文。" in mgr.read("MEMORY.md")
     assert "英文" not in mgr.read("MEMORY.md")
-    # old text no longer retrievable, new text is
+    # 旧文本不再可召回，新文本可召回
     assert any("中文" in h["text"] for h in mgr.search("偏好"))
     assert not any("英文" in h["text"] for h in mgr.search("偏好"))
 
@@ -255,7 +255,7 @@ def test_model_change_clears_index(tmp_path):
     mgr.write("MEMORY.md", "some fact", append=True)
     mgr._flush_now()  # noqa: SLF001 — 防抖:write 零索引,显式 flush 落索引后再断言
     assert mgr._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
-    # swap provider to a different model name -> clear stale index
+    # 换成不同模型名的 provider → 清掉过期索引
     mgr._provider = MockEmbeddingProvider(dims=8, model="v2")
     mgr._clear_if_model_changed()
     assert mgr._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
@@ -264,13 +264,13 @@ def test_model_change_clears_index(tmp_path):
 
 def test_fifo_cap_evicts_oldest(tmp_path):
     mgr = MemoryManager(str(tmp_path), embed_provider=None, max_chunks_per_file=2)
-    # each write re-indexes (overwrites chunks for the file); to exceed the cap
-    # we need >2 chunks in one file. Write a long content with 3+ chunks.
+    # 每次写入都重建索引（覆写该 file 的 chunks）；要超 cap 需在单文件里
+    # 有 >2 个 chunks。写一段含 3+ chunks 的长内容。
     long_content = "\n".join(f"line {i} has unique content number {i}" for i in range(20))
     mgr.write("MEMORY.md", long_content, append=False)
     mgr._flush_now()  # noqa: SLF001 — 防抖:write 零索引,显式 flush 落索引后再断言 cap
     count = mgr._db.execute("SELECT COUNT(*) FROM chunks WHERE path='MEMORY.md'").fetchone()[0]
-    assert count <= 2  # capped
+    assert count <= 2  # 触顶 cap
 
 
 def test_get_memory_manager_singleton(tmp_path, monkeypatch):
@@ -294,21 +294,20 @@ def test_set_memory_manager_reset(tmp_path):
 
 
 def test_index_file_rolls_back_on_insert_error(tmp_path):
-    """A failed DB statement mid-index must roll back so the next write on the
-    shared singleton connection doesn't commit the broken file's partial state.
-    Trigger: vec0 table dims=4 but provider returns 8-float vectors -> INSERT
-    mismatch raises inside the chunk loop. Without rollback the chunks INSERT
-    stays open (uncommitted, read-your-writes) and files/meta never get stamped."""
+    """索引中途某条 DB 语句失败必须 rollback，否则下一次写共享单例连接会
+    提交该文件的半截状态。触发方式：vec0 表 dims=4 但 provider 返回
+    8 维向量 → chunk 循环内 INSERT 维度不匹配抛异常。若不 rollback，chunks
+    的 INSERT 会留着未提交（read-your-writes），files/meta 也永远不会标戳。"""
     pytest.importorskip("sqlite_vec")
     from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
     mgr = MemoryManager(str(tmp_path), embed_provider=MockEmbeddingProvider(dims=8),
-                        dims=4)  # vec0 table float[4] vs 8-float vectors
+                        dims=4)  # vec0 表 float[4] 对 8 维向量
     mgr.write("MEMORY.md", "some fact", append=True)
     # 防抖:write 零索引不触发 _index_file → 不引发;显式调 _index_file 触发
     # vec0 维度不匹配 INSERT,验证 rollback(files/meta 无残留)。
     with pytest.raises(Exception):
         mgr._index_file("MEMORY.md")  # noqa: SLF001
-    # rollback: nothing committed for this file
+    # rollback：该文件无任何提交残留
     assert mgr._db.execute(  # noqa: SLF001
         "SELECT COUNT(*) FROM chunks WHERE path='MEMORY.md'").fetchone()[0] == 0
     assert mgr._db.execute(  # noqa: SLF001
@@ -316,8 +315,8 @@ def test_index_file_rolls_back_on_insert_error(tmp_path):
 
 
 def test_hybrid_search_result_has_line_numbers(tmp_path):
-    """Hybrid return must carry start_line/end_line like the FTS-only return —
-    the public search() contract is the same shape in both modes."""
+    """Hybrid 返回必须像 FTS-only 返回一样带 start_line/end_line——
+    两种模式下公开 search() 契约的返回形状一致。"""
     pytest.importorskip("sqlite_vec")
     from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
     mgr = MemoryManager(str(tmp_path), embed_provider=MockEmbeddingProvider(dims=8),

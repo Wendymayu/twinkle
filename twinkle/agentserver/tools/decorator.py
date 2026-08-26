@@ -1,10 +1,10 @@
-"""@tool decorator — converts a plain async function into a LocalFunction.
+"""@tool 装饰器 —— 把普通 async 函数转成 LocalFunction。
 
-Usage:
-  @tool                       # bare
-  @tool()                     # called, no args
-  @tool(name=..., input_params=...)   # override
-  tool(fn)                    # non-decorator form (used by tool_manager)
+用法:
+  @tool                       # 裸装饰器
+  @tool()                     # 带括号调用,无参数
+  @tool(name=..., input_params=...)   # 覆盖默认值
+  tool(fn)                    # 非装饰器形式(tool_manager 使用)
 """
 from __future__ import annotations
 

@@ -36,7 +36,7 @@ def _append_list(message: str, tasks: list[TodoTask]) -> str:
 
 
 def _snapshot(tasks: list[TodoTask]) -> dict:
-    """Structured todo snapshot for the UI (publish side-channel)."""
+    """给 UI 用的结构化 todo 快照(发布 side-channel)。"""
     pending_running = sum(1 for t in tasks if t.status in ("pending", "in_progress"))
     completed = sum(1 for t in tasks if t.status == "completed")
     return {
@@ -57,7 +57,7 @@ def _snapshot(tasks: list[TodoTask]) -> dict:
 
 @tool
 async def todo_create(subjects: list[str], sequential: bool = False) -> str:
-    """Create a list of todo tasks to plan and track multi-step work. Do not use for single-step simple requests. Pass a list of task subjects; fails if a todo list already exists for this session. Use sequential=True when tasks must be executed in order.
+    """创建一组 todo task 来规划并跟踪多步工作。不要用于单步简单请求。传入任务主题列表;若本 session 已存在 todo 列表则失败。任务必须按顺序执行时用 sequential=True。
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()
@@ -74,7 +74,7 @@ async def todo_create(subjects: list[str], sequential: bool = False) -> str:
 
 @tool
 async def todo_update(task_id: str, status: str = "", result: str = "", owner: str = "", metadata: dict | None = None) -> str:
-    """Update a todo task's status, result, owner, or metadata. Use status="completed" to mark done, status="in_progress" to start working, status="cancelled" to cancel. Metadata is merged: set key to null to delete.
+    """更新一个 todo task 的 status、result、owner 或 metadata。用 status="completed" 标记完成,status="in_progress" 开始处理,status="cancelled" 取消。metadata 会合并:把某 key 设为 null 即删除该 key。
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()
@@ -102,7 +102,7 @@ async def todo_update(task_id: str, status: str = "", result: str = "", owner: s
 
 @tool
 async def todo_list(status: str = "") -> str:
-    """List all current todo tasks with their status. Optionally filter by status (pending/in_progress/completed/cancelled). Returns 'No todo tasks.' when empty.
+    """列出所有当前 todo task 及其 status。可选按 status 过滤(pending/in_progress/completed/cancelled)。为空时返回 'No todo tasks.'。
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()
@@ -113,7 +113,7 @@ async def todo_list(status: str = "") -> str:
 
 @tool
 async def todo_get(task_id: str) -> str:
-    """Get details of a single todo task by its ID. Returns task info or error if not found.
+    """按 ID 获取单个 todo task 的详情。返回 task 信息,未找到则返回错误。
     """
     session_id = get_plan_todo_session_id()
     store = get_todo_store()

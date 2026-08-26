@@ -10,7 +10,7 @@ from twinkle.agentserver.todo import (
 
 
 def test_default_is_default_string() -> None:
-    # No token set in this fresh context -> "default".
+    # 此全新 context 未设置 token -> "default"。
     PLAN_TODO_SESSION_ID.set(None)
     assert get_plan_todo_session_id() == "default"
 
@@ -28,15 +28,15 @@ def test_append_then_flush() -> None:
     assert len(flushed) == 2
     assert flushed[0]["total"] == 0
     assert flushed[1]["remaining"] == 1
-    # flush cleared the buffer
+    # flush 清空了缓冲区
     assert flush_todo_events() == []
 
 
 def test_append_without_reset_is_noop() -> None:
-    # In a truly fresh (empty) context, TODO_EVENTS is its default (None);
-    # append must not raise and must not mutate any shared state.
-    # NOTE: contextvars.Context() (empty) — NOT copy_context(), which copies
-    # the binding to the same mutable list object and would leak mutations.
+    # 在真正全新（空）的 context 中，TODO_EVENTS 是其默认值（None）；
+    # append 不得抛异常，也不得改动任何共享状态。
+    # NOTE：contextvars.Context()（空）—— 而非 copy_context()，后者会把绑定
+    # 指向同一个可变 list 对象，从而泄漏修改。
     def body():
         append_todo_event({"tasks": [], "remaining": 0, "total": 0})
 

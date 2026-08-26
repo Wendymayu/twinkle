@@ -34,7 +34,7 @@ def _engine(tmp_path):
 
 
 def _make_loop(session_store, tmp_path, llm, tm):
-    """Build AgentLoop + register PermissionHook — engine stays in the hook."""
+    """构造 AgentLoop 并注册 PermissionHook — engine 留在 hook 里。"""
     engine = _engine(tmp_path)
     loop = AgentLoop(llm, session_store, tm)
     loop.register_hook(PermissionHook(engine))
@@ -141,8 +141,8 @@ def test_multi_tool_batch_each_asks_then_resumes(session_store, tmp_path) -> Non
         """echo"""
         return f"tool-saw:{text}"
     tm = ToolManager(); tm.register(echo)
-    # one assistant message with TWO tool_calls; both require approval (resolve "allow",
-    # NOT allow_always, so the 2nd still asks)
+    # 一条 assistant message 含两个 tool_call;都要审批(resolve "allow",
+    # 不是 allow_always,所以第二个仍会 ask)
     llm = _ScriptedLLM([
         [Finish("tool_calls", {"role": "assistant", "content": None,
             "tool_calls": [
@@ -163,7 +163,7 @@ def test_multi_tool_batch_each_asks_then_resumes(session_store, tmp_path) -> Non
 
     frames = asyncio.run(run())
     asks = [f for f in frames if f.response_kind == "e2a.ask"]
-    assert len(asks) == 2  # both c1 and c2 asked (allow, not allow_always -> no override persisted)
+    assert len(asks) == 2  # c1 和 c2 都 ask 了(用 allow 非 allow_always → 没持久化 override)
     assert frames[-1].response_kind == "e2a.complete"
     msgs = session_store.get_messages("s1")
     tool_msgs = [m for m in msgs if m["role"] == "tool"]

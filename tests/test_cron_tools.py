@@ -1,4 +1,4 @@
-"""cron_tools: 5 @tool wrappers over CronJobStore (+ run_now sidecar)."""
+"""cron_tools:5 个 @tool 包装 CronJobStore（+ run_now sidecar）。"""
 from __future__ import annotations
 
 import asyncio

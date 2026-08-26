@@ -1,4 +1,4 @@
-"""Tests for PlanNode ABC — recursive execution node with fallback and HookInterrupt."""
+"""PlanNode ABC 的测试——带 fallback 与 HookInterrupt 的递归执行节点。"""
 
 from __future__ import annotations
 
@@ -11,32 +11,32 @@ from twinkle.agentserver.hooks.base import HookInterrupt
 from twinkle.agentserver.workflow.node import PlanNode
 
 
-# -- Helpers: concrete node implementations for testing --
+# -- Helpers：用于测试的具体 node 实现 --
 
 
 class EchoNode(PlanNode):
-    """Simple node that returns its inputs."""
+    """返回其 inputs 的简单 node。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         return inputs
 
 
 class FailingNode(PlanNode):
-    """Node that always raises."""
+    """总是抛异常的 node。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         raise ValueError("boom")
 
 
 class HookInterruptNode(PlanNode):
-    """Node that raises HookInterrupt."""
+    """抛 HookInterrupt 的 node。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         raise HookInterrupt("approval needed", data={"tool": "rm"})
 
 
 class CompositeNode(PlanNode):
-    """Parent node that executes sub-plans sequentially."""
+    """顺序执行 sub-plans 的 parent node。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         results = []
@@ -46,11 +46,11 @@ class CompositeNode(PlanNode):
         return results
 
 
-# -- Tests --
+# -- 测试 --
 
 
 def test_node_echo():
-    """Simple echo node returns inputs."""
+    """简单 echo node 返回 inputs。"""
 
     async def _run():
         node = EchoNode(plan_name="echo", instruction="echo inputs")
@@ -61,7 +61,7 @@ def test_node_echo():
 
 
 def test_node_run_with_fallback():
-    """Fallback callback called on exception."""
+    """异常时调用 fallback callback。"""
 
     async def _run():
         fallback_called = []
@@ -86,7 +86,7 @@ def test_node_run_with_fallback():
 
 
 def test_node_run_without_fallback_raises():
-    """Without fallback, exception propagates."""
+    """无 fallback 时异常向上抛。"""
 
     async def _run():
         node = FailingNode(plan_name="fail", instruction="always fails")
@@ -97,7 +97,7 @@ def test_node_run_without_fallback_raises():
 
 
 def test_node_hook_interrupt_not_caught_by_fallback():
-    """HookInterrupt never caught by fallback."""
+    """HookInterrupt 不会被 fallback 捕获。"""
 
     async def _run():
         fallback_called = []
@@ -121,7 +121,7 @@ def test_node_hook_interrupt_not_caught_by_fallback():
 
 
 def test_execute_subplan():
-    """Parent executes sub-plans sequentially."""
+    """Parent 顺序执行 sub-plans。"""
 
     async def _run():
         child1 = EchoNode(plan_name="c1", instruction="echo")
@@ -138,7 +138,7 @@ def test_execute_subplan():
 
 
 def test_set_runtime_callbacks_propagates():
-    """Callbacks recursively propagated to sub_plans."""
+    """Callbacks 递归传播到 sub_plans。"""
 
     async def _run():
         def has_tool_fn(name: str) -> bool:
@@ -152,11 +152,11 @@ def test_set_runtime_callbacks_propagates():
         )
         parent.set_runtime_callbacks(has_tool=has_tool_fn)
 
-        # Parent has the callback
+        # Parent 持有 callback
         assert parent.has_tool("test_tool") is True
         assert parent.has_tool("other") is False
 
-        # Child also has the callback
+        # Child 也持有 callback
         assert child.has_tool("test_tool") is True
         assert child.has_tool("other") is False
 
@@ -164,7 +164,7 @@ def test_set_runtime_callbacks_propagates():
 
 
 def test_call_llm_raises_without_callback():
-    """RuntimeError if call_llm callback not set."""
+    """未设置 call_llm callback 时抛 RuntimeError。"""
 
     async def _run():
         node = EchoNode(plan_name="echo", instruction="echo")
@@ -175,7 +175,7 @@ def test_call_llm_raises_without_callback():
 
 
 def test_has_tool_raises_without_callback():
-    """RuntimeError if has_tool callback not set."""
+    """未设置 has_tool callback 时抛 RuntimeError。"""
 
     node = EchoNode(plan_name="echo", instruction="echo")
     with pytest.raises(RuntimeError, match="has_tool callback not initialized"):
@@ -183,7 +183,7 @@ def test_has_tool_raises_without_callback():
 
 
 def test_node_repr():
-    """repr contains plan_name."""
+    """repr 包含 plan_name。"""
 
     node = EchoNode(plan_name="my_node", instruction="echo")
     r = repr(node)
@@ -192,7 +192,7 @@ def test_node_repr():
 
 
 def test_subplan_depth_auto_set():
-    """Sub-plan depth auto-set to parent.depth + 1."""
+    """Sub-plan 的 depth 自动设为 parent.depth + 1。"""
 
     grandchild = EchoNode(plan_name="gc", instruction="echo")
     child = EchoNode(plan_name="child", instruction="echo", sub_plans=[grandchild])

@@ -1,4 +1,4 @@
-"""Entry point: `python -m twinkle.agentserver`."""
+"""入口：`python -m twinkle.agentserver`。"""
 import asyncio
 
 from twinkle.agentserver.server import main

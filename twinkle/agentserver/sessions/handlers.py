@@ -1,14 +1,14 @@
-"""Dispatch table for session/history RPCs at the AgentServer.
+"""AgentServer 的 session/history RPC 派发表。
 
-These are the RPC methods Twinkle originally dropped (``session.list`` /
-``history.get`` were marked "roadmap 不做" in docs/e2a-introduction.md) —
-re-adopted here, mirroring jiuwenclaw's remote storage mode where the agent
-server (not the gateway) owns session business logic.
+这些是 Twinkle 原先砍掉的 RPC 方法(``session.list`` /
+``history.get`` 在 docs/e2a-introduction.md 标为 "roadmap 不做")——
+这里重新采纳,对齐 jiuwenclaw 的远程存储模式:由 agent
+server(而非 gateway)持有 session 业务逻辑。
 
-Each handler yields a single ``E2AResponse`` with ``response_kind="e2a.result"``
-and ``is_final=True``; the gateway maps that to the browser ``result`` event.
-On failure it yields a ``status="failed"`` result frame with an ``error`` body
-so the frontend ``request()`` can reject cleanly.
+每个 handler yield 单个 ``E2AResponse``,带 ``response_kind="e2a.result"``
+和 ``is_final=True``;gateway 把它映射成浏览器的 ``result`` 事件。
+失败时 yield 一个 ``status="failed"`` 的 result 帧,body 带 ``error``,
+让前端 ``request()`` 能干净地 reject。
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ async def dispatch_session_rpc(
             content = store.read_file(session_id, name)
             body = {"type": "file.read", "name": name, "content": content}
         else:
-            return  # not a session RPC — caller routes to AgentLoop
+            return  # 不是 session RPC —— 调用方路由给 AgentLoop
         yield E2AResponse(
             request_id=envelope.request_id,
             sequence=0,

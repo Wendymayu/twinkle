@@ -1,4 +1,4 @@
-"""Tests for the sandbox module — exec(plan_code) isolation."""
+"""sandbox 模块的测试 —— exec(plan_code) 隔离。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from twinkle.agentserver.workflow.sandbox import (
 )
 
 
-# ── _SAFE_BUILTINS tests ──────────────────────────────────────────
+# ── _SAFE_BUILTINS 测试 ──────────────────────────────────────────
 
 
 def test_safe_builtins_has_len() -> None:
@@ -35,12 +35,12 @@ def test_safe_builtins_no_getattr() -> None:
     assert "getattr" not in _SAFE_BUILTINS
 
 
-# ── build_namespace tests ─────────────────────────────────────────
+# ── build_namespace 测试 ─────────────────────────────────────────
 
 
 def test_build_namespace_has_plan_node() -> None:
     ns = build_namespace()
-    # PlanNode may be None if node.py doesn't exist yet (Task 4)
+    # PlanNode 可能为 None，若 node.py 尚不存在（Task 4）
     assert "PlanNode" in ns
 
 
@@ -58,7 +58,7 @@ def test_build_namespace_replaces_builtins() -> None:
     assert "open" not in builtins
 
 
-# ── exec-in-sandbox integration tests ─────────────────────────────
+# ── sandbox 中 exec 的集成测试 ─────────────────────────────
 
 
 def test_exec_in_sandbox_cannot_import_os() -> None:

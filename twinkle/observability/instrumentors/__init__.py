@@ -1,8 +1,7 @@
-"""Apply all agentserver instrumentors.
+"""应用所有 agentserver instrumentor。
 
-Each instrumentor is applied in its own try/except so one failing surface
-doesn't break the rest. Production passes *_cls=None (lazy import of the
-real class); tests pass fakes.
+每个 instrumentor 在各自的 try/except 中应用，使某一面失败不波及其余。
+生产传 *_cls=None（懒导入真实 class）；测试传 fake。
 """
 from __future__ import annotations
 

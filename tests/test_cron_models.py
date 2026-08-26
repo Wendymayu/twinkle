@@ -1,4 +1,4 @@
-"""CronJob / CronRunState / _Event dataclass tests."""
+"""CronJob / CronRunState / _Event dataclass 测试。"""
 from __future__ import annotations
 
 import pytest

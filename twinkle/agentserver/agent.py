@@ -1,9 +1,9 @@
-"""ReActAgent — a ReAct-pattern agent: think -> (tool -> result)* -> answer.
+"""ReActAgent —— 一个 ReAct-pattern agent：think -> (tool -> result)* -> answer。
 
-run() is an async generator yielding E2AResponse frames so the ws send
-boundary stays in server.py (agent never touches the socket).
+run() 是一个 async generator,产出 E2AResponse 帧,使 ws send 边界留在
+server.py(agent 永不碰 socket)。
 
-Twinkle is stream-only; unary has been removed.
+Twinkle 仅流式;unary 已移除。
 """
 from __future__ import annotations
 
@@ -51,21 +51,21 @@ log = logging.getLogger("twinkle.agentserver")
 
 
 # ---------------------------------------------------------------------------
-# AgentRequest — pure business input, no transport-layer concepts
+# AgentRequest —— 纯业务输入,无 transport-layer 概念
 # ---------------------------------------------------------------------------
 
 @dataclass
 class AgentRequest:
-    """One agent run's business inputs. No E2A / WebSocket concepts.
+    """一次 agent run 的业务输入。无 E2A / WebSocket 概念。
 
-    server.py is responsible for constructing this from the transport envelope.
+    server.py 负责从 transport envelope 构造它。
     """
 
     session_id: str
     request_id: str
     query: str
     channel: str = "web"
-    mode: str = ""  # "" = normal, "team" = team collaboration
+    mode: str = ""  # "" = normal,"team" = team 协作
 
 
 class _Inbox(Protocol):
@@ -77,22 +77,22 @@ class _Inbox(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# System prompt builder
+# System prompt 构造器
 # ---------------------------------------------------------------------------
 
 def build_system_prompt() -> str:
-    """Build the base system prompt injected once per session at position 0.
+    """构造 base system prompt,每 session 在 position 0 注入一次。
 
-    Includes agent identity, runtime environment, workspace overview, and
-    tool usage guidance. Dynamic values (platform, date, workspace paths)
-    are resolved at injection time so the prompt stays current.
+    含 agent identity、runtime environment、workspace overview 与
+    tool usage guidance。动态值(platform、date、workspace paths)在注入时
+    解析,使 prompt 保持当前。
     """
     os_type = sys.platform
     workspace = WORKSPACE_DIR
     memory_dir = MEMORY_DIR
     skills_dir = SKILLS_DIR
 
-    # Windows-specific mkdir warning
+    # Windows 特定 mkdir 警告
     mkdir_warning = ""
     if os_type.startswith("win"):
         mkdir_warning = (
@@ -146,14 +146,14 @@ def build_system_prompt() -> str:
 
 
 def build_agent_runtime_prompt() -> str:
-    """Build a lean runtime-only prompt for team members.
+    """构造一个精简的 runtime-only prompt 给 team members。
 
-    Members get team identity from build_member_system_prompt(); this
-    supplies only the execution environment they share with every agent:
-    platform, date, command syntax, and tool usage guidance.
+    Members 从 build_member_system_prompt() 拿 team identity;本函数只供给
+    他们与每个 agent 共享的执行环境：platform、date、command syntax 与
+    tool usage guidance。
 
-    Omits the user-facing identity/behavior section and the global
-    workspace paths — members see team workspace via their team section.
+    省略 user-facing 的 identity/behavior 段和全局 workspace paths——
+    members 通过自己的 team section 看 team workspace。
     """
     os_type = sys.platform
 
@@ -187,19 +187,19 @@ def build_agent_runtime_prompt() -> str:
 """
 
 
-# ── Team leader prompt (injected per-request when mode=team) ──────
+# ── Team leader prompt(当 mode=team 时 per-request 注入) ──────
 
 def build_leader_system_prompt() -> str:
-    """Build the leader's system prompt for team mode.
+    """构造 team mode 下 Leader 的 system prompt。
 
-    Replaces build_system_prompt() when mode=team. The leader is a
-    coordinator — identity and workflow are team-specific, not the
-    generic user-facing rules in the base prompt.
+    当 mode=team 时替换 build_system_prompt()。Leader 是
+    coordinator——identity 与 workflow 是 team 专属,非 base prompt 里
+    通用的 user-facing 规则。
 
-    Aligned with jiuwenswarm's TeamRail sections:
-      P:11  team_role     — leader_policy (who you are)
-      P:13  team_workflow — leader_workflow (how you work)
-      then   runtime + tool guidance
+    对齐 jiuwenswarm 的 TeamRail sections：
+      P:11  team_role     — leader_policy(你是谁)
+      P:13  team_workflow — leader_workflow(你怎么干)
+      然后   runtime + tool guidance
     """
     os_type = sys.platform
 
@@ -274,20 +274,20 @@ list_tasks / get_task 查队列与详情(含 help_reason 求助标记,成员遇�
 - 简单单步请求：直接委派或调工具，不要使用 todo。"""
 
 
-# ── Member system prompt (aligned with jiuwenswarm sections) ────
+# ── Member system prompt(对齐 jiuwenswarm sections) ────
 
 def build_member_system_prompt(*, persona: str, workspace: str,
                                member_name: str = "") -> str:
-    """Build a member's system prompt with team identity front and center.
+    """构造 member 的 system prompt,team identity 居首居中。
 
-    Aligned with jiuwenswarm's section model:
+    对齐 jiuwenswarm 的 section model：
       P:11  team_role     — role policy + member identity
-      P:15  team_persona  — persona description
+      P:15  team_persona  — persona 描述
       P:30  team_info     — workspace path
 
-    Followed by a lean runtime prompt (platform, date, tool usage) —
-    NOT the full user-facing build_system_prompt(). Members don't need
-    user-facing identity/behavior rules or global workspace paths.
+    其后跟一个精简 runtime prompt(platform、date、tool usage)——
+    不是完整的 user-facing build_system_prompt()。Members 不需要
+    user-facing 的 identity/behavior 规则或全局 workspace paths。
     """
     name_line = f"（成员名: `{member_name}`）" if member_name else ""
     return f"""# 团队角色
@@ -317,45 +317,44 @@ def build_member_system_prompt(*, persona: str, workspace: str,
 # ── base_sections 工厂(loop 每步注入 builder;member/subagent 构造时带 persona) ──
 
 def normal_base_sections() -> list[PromptSection]:
-    """Normal-mode base sections for the generic agent path."""
+    """generic agent 路径的 Normal-mode base sections。"""
     return [PromptSection("system_prompt", build_system_prompt(), priority=10)]
 
 
 def leader_base_sections() -> list[PromptSection]:
-    """Team-leader base sections (mode=team)."""
+    """Team-leader base sections(mode=team)。"""
     return [PromptSection("system_prompt", build_leader_system_prompt(), priority=10)]
 
 
 def member_base_sections(*, persona: str, workspace: str,
                          member_name: str = "") -> list[PromptSection]:
-    """Team-member base sections — persona baked at construction time."""
+    """Team-member base sections —— persona 在构造时定型。"""
     return [PromptSection("system_prompt",
                            build_member_system_prompt(persona=persona, workspace=workspace,
                                                       member_name=member_name),
                            priority=10)]
 
 
-# ── Leader tool whitelist for team mode ──────────────────────────
-# In team mode the leader is a COORDINATOR: plan, delegate, review.
-# Execution tools (command_exec, write_file, edit_file) are reserved
-# for members so delegation is not optional — the leader MUST delegate
-# substantive work. This is the architectural difference from subagent
-# mode: the leader cannot do the work itself.
+# ── team mode 下 Leader 的 tool whitelist ──────────────────────────
+# team mode 下 Leader 是 COORDINATOR：plan、delegate、review。
+# 执行类工具(command_exec、write_file、edit_file)预留给
+# members,故委派非可选——Leader MUST 委派实质性工作。这是与 subagent
+# mode 的架构差异：Leader 不能自己干活。
 
 _TEAM_LEADER_TOOL_WHITELIST: frozenset[str] = frozenset({
-    # Coordination
+    # 协调类
     "delegate_to_member",
     "create_task", "cancel_task", "list_tasks", "get_task",   # NEW: team task 编排
-    "send_member",                                            # NEW: leader→member steer
-    # Planning & tracking
+    "send_member",                                            # NEW：leader→member steer
+    # 规划与追踪
     "todo_create", "todo_update", "todo_list", "todo_get",
-    # Read-only inspection
+    # 只读检查
     "read_file", "list_files", "glob",
     "web_search", "web_fetch",
     "memory_search", "read_memory",
-    # Skills (read-only)
+    # Skills(只读)
     "list_skill", "read_skill",
-    # Cron (read-only management)
+    # Cron(只读管理)
     "cron_list_jobs",
 })
 
@@ -368,11 +367,10 @@ _MAX_HOOK_RETRIES = 3
 # ---------------------------------------------------------------------------
 
 class ReActAgent:
-    """A ReAct-pattern agent: LLM think → tool calls → results → re-decide.
+    """一个 ReAct-pattern agent：LLM think → tool calls → results → re-decide。
 
-    Hooks are injected at construction time via *hooks*.  ``run()`` is the
-    single public entry point — it processes one user message through the
-    ReAct loop and yields E2AResponse frames.
+    Hooks 在构造时经 *hooks* 注入。``run()`` 是唯一的公共入口——它把一条
+    user message 跑过 ReAct 循环并产出 E2AResponse 帧。
     """
 
     def __init__(
@@ -392,19 +390,19 @@ class ReActAgent:
         for h in hooks:
             self._hook_manager.register_hook(h)
         self._inbox = inbox
-        self._base_sections = base_sections  # None → normal/leader by mode; list → member/subagent
+        self._base_sections = base_sections  # None → 按 mode 取 normal/leader;list → member/subagent
 
     @property
     def session_store(self) -> SessionStore:
-        """The SessionStore this agent reads/writes conversation history from."""
+        """agent 读写 conversation history 所用的 SessionStore。"""
         return self._session_store
 
     def register_hook(self, hook_instance: AgentHook) -> None:
-        """Register an AgentHook (kept for test injection — prefer constructor)."""
+        """注册一个 AgentHook(为测试注入保留——优先用构造器)。"""
         self._hook_manager.register_hook(hook_instance)
 
     def unregister_hook(self, hook_instance: AgentHook) -> None:
-        """Unregister an AgentHook."""
+        """注销一个 AgentHook。"""
         self._hook_manager.unregister_hook(hook_instance)
 
     async def _refresh_mcp_tools(self, ctx: HookContext) -> None:
@@ -418,13 +416,13 @@ class ReActAgent:
             for tool in diff.added:
                 self._tool_manager.register(tool)
 
-    # -- Public entry point -------------------------------------------------
+    # -- 公共入口 -------------------------------------------------
 
     async def run(self, request: AgentRequest) -> AsyncIterator[E2AResponse]:
-        """Process one user message through the ReAct loop.
+        """把一条 user message 跑过 ReAct 循环。
 
-        Triggers BEFORE_INVOKE / AFTER_INVOKE hooks, delegates to the
-        internal ReAct loop, writes interrupt snapshots on failure.
+        触发 BEFORE_INVOKE / AFTER_INVOKE hooks,委托给内部 ReAct 循环,失败时写
+        interrupt snapshot。
         """
         session_id = request.session_id
         request_id = request.request_id
@@ -479,17 +477,17 @@ class ReActAgent:
             APPROVAL_REGISTRY.clear_all_pending(session_id)
             await self._hook_manager.execute(HookEvent.AFTER_INVOKE, ctx)
 
-    # -- ReAct loop ---------------------------------------------------------
+    # -- ReAct 循环 ---------------------------------------------------------
 
     async def _run_react_loop(
         self,
         ctx: HookContext,
         request: AgentRequest,
     ) -> AsyncIterator[E2AResponse]:
-        """The ReAct loop with hook trigger points.
+        """带 hook 触发点的 ReAct 循环。
 
-        Model calls use manual self._hook_manager.execute() (async generator
-        incompatible with @hook).  Tool calls use @hook-decorated _tool_call.
+        Model calls 用手写 self._hook_manager.execute()(async generator 与
+        @hook 不兼容)。Tool calls 用 @hook 装饰的 _tool_call。
         """
         session_id = request.session_id
         request_id = request.request_id
@@ -553,7 +551,7 @@ class ReActAgent:
                     {"role": "user",
                      "content": f"<environment_context>\n{env_text}\n</environment_context>"})
 
-            # Check force_finish
+            # 检查 force_finish
             force_finish = ctx.consume_force_finish_request()
             if force_finish is not None:
                 yield E2AResponse(
@@ -566,7 +564,7 @@ class ReActAgent:
                 )
                 return
 
-            # -- LLM stream with retry loop -- #
+            # -- LLM 流式 + 重试循环 -- #
             should_reask = False
             for retry_attempt in range(_MAX_HOOK_RETRIES + 1):
                 ctx.retry_attempt = retry_attempt
@@ -594,7 +592,7 @@ class ReActAgent:
                             tool_calls = stream_event.assistant_message.get("tool_calls")
                             if stream_event.finish_reason == "tool_calls" and tool_calls:
                                 if len(tool_calls) > 1:
-                                    # --- Parallel path ---
+                                    # --- 并行路径 ---
                                     try:
                                         parallel_results, parallel_todos = await self._try_parallel_tool_calls(
                                             tool_calls, session_id, request_id,
@@ -621,7 +619,7 @@ class ReActAgent:
                                     except HookInterrupt:
                                         log.info("parallel tool calls fell back to sequential (HookInterrupt)")
                                 if len(tool_calls) <= 1 or should_reask is False:
-                                    # --- Sequential path ---
+                                    # --- 串行路径 ---
                                     for tool_call in tool_calls:
                                         name = tool_call["function"]["name"]
                                         try:
@@ -695,7 +693,7 @@ class ReActAgent:
                                     await self._hook_manager.execute(HookEvent.AFTER_MODEL_CALL, ctx)
                                 should_reask = True
                                 break
-                            # Final answer
+                            # 最终回答
                             yield E2AResponse(
                                 request_id=request_id,
                                 sequence=seq,
@@ -739,7 +737,7 @@ class ReActAgent:
             if should_reask:
                 continue
 
-    # -- Parallel tool execution --------------------------------------------
+    # -- 并行工具执行 --------------------------------------------
 
     async def _try_parallel_tool_calls(
         self,
@@ -747,11 +745,11 @@ class ReActAgent:
         session_id: str,
         request_id: str,
     ) -> tuple[list[tuple[str, str]], list[dict]]:
-        """Execute multiple tool calls concurrently via asyncio.gather.
+        """经 asyncio.gather 并发执行多个 tool call。
 
-        Each tool call gets its own HookContext (isolated inputs + extra) and
-        its own TODO_EVENTS buffer so concurrent calls don't race on shared
-        state.  Results are returned in the same order as *tcs*.
+        每个 tool call 拿自己的 HookContext(隔离的 inputs + extra)和自己的
+        TODO_EVENTS buffer,使并发调用不在共享 state 上竞争。结果按 *tool_calls*
+        的顺序返回。
         """
         results_per_tool: list[tuple[str, str] | None] = [None] * len(tool_calls)
         todos_per_tool: list[list[dict]] = [[] for _ in range(len(tool_calls))]
@@ -800,10 +798,10 @@ class ReActAgent:
         all_todos = [snap for todo_list in todos_per_tool for snap in todo_list]
         return results, all_todos
 
-    # -- Interrupt snapshot -------------------------------------------------
+    # -- 中断快照 -------------------------------------------------
 
     async def _build_interrupt_snapshot(self, ctx: HookContext, session_id: str) -> str:
-        """Build an interrupt snapshot message from session history + TodoStore."""
+        """从 session history + TodoStore 构造一条 interrupt snapshot 消息。"""
         parts = ["[SYSTEM] 任务中断。"]
 
         if ctx.exception:
@@ -834,10 +832,10 @@ class ReActAgent:
 
         return " ".join(parts)
 
-    # -- Orphan tool-result fill --------------------------------------------
+    # -- 孤儿 tool-result 填充 --------------------------------------------
 
     async def _fill_missing_tool_results(self, session_id: str, request_id: str) -> None:
-        """Inject synthetic tool_result for orphan tool_calls from a crash."""
+        """为崩溃产生的孤儿 tool_calls 注入合成的 tool_result。"""
         msgs = self._session_store.get_messages(session_id)
         if not msgs:
             return
@@ -872,11 +870,11 @@ class ReActAgent:
                     {"role": "tool", "tool_call_id": tc_id, "content": content},
                     request_id=request_id)
 
-    # -- @hook-decorated tool call ------------------------------------------
+    # -- @hook 装饰的 tool call ------------------------------------------
 
     @hook(HookEvent.BEFORE_TOOL_CALL, HookEvent.AFTER_TOOL_CALL,
           on_exception=HookEvent.ON_TOOL_EXCEPTION)
     async def _tool_call(self, ctx: HookContext) -> str:
-        """Tool execution wrapped with @hook lifecycle."""
+        """用 @hook 生命周期包裹的 tool 执行。"""
         inputs: ToolCallInputs = ctx.inputs  # type: ignore[assignment]
         return await self._tool_manager.execute(inputs.name, inputs.args)

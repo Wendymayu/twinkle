@@ -13,12 +13,12 @@ from twinkle.agentserver.tools.manager import ToolManager
 def _tm_with_tools():
     @tool
     async def read_file(path: str) -> str:
-        """read a file"""
+        """读取文件"""
         return f"content:{path}"
 
     @tool
     async def mcp_query(sql: str) -> str:
-        """query db"""
+        """查询数据库"""
         return f"rows:{sql}"
 
     m = ToolManager()
@@ -39,7 +39,7 @@ def test_tools_search_finds_deferred_by_exact_name():
     assert res["matches"][0]["name"] == "mcp_query"
     assert "input_schema" in res["matches"][0]
     assert res["count"] == 1
-    assert "input_schema" in res["message"]  # guidance points to invoke_tool via schema
+    assert "input_schema" in res["message"]  # guidance 指向 invoke_tool(经 schema)
 
 
 def test_tools_search_case_insensitive():
@@ -77,7 +77,7 @@ def test_tools_search_empty_name_returns_required_message():
     assert res2["success"] is False
     assert "tool_name is required" in res2["message"]
 
-    res3 = json.loads(asyncio.run(t.invoke({})))  # missing key entirely
+    res3 = json.loads(asyncio.run(t.invoke({})))  # 完全缺少该 key
     assert res3["success"] is False
     assert "tool_name is required" in res3["message"]
 
@@ -110,7 +110,7 @@ def test_invoke_tool_rejects_unknown_tool():
     res = json.loads(asyncio.run(inv.invoke({"tool_name": "nope",
                                             "arguments": {}})))
     assert res["success"] is False
-    assert "不是按需可见工具" in res["error"]  # same contract as eager-reject
+    assert "不是按需可见工具" in res["error"]  # 与 eager 拒绝同契约
 
 
 def test_invoke_tool_propagates_deferred_tool_exception():
@@ -118,7 +118,7 @@ def test_invoke_tool_propagates_deferred_tool_exception():
     实现故意不 try/except(对齐 catch-specific-then-propagate 约定);本测试锁定该行为。"""
     @tool
     async def raising_tool(x: str) -> str:
-        """raises on purpose"""
+        """故意抛异常"""
         raise RuntimeError("boom")
     m = _tm_with_tools()
     m.register(raising_tool)   # raising_tool 不在 _EAGER → deferred

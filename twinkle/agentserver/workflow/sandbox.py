@@ -1,9 +1,9 @@
-"""Sandbox — safe namespace for exec(plan_code) isolation.
+"""Sandbox — 为 exec(plan_code) 隔离提供安全 namespace。
 
-Provides a restricted execution environment for plan_code that:
-1. Replaces __builtins__ with a safe whitelist (no open/exec/eval/getattr)
-2. Replaces __import__ with a custom safe_import that blocks forbidden modules
-3. Exposes PlanNode, HookInterrupt, and a restricted asyncio for plan_code to use
+为 plan_code 提供受限的执行环境：
+1. 用安全白名单替换 __builtins__（无 open/exec/eval/getattr）
+2. 用自定义 safe_import 替换 __import__，阻止禁止的模块
+3. 向 plan_code 暴露 PlanNode、HookInterrupt 和受限的 asyncio
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import asyncio
 import importlib
 from typing import Any
 
-# ~40 safe builtins — no open/exec/eval/getattr/type
+# 约 40 个安全 builtin — 无 open/exec/eval/getattr/type
 _SAFE_BUILTINS: dict[str, Any] = {
     "__build_class__": __build_class__,  # required for class statements in exec()
     "True": True,
@@ -51,9 +51,9 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "sum": sum,
     "tuple": tuple,
     "zip": zip,
-    # I/O — print for workflow logging (output goes to AgentServer stdout)
+    # I/O — print 用于 workflow 日志（输出到 AgentServer stdout）
     "print": print,
-    # Exception types — plan_code may need to raise
+    # 异常类型 — plan_code 可能需要抛出
     "Exception": Exception,
     "ValueError": ValueError,
     "TypeError": TypeError,
@@ -63,12 +63,12 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "NotImplementedError": NotImplementedError,
     "StopIteration": StopIteration,
     "AttributeError": AttributeError,
-    # Required for class inheritance
+    # 类继承所需
     "super": super,
     "property": property,
 }
 
-# Modules that plan_code must never import
+# plan_code 绝不能 import 的模块
 _FORBIDDEN_MODULES: frozenset[str] = frozenset(
     {
         "os",
@@ -83,14 +83,14 @@ _FORBIDDEN_MODULES: frozenset[str] = frozenset(
     }
 )
 
-# Only imports under these prefixes are allowed
+# 只允许这些前缀下的 import
 _ALLOWED_IMPORT_PREFIXES: tuple[str, ...] = ("twinkle.agentserver.workflow",)
 
 
 class _SafeAsyncio:
-    """Restricted asyncio proxy — only exposes safe coroutines.
+    """受限的 asyncio 代理 — 只暴露安全的协程。
 
-    Blocks create_subprocess_shell/exec, open_connection, start_server, etc.
+    阻止 create_subprocess_shell/exec、open_connection、start_server 等。
     """
 
     _ALLOWED = frozenset({
@@ -106,9 +106,6 @@ class _SafeAsyncio:
             f"asyncio.{name} is forbidden in plan_code"
         )
 
-    def __hasattr__(self, name: str) -> bool:
-        return name in self._ALLOWED
-
 
 def safe_import(
     name: str,
@@ -117,42 +114,42 @@ def safe_import(
     fromlist: tuple[str, ...] = (),
     level: int = 0,
 ) -> Any:
-    """Custom __import__ replacement for the sandbox.
+    """sandbox 的自定义 __import__ 替换。
 
-    Blocks:
-    - Relative imports (level > 0)
-    - Forbidden modules (os, sys, subprocess, etc.)
-    - Any module not under an allowed prefix
+    阻止：
+    - 相对导入（level > 0）
+    - 禁止的模块（os、sys、subprocess 等）
+    - 任何不在允许前缀下的模块
 
-    Raises ImportError for any violation.
+    任何违规都抛 ImportError。
     """
     if level:
         raise ImportError(f"Relative imports are forbidden in plan_code (level={level})")
 
-    # Check forbidden modules
+    # 检查禁止的模块
     top_level = name.split(".")[0]
     if top_level in _FORBIDDEN_MODULES or name in _FORBIDDEN_MODULES:
         raise ImportError(f"plan_code cannot import forbidden module: {name}")
 
-    # Check allowed prefixes
+    # 检查允许的前缀
     if not any(name.startswith(prefix) for prefix in _ALLOWED_IMPORT_PREFIXES):
         raise ImportError(
             f"plan_code cannot import: {name} — "
             f"only imports from {_ALLOWED_IMPORT_PREFIXES} are allowed"
         )
 
-    # Use importlib.import_module to actually load the module
+    # 用 importlib.import_module 真正加载模块
     module = importlib.import_module(name)
     if fromlist:
-        # Ensure sub-module attributes are accessible
+        # 确保子模块属性可访问
         for item_name in fromlist:
             if not hasattr(module, item_name):
                 try:
                     importlib.import_module(f"{name}.{item_name}")
                 except ImportError:
-                    pass  # Non-submodule attribute — same as __import__ behavior
+                    pass  # 非子模块属性 — 同 __import__ 的行为
         return module
-    # fromlist empty: import x.y returns top-level package x
+    # fromlist 为空：import x.y 返回顶层包 x
     if "." in name:
         import sys
 
@@ -161,13 +158,13 @@ def safe_import(
 
 
 def build_namespace() -> dict[str, Any]:
-    """Build a sandboxed namespace for exec(plan_code).
+    """为 exec(plan_code) 构建沙箱 namespace。
 
-    - Replaces __builtins__ with the safe whitelist
-    - Injects custom __import__ via safe_import
-    - Lazy-imports PlanNode and HookInterrupt into the namespace
+    - 用安全白名单替换 __builtins__
+    - 通过 safe_import 注入自定义 __import__
+    - 惰性导入 PlanNode 和 HookInterrupt 到 namespace
     """
-    # Lazy imports — PlanNode may not exist yet (Task 4)
+    # 惰性 import — PlanNode 此时可能还不存在（Task 4）
     from twinkle.agentserver.hooks.base import HookInterrupt
 
     try:

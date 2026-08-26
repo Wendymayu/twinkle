@@ -9,7 +9,7 @@ from twinkle.agentserver.tools.errors import ToolError
 
 @pytest.fixture
 def ws(monkeypatch, tmp_path):
-    """Point file_tools at a tmp workspace with a fixed session id."""
+    """把 file_tools 指向一个 tmp workspace,用固定 session id。"""
     monkeypatch.setattr(file_tools, "WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(file_tools, "get_plan_todo_session_id", lambda: "test-session-key")
     file_tools._registry.clear("test-session-key")
@@ -290,7 +290,7 @@ def test_glob_escape_base_rejected(ws):
 
 
 def test_glob_absolute_pattern_returns_error(ws):
-    # Path.glob raises NotImplementedError on absolute patterns (Py 3.14);
-    # the tool must catch it and raise a clean ToolError, not leak.
+    # Path.glob 对绝对路径 pattern 抛 NotImplementedError(Py 3.14);
+    # 工具必须接住并抛出干净的 ToolError,不能泄露出去。
     with pytest.raises(ToolError, match="glob failed"):
         _invoke(file_tools.glob, pattern="/abs/*")

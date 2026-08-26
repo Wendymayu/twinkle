@@ -1,9 +1,9 @@
-"""Task 10 — HookManager.execute() must propagate HookInterrupt.
+"""Task 10 — HookManager.execute() 必须向上传播 HookInterrupt。
 
-A HookInterrupt is a HITL control-flow signal (e.g., a permission hook
-asking for approval). It must reach the AgentLoop caller, NOT be caught
-by execute()'s fail-soft `except Exception` (which would log + swallow it).
-All other exceptions keep fail-soft behavior (logged, continue).
+HookInterrupt 是 HITL 控制流信号(例如权限 hook 请求审批)。
+它必须到达 AgentLoop 调用方,不能被 execute() 的 fail-soft
+`except Exception` 捕获(那会 log + 吞掉)。
+其他异常保持 fail-soft 行为(log 后继续)。
 """
 import asyncio
 

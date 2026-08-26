@@ -1,7 +1,7 @@
 import pytest
 
-# Skip the whole file gracefully if [obs] isn't installed — keeps the
-# existing test suite green without opentelemetry.
+# 若未安装 [obs] 则优雅跳过整个文件 —— 在没有 opentelemetry 的情况下保持
+# 现有测试套件全绿。
 pytest.importorskip("opentelemetry.sdk")
 
 from opentelemetry.sdk.metrics import MeterProvider
@@ -18,7 +18,7 @@ from twinkle.observability import attributes as A
 
 
 class CollectingSpanExporter(SpanExporter):
-    """In-memory SpanExporter; appended spans available via .spans."""
+    """内存版 SpanExporter；通过 .spans 访问已追加的 span。"""
 
     def __init__(self):
         self.spans = []
@@ -65,7 +65,7 @@ def test_attribute_constants_are_strings():
     assert A.GEN_AI_USAGE_INPUT_TOKENS == "gen_ai.usage.input_tokens"
     assert A.METRIC_TOKEN_USAGE == "gen_ai.client.token.usage"
     assert A.TOOL_ERROR_PREFIX == "[tool error]"
-    # --- new: compression + evolution ---
+    # --- 新增：compression + evolution ---
     assert A.SPAN_COMPRESSION == "twinkle.compression"
     assert A.SPAN_SKILL_EVOLUTION == "twinkle.skill.evolution"
     assert A.TWINKLE_COMPRESSION_TOKENS_BEFORE == "twinkle.compression.tokens_before"
@@ -83,8 +83,8 @@ import types
 
 from twinkle.observability.wrap import patch_method
 
-# Each test uses a *local* class (no shared module-level state) to avoid
-# monkey-patch cross-test pollution.
+# 每个测试使用 *local* 类（无共享的模块级状态）以避免
+# monkey-patch 的跨测试污染。
 
 
 def test_patch_wraps_and_calls_original():
@@ -125,7 +125,7 @@ def test_patch_is_idempotent():
         return wrapped
 
     assert patch_method(Dummy, "method", factory) is True
-    assert patch_method(Dummy, "method", factory) is False  # already wrapped
+    assert patch_method(Dummy, "method", factory) is False  # 已包装过
 
 
 def test_patch_failsoft_missing_method():
@@ -265,7 +265,7 @@ def test_metrics_record_tool_call(meter_metricreader):
 def test_metrics_failsoft_none_usage(meter_metricreader):
     meter, _ = meter_metricreader
     m = Metrics(meter)
-    m.record_token_usage(None, "m")  # must not raise
+    m.record_token_usage(None, "m")  # 不得抛异常
     m.record_tool_call(None, error=True, duration_s=0.0)
 
 
@@ -274,8 +274,8 @@ def test_metrics_none_meter_is_silent_noop(caplog):
 
     with caplog.at_level(logging.ERROR, logger="twinkle.observability.metrics"):
         m = Metrics(None)
-    # The meter-None guard must skip instrument creation silently (no
-    # fail-soft tracebacks) — this is the traces-on + metrics-off path.
+    # meter 为 None 的守卫必须静默跳过 instrument 创建（不输出
+    # fail-soft 回溯）—— 这是 traces 开启 + metrics 关闭的路径。
     assert "create_counter failed" not in caplog.text
     assert "create_histogram failed" not in caplog.text
     m.record_token_usage({"prompt_tokens": 1}, "m")
@@ -289,7 +289,7 @@ from twinkle.observability.instrumentors.llm import instrument_llm
 
 
 class _Cfg:
-    """Config stand-in for instrumentor tests (input/output always captured)."""
+    """instrumentor 测试的 Config 替身（始终捕获 input/output）。"""
     pass
 
 
@@ -332,16 +332,15 @@ def test_instrument_llm_emits_gen_ai_chat_span(tracer_exporter, meter_metricread
     assert attrs["gen_ai.usage.output_tokens"] == 2
     assert attrs["gen_ai.usage.total_tokens"] == 7
     assert isinstance(attrs["gen_ai.streaming.first_token_ms"], int)
-    assert "gen_ai.input.messages" in attrs  # always captured now
+    assert "gen_ai.input.messages" in attrs  # 现在始终捕获
     assert "gen_ai.output.messages" in attrs
 
 
 def test_instrument_llm_handles_pydantic_completion_usage(tracer_exporter, meter_metricreader):
-    """Regression: the real openai SDK yields Finish.usage as a
-    CompletionUsage pydantic object, not a dict. Reading tokens via .get()
-    raised AttributeError and broke the whole agent invoke (only 2 spans,
-    status=ERROR, no usage/metrics). Must support both dict (fakes/tests)
-    and pydantic objects."""
+    """回归测试：真实 openai SDK 把 Finish.usage 作为 CompletionUsage pydantic 对象
+    而非 dict 产出。通过 .get() 读 token 会抛 AttributeError 并搞崩整个 agent invoke
+    （只有 2 个 span、status=ERROR、没有 usage/metrics）。必须同时支持 dict（fake/测试）
+    和 pydantic 对象。"""
     from openai.types import CompletionUsage
 
     class _FakeLLM:
@@ -364,19 +363,19 @@ def test_instrument_llm_handles_pydantic_completion_usage(tracer_exporter, meter
     async def run():
         return [e async for e in _FakeLLM().stream(messages=[], tools=[])]
 
-    events = asyncio.run(run())  # previously raised AttributeError
+    events = asyncio.run(run())  # 以前会抛 AttributeError
     assert [type(e).__name__ for e in events] == ["TextDelta", "Finish"]
 
     assert len(exp.spans) == 1
     span = exp.spans[0]
     assert span.name == "gen_ai.chat"
-    assert span.status.status_code.name != "ERROR"  # must not be marked failed
+    assert span.status.status_code.name != "ERROR"  # 不得标记为失败
     attrs = span.attributes
     assert attrs["gen_ai.usage.input_tokens"] == 5
     assert attrs["gen_ai.usage.output_tokens"] == 2
     assert attrs["gen_ai.usage.total_tokens"] == 7
 
-    # metrics must record token usage from the pydantic object too
+    # metrics 也必须从 pydantic 对象记录 token 用量
     reader.force_flush()
     assert A.METRIC_TOKEN_USAGE in _metric_names(reader)
 
@@ -397,7 +396,7 @@ def test_instrument_llm_captures_message_content(tracer_exporter, meter_metricre
     assert len(exp.spans) == 1
     attrs = exp.spans[0].attributes
     assert "gen_ai.input.messages" in attrs
-    assert "hi" in attrs["gen_ai.input.messages"]  # actual content captured
+    assert "hi" in attrs["gen_ai.input.messages"]  # 实际内容已捕获
     assert "gen_ai.output.messages" in attrs
 
 
@@ -430,7 +429,7 @@ def test_instrument_tool_emits_gen_ai_tool_span(tracer_exporter, meter_metricrea
     assert span.name == "gen_ai.tool"
     assert span.attributes["gen_ai.tool.name"] == "web_fetch"
     assert span.attributes["gen_ai.tool.error"] is False
-    assert "gen_ai.tool.arguments" in span.attributes  # always captured now
+    assert "gen_ai.tool.arguments" in span.attributes  # 现在始终捕获
     assert "gen_ai.tool.result" in span.attributes
 
 
@@ -475,8 +474,8 @@ from twinkle.observability.instrumentors.llm import _trunc
 
 
 def test_trunc_default_is_full_no_truncation(monkeypatch):
-    """Default (TWINKLE_OBS_ATTR_LIMIT unset) captures full content — trace
-    input/output are fully visible without configuration (was capped at 4096)."""
+    """默认（未设置 TWINKLE_OBS_ATTR_LIMIT）捕获完整内容 —— trace 的
+    input/output 无需配置即可完整可见（以前截断到 4096）。"""
     monkeypatch.delenv("TWINKLE_OBS_ATTR_LIMIT", raising=False)
     big = "x" * 50000
     assert _trunc(big) == big
@@ -492,7 +491,7 @@ def test_trunc_custom_limit_caps(monkeypatch):
     monkeypatch.setenv("TWINKLE_OBS_ATTR_LIMIT", "4096")
     out = _trunc("z" * 5000)
     assert out.endswith("...")
-    assert len(out) == 4096 + 3  # cap + ellipsis suffix
+    assert len(out) == 4096 + 3  # 上限 + 省略号后缀
 
 
 from twinkle.observability.instrumentors.agent import instrument_agent
@@ -534,10 +533,10 @@ def test_instrument_agent_emits_invoke_span(tracer_exporter, meter_metricreader)
     assert len(exp.spans) == 1
     span = exp.spans[0]
     assert span.name == "twinkle.agent.invoke"
-    assert span.parent is None  # root
+    assert span.parent is None  # 根 span
     assert span.attributes["twinkle.request.id"] == "req-1"
     assert span.attributes["twinkle.session.id"] == "sess-1"
-    assert span.attributes["twinkle.agent.iterations"] == 0  # no llm call in this fake
+    assert span.attributes["twinkle.agent.iterations"] == 0  # 这个 fake 中没有 llm 调用
     assert span.attributes["twinkle.agent.status"] == "succeeded"
 
 
@@ -567,7 +566,7 @@ def test_instrument_agent_records_error_status_and_reraises(tracer_exporter, met
 
 
 class _E2AFrame:
-    """Minimal duck-typed E2AResponse for agent-instrumentor status tests."""
+    """用于 agent-instrumentor 状态测试的最小 duck-typed E2AResponse。"""
 
     def __init__(self, response_kind: str, status: str):
         self.response_kind = response_kind
@@ -575,8 +574,8 @@ class _E2AFrame:
 
 
 def test_instrument_agent_marks_failed_on_e2a_error_frame(tracer_exporter, meter_metricreader):
-    # MAX_STEPS -> agent loop yields e2a.error and returns normally (no exception);
-    # the span must reflect the real outcome (failed), not be mislabeled "succeeded".
+    # MAX_STEPS -> agent loop 产出 e2a.error 并正常返回（无异常）；
+    # span 必须反映真实结果（failed），不能被误标为 "succeeded"。
     class _FakeAgent:
         async def run(self, request):
             yield _E2AFrame("e2a.error", "failed")
@@ -634,9 +633,9 @@ def test_init_providers_console_returns_tracer_and_meter(monkeypatch):
     tracer, meter = init_providers(cfg)
     assert tracer is not None
     assert meter is not None
-    # (Tracer functionality is covered by test_tracer_exporter_collects_spans;
-    # we don't start a span here to avoid the console BatchSpanProcessor
-    # exporting to closed stderr at interpreter shutdown.)
+    # （Tracer 功能由 test_tracer_exporter_collects_spans 覆盖；
+    # 这里不开 span，以避免 console BatchSpanProcessor 在解释器关闭时
+    # 向已关闭的 stderr 导出。）
 
 
 from twinkle.observability import setup
@@ -647,11 +646,11 @@ def test_setup_noop_when_disabled(monkeypatch):
     for k in _OBS_KEYS:
         monkeypatch.delenv(k, raising=False)
     assert setup() is False
-    assert setup() is False  # still no-op, no raise, _APPLIED stays False
+    assert setup() is False  # 仍然是 no-op，不抛异常，_APPLIED 保持 False
 
 
-# --- end-to-end: full trace tree (agent.invoke -> gen_ai.chat + gen_ai.tool) ---
-# Only one test uses these module-level fakes, so patching them is isolated.
+# --- 端到端：完整 trace 树（agent.invoke -> gen_ai.chat + gen_ai.tool）---
+# 只有一个测试用到这些模块级 fake，所以 patch 它们是隔离的。
 
 class _IntegLLM:
     def __init__(self):
@@ -690,10 +689,9 @@ class _IntegEnvelope:
 
 
 def _fresh_fake_compression_mod():
-    """Fresh module-like object so apply_instrumentors' compression entry
-    patches an isolated target. The real compression module is a singleton
-    shared across tests; patch_method's idempotency guard returns False on the
-    2nd patch, which would make results["compression"] False in later tests.
+    """新鲜的 module-like 对象，使 apply_instrumentors 的 compression 条目 patch 一个
+    隔离的目标。真实 compression 模块是跨测试共享的 singleton；patch_method 的幂等守卫
+    在第 2 次 patch 时返回 False，这会让后续测试中 results["compression"] 为 False。
     """
     mod = types.ModuleType("fake_compression_obs")
 
@@ -706,8 +704,8 @@ def _fresh_fake_compression_mod():
 
 
 class _FakeEvoNoop:
-    """Noop orchestrator for apply_instrumentors isolation (fresh class per
-    test avoids the idempotency guard on a shared real orchestrator)."""
+    """用于 apply_instrumentors 隔离的 noop orchestrator（每个测试用全新类
+    避免共享的真实 orchestrator 上的幂等守卫）。"""
     async def evolve(self, skill_name, conversation_messages, *a, **k):
         return None
 
@@ -746,28 +744,27 @@ def test_full_trace_tree(tracer_exporter, meter_metricreader):
     assert agent_span.name == "twinkle.agent.invoke"
     assert agent_span.attributes["twinkle.request.id"] == "req-x"
     assert agent_span.attributes["twinkle.session.id"] == "sess-x"
-    assert agent_span.attributes["twinkle.agent.iterations"] == 1  # one llm call
+    assert agent_span.attributes["twinkle.agent.iterations"] == 1  # 一次 llm 调用
     assert agent_span.attributes["twinkle.agent.status"] == "succeeded"
 
     chat_span = next(s for s in exp.spans if s.name == "gen_ai.chat")
     tool_span = next(s for s in exp.spans if s.name == "gen_ai.tool")
     assert chat_span.parent is not None
     assert tool_span.parent is not None
-    # both children are direct children of the agent span
+    # 两个子 span 都是 agent span 的直接子节点
     assert chat_span.parent.span_id == agent_span.context.span_id
     assert tool_span.parent.span_id == agent_span.context.span_id
 
 
-# --- subagent: nested invoke span must parent to the tool span (not the outer invoke) ---
-# A tool that internally runs another instrumented agent loop (mimics spawn_subagent).
-# With start_as_current_span on the tool, the nested twinkle.agent.invoke span's
-# parent must be the gen_ai.tool span (the current span during the tool's execution).
-# Before the fix (start_span, not current) the nested invoke parented to the outer
-# agent invoke instead.
+# --- subagent：嵌套的 invoke span 必须挂在 tool span 下（而非外层 invoke）---
+# 一个内部运行另一个已 instrument 的 agent loop 的 tool（模拟 spawn_subagent）。
+# 由于 tool 上用 start_as_current_span，嵌套的 twinkle.agent.invoke span 的 parent
+# 必须是 gen_ai.tool span（tool 执行期间的 current span）。
+# 修复前（用 start_span 而非 current）嵌套 invoke 会挂到外层 agent invoke 下。
 
 class _SubLLM:
-    """Fresh LLM class for this test only (NOT shared with test_full_trace_tree,
-    so apply_instrumentors' idempotency guard doesn't trip on a pre-patched class)."""
+    """仅用于本测试的新鲜 LLM 类（不与 test_full_trace_tree 共享，因此
+    apply_instrumentors 的幂等守卫不会在一个已 patch 的类上触发）。"""
 
     def __init__(self):
         self._model = "sub-model"
@@ -782,8 +779,8 @@ class _SubLLM:
 
 
 class _RecurAgent:
-    """Streams from its llm; if it has tools, calls spawn_subagent. Used as BOTH
-    the outer agent and the nested child (same instrumented class)."""
+    """从其 llm 流式产出；若有 tools 则调用 spawn_subagent。同时用作外层 agent
+    和嵌套子 agent（同一个已 instrument 的类）。"""
 
     def __init__(self, llm, tools=None):
         self._llm = llm
@@ -797,9 +794,9 @@ class _RecurAgent:
 
 
 class _SpawnTool:
-    """Mimics spawn_subagent: execute runs a nested agent's run in a child
-    task. asyncio.create_task copies the OTel context, so the nested invoke span's
-    parent = whatever was current at create_task time."""
+    """模拟 spawn_subagent：execute 在 child task 中运行嵌套 agent 的 run。
+    asyncio.create_task 会复制 OTel context，因此嵌套 invoke span 的 parent
+    = create_task 时的 current span。"""
 
     def __init__(self, child_agent):
         self._child = child_agent
@@ -837,9 +834,9 @@ def test_subagent_invoke_span_nests_under_tool_span(tracer_exporter, meter_metri
     assert results["compression"] is True
     assert results["evolution"] is True
 
-    child_agent = _RecurAgent(_SubLLM(), tools=None)   # nested: streams only
+    child_agent = _RecurAgent(_SubLLM(), tools=None)   # 嵌套：仅流式产出
     tool = _SpawnTool(child_agent)
-    outer = _RecurAgent(_SubLLM(), tools=tool)         # outer: streams + calls tool
+    outer = _RecurAgent(_SubLLM(), tools=tool)         # 外层：流式产出 + 调用 tool
 
     async def run():
         return [f async for f in outer.run(_IntegEnvelope())]
@@ -847,7 +844,7 @@ def test_subagent_invoke_span_nests_under_tool_span(tracer_exporter, meter_metri
     asyncio.run(run())
 
     names = [s.name for s in exp.spans]
-    # outer invoke + outer chat + tool + nested invoke + nested chat
+    # 外层 invoke + 外层 chat + tool + 嵌套 invoke + 嵌套 chat
     assert names.count("twinkle.agent.invoke") == 2
     assert names.count("gen_ai.chat") == 2
     assert names.count("gen_ai.tool") == 1
@@ -860,8 +857,8 @@ def test_subagent_invoke_span_nests_under_tool_span(tracer_exporter, meter_metri
     nested_invoke = nested[0]
 
     tool_span = next(s for s in exp.spans if s.name == "gen_ai.tool")
-    # the tool span's parent is the OUTER invoke (current when the tool ran)
+    # tool span 的 parent 是外层 invoke（tool 运行时的 current span）
     assert tool_span.parent.span_id == outer_invoke.context.span_id
-    # the NESTED invoke's parent must be the tool span (the fix) — NOT the outer invoke.
-    # Before the fix this asserted against outer_invoke.context.span_id.
+    # 嵌套 invoke 的 parent 必须是 tool span（即修复点）—— 不是外层 invoke。
+    # 修复前这里断言的是 outer_invoke.context.span_id。
     assert nested_invoke.parent.span_id == tool_span.context.span_id

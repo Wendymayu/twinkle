@@ -1,19 +1,19 @@
-"""Central Python logging setup — routes process logs to ~/.twinkle/logs/.
+"""集中式 Python logging setup —— 把进程日志路由到 ~/.twinkle/logs/。
 
-Three files under LOG_DIR (= <WORKSPACE_DIR>/logs):
-  gateway.log                    gateway process logs (daily-rotated)
-  server.log                     agentserver process logs (daily-rotated)
-  audit/permission_audit.jsonl   JSONL permission audit (no rotation,
-                                 written directly by ToolPermissionLog)
+LOG_DIR（= <WORKSPACE_DIR>/logs）下三个文件：
+  gateway.log                    gateway 进程日志（按天轮转）
+  server.log                     agentserver 进程日志（按天轮转）
+  audit/permission_audit.jsonl   JSONL permission audit（不轮转，
+                                 由 ToolPermissionLog 直接写）
 
-Console (stderr) output is retained alongside the files (INFO+). gateway.log
-and server.log rotate daily (midnight, backupCount=14). The audit file is
-owned by ToolPermissionLog, NOT here — it stays decoupled so audit still
-works even if setup_logging is never called (e.g. in tests).
+Console（stderr）输出与文件并存（INFO+）。gateway.log 与 server.log 按天
+轮转（midnight，backupCount=14）。audit 文件归 ToolPermissionLog 所有，
+不在此处——保持解耦，使即便 setup_logging 从未被调用（如测试中）audit
+仍工作。
 
-Call setup_logging("gateway"|"agentserver") once from each process's __main__
-before asyncio.run(). Reconfigurable: each call clears root handlers and
-rebuilds (safe because observability only touches OTel, not Python logging).
+在每个进程的 __main__ 中、asyncio.run() 之前调用一次
+setup_logging("gateway"|"agentserver")。可重配：每次调用清空 root handler
+并重建（安全，因 observability 只动 OTel，不动 Python logging）。
 """
 from __future__ import annotations
 
@@ -29,10 +29,10 @@ _ROLE_FILE = {"gateway": "gateway.log", "agentserver": "server.log"}
 
 
 def setup_logging(role: str) -> None:
-    """Configure root logging: stderr console + one daily-rotated file per role.
+    """配置 root logging：stderr console + 每个 role 一个按天轮转的文件。
 
-    Idempotent in effect: clears existing root handlers, then re-adds. Safe to
-    call once at startup or again (e.g. in tests).
+    效果幂等：清空已有 root handler 再重加。启动时调用一次或重复调用
+    （如测试中）均安全。
     """
     log_dir = Path(LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)

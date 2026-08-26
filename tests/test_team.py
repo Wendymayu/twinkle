@@ -1,4 +1,4 @@
-"""Tests for Team Phase 18: TeamManager, Team, delegate_to_member, wiring."""
+"""Team Phase 18 的测试:TeamManager、Team、delegate_to_member、wiring。"""
 
 import asyncio
 import tempfile
@@ -16,7 +16,7 @@ from twinkle.agentserver.tools.manager import ToolManager
 from twinkle.config.schema import TeamConfig
 
 
-# ── helpers ───────────────────────────────────────────────────
+# ── helper ────────────────────────────────────────────────────
 
 def _parent_tools() -> ToolManager:
     from twinkle.agentserver.tools import tool_manager
@@ -32,7 +32,7 @@ def _team_manager(store, config=None):
 
 
 class _ScriptedLLM:
-    """Returns one canned event-list per call, in order."""
+    """每次调用返回一个预设的 event-list,按序。"""
 
     def __init__(self, scripts):
         self._scripts = scripts
@@ -52,7 +52,7 @@ def _team_with_scripted_llm(store, scripts, config=None):
     return team
 
 
-# ── workspace ─────────────────────────────────────────────────
+# ── 工作区 ─────────────────────────────────────────────────────
 
 def test_team_workspace_dir():
     d = team_workspace_dir("s1")
@@ -82,7 +82,7 @@ def test_member_key_different_persona():
     assert k1 != k2
 
 
-# ── TeamManager lifecycle ─────────────────────────────────────
+# ── TeamManager 生命周期 ────────────────────────────────────────
 
 def test_team_manager_ensure_team(session_store):
     mgr = _team_manager(session_store)
@@ -124,10 +124,10 @@ def test_build_member_filtered_tools(session_store):
     member = asyncio.run(_run())
 
     tool_names = {t.card.name for t in member._tool_manager.list()}
-    # tools in whitelist present
+    # whitelist 内的工具存在
     for name in ["web_search", "read_file", "write_file", "command_exec"]:
         assert name in tool_names, f"{name} should be in member tools"
-    # excluded tools
+    # 已排除的工具
     for name in ["spawn_subagent", "delegate_to_member", "write_memory"]:
         assert name not in tool_names, f"{name} should NOT be in member tools"
 
@@ -142,7 +142,7 @@ def test_build_member_persona_in_system_prompt(session_store):
         return await team._build_member("researcher", "金融分析师")
     member = asyncio.run(_run())
 
-    # persona baked into base_sections (injected at construction); session store no longer seeds a system msg
+    # persona 编入 base_sections(构造时注入);session store 不再种 system msg
     built = "\n\n".join(s.content for s in member._base_sections)
     assert "researcher" in built
     assert "金融分析师" in built
@@ -163,11 +163,10 @@ def test_build_member_workspace_in_prompt(session_store):
 
 
 def test_build_member_registers_repeat_detector_hook(session_store):
-    """Team member runs unbounded (no step cap), so it must register
-    RepeatToolCallDetectorHook — its CRITICAL force_finish backfills the
-    missing hard step cap, aligning team member with the main agent's
-    loop-detection fallback. (Subagent instead keeps hard_timeout=3000s as
-    its whole-execution cap and need not register it.)"""
+    """Team member 无界运行(无 step cap),故必须注册
+    RepeatToolCallDetectorHook —— 其 CRITICAL force_finish 回填缺失的
+    硬 step cap,使 team member 与主 agent 的 loop-detection 兜底对齐。
+    (Subagent 则保留 hard_timeout=3000s 作为整任务 cap,无需注册它。)"""
     from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
         RepeatToolCallDetectorHook)
     mgr = _team_manager(session_store)
@@ -205,7 +204,7 @@ def test_delegate_reuses_member(session_store):
     r2 = asyncio.run(team.delegate("researcher", "researcher persona", "task2"))
     assert "result1" in r1
     assert "result2" in r2
-    # same persona -> same member key -> only one member in cache
+    # 相同 persona -> 相同 member key -> cache 中只有一个 member
     assert len(team._members) == 1
 
 
@@ -226,10 +225,10 @@ def test_member_run_end_releases_uncompleted_claim(session_store, isolated_todo_
     assert after.owner == ""
 
 
-# ── delegate_to_member tool ───────────────────────────────────
+# ── delegate_to_member 工具 ───────────────────────────────────
 
 def test_delegate_to_member_no_contextvar():
-    """When CURRENT_TEAM is not set, raises ToolError (unavailable)."""
+    """CURRENT_TEAM 未设置时抛 ToolError(不可用)。"""
     from twinkle.agentserver.tools.builtin.team_tools import delegate_to_member
 
     token = CURRENT_TEAM.set(None)
@@ -264,7 +263,7 @@ def test_team_context_hook_sets_contextvar(session_store):
 
 
 def test_team_context_hook_noop_when_normal_mode(session_store):
-    """TeamContextHook sets CURRENT_TEAM to None when mode != team."""
+    """mode != team 时 TeamContextHook 把 CURRENT_TEAM 置为 None。"""
     from twinkle.agentserver.hooks.base import HookContext, HookEvent, InvokeInputs
     from twinkle.agentserver.hooks.builtin.team_context_hook import TeamContextHook
 
@@ -274,7 +273,7 @@ def test_team_context_hook_noop_when_normal_mode(session_store):
     async def _run():
         ctx = HookContext(
             agent=None, event=HookEvent.BEFORE_INVOKE,
-            inputs=InvokeInputs(query="test"),  # mode defaults to ""
+            inputs=InvokeInputs(query="test"),  # mode 默认为 ""
             session_id="s1", request_id="r1",
         )
         await hook.before_invoke(ctx)
@@ -284,7 +283,7 @@ def test_team_context_hook_noop_when_normal_mode(session_store):
     asyncio.run(_run())
 
 
-# ── config wiring ─────────────────────────────────────────────
+# ── config 装配 ─────────────────────────────────────────────────
 
 def test_team_config_defaults_disabled():
     cfg = TeamConfig()
@@ -292,7 +291,7 @@ def test_team_config_defaults_disabled():
 
 
 def test_delegate_to_member_always_registered():
-    """delegate_to_member is always registered (mode controls visibility, not registration)."""
+    """delegate_to_member 始终注册(mode 控制可见性,而非注册)。"""
     import twinkle.agentserver.tools as tm_pkg
     tm = tm_pkg.tool_manager()
     names = {t.card.name for t in tm.list()}
@@ -300,7 +299,7 @@ def test_delegate_to_member_always_registered():
 
 
 def test_leader_system_prompt_structure():
-    """build_leader_system_prompt includes team role, workflow, and delegate_to_member."""
+    """build_leader_system_prompt 含 team 角色、工作流程和 delegate_to_member。"""
     from twinkle.agentserver.agent import build_leader_system_prompt
     prompt = build_leader_system_prompt()
     assert "TeamLeader" in prompt
@@ -314,19 +313,19 @@ def test_leader_system_prompt_structure():
 
 
 def test_leader_prompt_omits_user_facing_rules():
-    """Leader prompt must NOT include user-facing identity rules from base prompt."""
+    """Leader prompt 不得含 base prompt 中面向用户的身份规则。"""
     from twinkle.agentserver.agent import build_leader_system_prompt
     prompt = build_leader_system_prompt()
     assert "身份与行为原则" not in prompt
     assert "对外交流时" not in prompt
     assert "尽量不拒绝" not in prompt
-    # No global workspace paths — leader delegates file work
+    # 无全局 workspace 路径 —— leader 委派文件工作
     assert "工作区根目录" not in prompt
     assert "长期记忆存储" not in prompt
 
 
 def test_leader_whitelist_excludes_execution_tools():
-    """Leader in team mode must NOT have command_exec, write_file, edit_file."""
+    """team mode 下 Leader 不得有 command_exec、write_file、edit_file。"""
     from twinkle.agentserver.agent import _TEAM_LEADER_TOOL_WHITELIST
     assert "command_exec" not in _TEAM_LEADER_TOOL_WHITELIST
     assert "write_file" not in _TEAM_LEADER_TOOL_WHITELIST
@@ -336,7 +335,7 @@ def test_leader_whitelist_excludes_execution_tools():
 
 
 def test_leader_whitelist_has_coordination_tools():
-    """Leader must have delegate_to_member, todo, and read-only tools."""
+    """Leader 必须有 delegate_to_member、todo 和只读工具。"""
     from twinkle.agentserver.agent import _TEAM_LEADER_TOOL_WHITELIST
     assert "delegate_to_member" in _TEAM_LEADER_TOOL_WHITELIST
     assert "read_file" in _TEAM_LEADER_TOOL_WHITELIST
@@ -360,7 +359,7 @@ def test_member_whitelist_has_claim_complete():
 
 
 def test_base_prompt_omits_team_section():
-    """build_system_prompt (normal mode) does NOT include team/leader content."""
+    """build_system_prompt(普通 mode)不含 team/leader 内容。"""
     from twinkle.agentserver.agent import build_system_prompt
     prompt = build_system_prompt()
     assert "delegate_to_member" not in prompt
@@ -368,10 +367,10 @@ def test_base_prompt_omits_team_section():
     assert "团队角色" not in prompt
 
 
-# ── member prompt structure (aligned with jiuwenswarm) ────────────
+# ── member prompt 结构(对齐 jiuwenswarm) ────────────────────────
 
 def test_member_prompt_omits_user_facing_identity():
-    """Member prompt must NOT include user-facing identity/behavior rules."""
+    """Member prompt 不得含面向用户的身份/行为规则。"""
     from twinkle.agentserver.agent import build_member_system_prompt
     prompt = build_member_system_prompt(persona="tester", workspace="/tmp/ws")
     assert "身份与行为原则" not in prompt
@@ -380,16 +379,16 @@ def test_member_prompt_omits_user_facing_identity():
 
 
 def test_member_prompt_omits_global_workspace_paths():
-    """Member prompt must NOT show global WORKSPACE_DIR/MEMORY_DIR/SKILLS_DIR."""
+    """Member prompt 不得展示全局 WORKSPACE_DIR/MEMORY_DIR/SKILLS_DIR。"""
     from twinkle.agentserver.agent import build_member_system_prompt
     prompt = build_member_system_prompt(persona="tester", workspace="/tmp/ws")
     assert "工作区根目录" not in prompt
     assert "长期记忆存储" not in prompt
-    assert "技能库" not in prompt  # the table row, not the tool section
+    assert "技能库" not in prompt  # 表格行,非工具小节
 
 
 def test_member_prompt_has_runtime_environment():
-    """Member prompt includes runtime environment block (platform/date moved to env-tail)."""
+    """Member prompt 含运行环境块(平台/日期已移到 env-tail)。"""
     from twinkle.agentserver.agent import build_member_system_prompt
     prompt = build_member_system_prompt(persona="tester", workspace="/tmp/ws")
     assert "运行环境" in prompt
@@ -400,17 +399,17 @@ def test_member_prompt_has_runtime_environment():
 
 
 def test_member_prompt_has_tool_usage_guide():
-    """Member prompt includes Todo tool usage guidance (Memory/Skill injected by hooks)."""
+    """Member prompt 含 Todo 工具使用指引(Memory/Skill 由 hook 注入)。"""
     from twinkle.agentserver.agent import build_member_system_prompt
     prompt = build_member_system_prompt(persona="tester", workspace="/tmp/ws")
     assert "工具使用指南" in prompt
     assert "todo_create" in prompt
-    # memory_search / list_skill are injected by MemoryHook / SkillHook,
-    # not baked into the static prompt — no duplication with hook content.
+    # memory_search / list_skill 由 MemoryHook / SkillHook 注入,
+    # 不 baked 进静态 prompt —— 与 hook 内容不重复。
 
 
 def test_member_prompt_has_team_sections():
-    """Member prompt leads with team role + persona + workspace."""
+    """Member prompt 以 team 角色 + persona + workspace 开头。"""
     from twinkle.agentserver.agent import build_member_system_prompt
     prompt = build_member_system_prompt(persona="数据分析师", workspace="/shared")
     assert "团队角色" in prompt
@@ -419,11 +418,11 @@ def test_member_prompt_has_team_sections():
     assert "数据分析师" in prompt
     assert "团队共享工作区" in prompt
     assert "/shared" in prompt
-    # Team sections come before runtime prompt
+    # Team 小节在 runtime prompt 之前
     assert prompt.index("团队角色") < prompt.index("运行环境")
 
 
-# ── member_name addressing (Task 3) ───────────────────────────────
+# ── member_name 寻址(Task 3) ────────────────────────────────────
 
 def test_member_session_id_uses_member_name(session_store):
     team = _team_with_scripted_llm(session_store, [])
@@ -462,6 +461,6 @@ def test_send_member_unknown_name_errors(session_store):
 def test_member_prompt_contains_member_name(session_store):
     team = _team_with_scripted_llm(session_store, [])
     member = asyncio.run(team._ensure_member("researcher", "金融分析师"))
-    # member_name baked into base_sections (injected at construction); session store no longer seeds a system msg
+    # member_name 编入 base_sections(构造时注入);session store 不再种 system msg
     built = "\n\n".join(s.content for s in member._base_sections)
     assert "researcher" in built

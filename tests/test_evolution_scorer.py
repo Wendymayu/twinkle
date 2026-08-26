@@ -95,7 +95,7 @@ def test_calc_score_default_weights():
     rec.usage_stats = UsageStats(times_presented=10, times_used=5, times_positive=3, times_negative=1)
     # E = (3+1)/(3+1+2) = 4/6 = 0.667
     # U = 5/10 = 0.5
-    # F ≈ 1.0 (fresh)
+    # F ≈ 1.0（新鲜度）
     # score = 0.5*0.667 + 0.3*0.5 + 0.2*1.0 = 0.333 + 0.15 + 0.2 = 0.683
     s = calc_score(rec)
     assert 0.67 < s < 0.70

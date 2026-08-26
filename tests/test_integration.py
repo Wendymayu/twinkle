@@ -1,9 +1,7 @@
-"""End-to-end Phase 1 integration: the full browser -> gateway ->
-agentserver -> gateway -> browser round trip, driven by a REAL AgentLoop
-with a FAKE LLMClient (deterministic, no API key).
+"""端到端 Phase 1 集成:完整的 browser -> gateway -> agentserver ->
+gateway -> browser 往返,由真实 AgentLoop 驱动,配一个 FAKE LLMClient(确定性、无需 API key)。
 
-Exercises: streaming chunks, tool round-trip, and cross-turn memory —
-the roadmap Phase 1 / M2 acceptance, headlessly.
+覆盖:流式分片、工具往返、跨轮 memory——即 roadmap 的 Phase 1 / M2 验收,无头运行。
 """
 import asyncio
 import json
@@ -36,9 +34,8 @@ class _ScriptedLLM:
 
 
 class _FakeSkillNetClient:
-    """Network-free stand-in for SkillNetClient: a canned catalog + a canned
-    downloaded skill dir. Lets the gateway-seam e2e run without hitting GitHub.
-    Real-GitHub coverage is the throwaway ``_e2e_skillnet.py``."""
+    """SkillNetClient 的免网络替身:预置的 catalog + 预置的下载 skill 目录。
+    让 gateway 接缝的 e2e 不碰 GitHub 也能跑。真实 GitHub 覆盖在即抛型 ``_e2e_skillnet.py`` 里。"""
     def __init__(self, catalog):
         self._catalog = catalog
 
@@ -71,7 +68,7 @@ def _reg_with_echo():
 
 
 async def _collect_streamed(browser) -> tuple[str, bool]:
-    """Collect chat.delta into chat.final. Returns (assembled, saw_final)."""
+    """把 chat.delta 收集成 chat.final。返回 (assembled, saw_final)。"""
     assembled = ""
     saw_final = False
     deadline = asyncio.get_running_loop().time() + 5
@@ -94,7 +91,7 @@ def test_end_to_end_tool_round_trip(tmp_path, port_factory) -> None:
     agentserver_port = port_factory()
     gateway_port = port_factory()
     scripts = [
-        # turn 1: model calls echo tool, then answers
+        # turn 1:模型调 echo 工具,然后作答
         [Finish("tool_calls", {
             "role": "assistant", "content": None,
             "tool_calls": [{"id": "c1", "type": "function",
@@ -142,7 +139,7 @@ def test_end_to_end_tool_round_trip(tmp_path, port_factory) -> None:
 
 
 async def _collect_result(browser) -> dict:
-    """Read frames until a `result` event arrives; skip deltas/acks. 5s deadline."""
+    """读帧直到 `result` 事件到达;跳过 delta/ack。5s 超时。"""
     deadline = asyncio.get_running_loop().time() + 5
     while asyncio.get_running_loop().time() < deadline:
         raw = await asyncio.wait_for(browser.recv(), timeout=5)
@@ -162,16 +159,14 @@ async def _read_ack(browser) -> dict:
 
 
 def test_session_rpc_round_trip(tmp_path, port_factory) -> None:
-    """Exercises the full browser -> gateway -> AgentServer `result` event
-    framing for session.list / session.create / history.get RPCs. RPCs don't
-    run the ReAct loop, so a trivial scripted LLM (no scripts) is fine."""
+    """覆盖 session.list / session.create / history.get RPC 的完整 browser -> gateway -> AgentServer `result` 事件组帧。这些 RPC 不跑 ReAct 循环,故用一个空的 scripted LLM(无脚本)即可。"""
     agentserver_port = port_factory()
     gateway_port = port_factory()
     store = SessionStore(str(tmp_path / "sessions"))
     loop_obj = AgentLoop(_ScriptedLLM([]), store, _reg_with_echo())
 
     async def run() -> None:
-        # pre-seed a session so session.list has something to report
+        # 预置一个 session,让 session.list 有东西可报
         await store.create_session("s-seed")
         await store.append(
             "s-seed", {"role": "user", "content": "hello"}, request_id="r0"
@@ -242,10 +237,7 @@ def test_session_rpc_round_trip(tmp_path, port_factory) -> None:
 
 
 def test_session_files_ws_round_trip(tmp_path, port_factory) -> None:
-    """Exercises the full browser -> gateway -> AgentServer ws path for
-    session.files + file.read RPCs, asserting result events carry the
-    file list + content. RPCs don't run the ReAct loop, so a trivial
-    scripted LLM (no scripts) is fine."""
+    """覆盖 session.files + file.read RPC 的完整 browser -> gateway -> AgentServer ws 链路,断言 result 事件携带文件列表 + 内容。这些 RPC 不跑 ReAct 循环,故用一个空的 scripted LLM(无脚本)即可。"""
     agentserver_port = port_factory()
     gateway_port = port_factory()
     store = SessionStore(str(tmp_path / "sessions"))
@@ -305,12 +297,8 @@ def test_session_files_ws_round_trip(tmp_path, port_factory) -> None:
 
 
 def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
-    """Full browser -> gateway -> AgentServer round trip for skills.search /
-    skills.install / skills.list_local. Verifies the gateway forwards skill RPCs
-    and the install background-task's delayed e2a.result resolves through to a
-    browser `result` event + lands on disk + list_local reflects it. RPCs don't
-    run the ReAct loop, so a trivial scripted LLM (no scripts) is fine.
-    Network-free (FakeSkillNetClient); real-GitHub coverage is _e2e_skillnet.py."""
+    """skills.search / skills.install / skills.list_local 的完整 browser -> gateway -> AgentServer 往返。验证 gateway 转发 skill RPC,且 install 后台 task 的延迟 e2a.result 一路解析成 browser `result` 事件 + 落盘 + list_local 能反映它。这些 RPC 不跑 ReAct 循环,故用一个空的 scripted LLM(无脚本)即可。
+    免网络(FakeSkillNetClient);真实 GitHub 覆盖在 _e2e_skillnet.py。"""
     from twinkle.agentserver.skills import (
         _set_skill_manager, _set_skillnet_client, SkillManager,
     )
@@ -323,9 +311,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    # install path reads `twinkle.config.SKILLS_DIR` at call time; list_local reads
-    # the SkillManager singleton. Point both at the same temp dir so install lands
-    # and list_local reflects it.
+    # install 路径在调用时读 `twinkle.config.SKILLS_DIR`;list_local 读 SkillManager 单例。把两者都指向同一个 temp 目录,让 install 落盘后 list_local 能反映。
     monkeypatch.setattr("twinkle.config.SKILLS_DIR", str(skills_dir))
     _set_skill_manager(SkillManager(str(skills_dir)))
     _set_skillnet_client(_FakeSkillNetClient(catalog=[
@@ -347,7 +333,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
                     async with connect(f"ws://127.0.0.1:{gateway_port}") as browser:
                         await browser.recv()  # connection.ack
 
-                        # skills.search (background task → delayed result)
+                        # skills.search(后台 task → 延迟 result)
                         await browser.send(json.dumps({
                             "type": "req", "id": "r-search",
                             "method": "skills.search",
@@ -358,7 +344,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
                         assert payload["type"] == "skills.search"
                         assert [s["name"] for s in payload["skills"]] == ["foo"]
 
-                        # skills.install (background task → delayed result + lands on disk)
+                        # skills.install(后台 task → 延迟 result + 落盘)
                         await browser.send(json.dumps({
                             "type": "req", "id": "r-install",
                             "method": "skills.install",
@@ -369,7 +355,7 @@ def test_skill_rpc_round_trip(tmp_path, port_factory, monkeypatch) -> None:
                         assert payload["ok"] is True
                         assert payload["skill_name"] == "foo"
 
-                        # skills.list_local (inline → reflects the just-installed skill)
+                        # skills.list_local(内联 → 反映刚安装的 skill)
                         await browser.send(json.dumps({
                             "type": "req", "id": "r-list",
                             "method": "skills.list_local",

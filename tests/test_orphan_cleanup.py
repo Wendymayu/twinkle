@@ -21,7 +21,7 @@ def _env(query, request_id="r1", session_id="s1"):
 
 
 def test_orphan_assistant_tool_calls_sanitized(session_store) -> None:
-    # seed an orphan: assistant(tool_calls) with NO tool result (simulating a crash mid-approval)
+    # 种入一个 orphan：assistant(tool_calls) 没有 tool result（模拟 approval 中途崩溃）
     asyncio.run(session_store.append("s1", {"role": "system", "content": "sys"}))
     asyncio.run(session_store.append("s1", {"role": "user", "content": "do x"}))
     asyncio.run(session_store.append("s1", {
@@ -40,13 +40,13 @@ def test_orphan_assistant_tool_calls_sanitized(session_store) -> None:
     asyncio.run(_collect(loop.run(_env("resume", session_id="s1"))))
     msgs = session_store.get_messages("s1")
     roles = [m["role"] for m in msgs]
-    assert "tool" in roles  # the orphan got a synthetic tool result
+    assert "tool" in roles  # orphan 得到了一个合成的 tool result
     assert roles[-1] == "assistant" and msgs[-1]["content"] == "recovered"
 
 
 def test_mid_batch_orphan_sanitized(session_store) -> None:
-    # crash mid-batch: c1 executed + result appended, c2 hit ASK + crashed while suspended.
-    # last message is `tool` (c1's result), NOT assistant — the old sanitize bailed here.
+    # 批量中途崩溃：c1 已执行 + result 已追加，c2 遇到 ASK + 在挂起时崩溃。
+    # 最后一条是 `tool`（c1 的 result），不是 assistant —— 旧的 sanitize 在这里就退出了。
     asyncio.run(session_store.append("s1", {"role": "system", "content": "sys"}))
     asyncio.run(session_store.append("s1", {"role": "user", "content": "do x and y"}))
     asyncio.run(session_store.append("s1", {
@@ -67,7 +67,7 @@ def test_mid_batch_orphan_sanitized(session_store) -> None:
     loop = AgentLoop(llm, session_store, tm)
     asyncio.run(_collect(loop.run(_env("resume", session_id="s1"))))
     msgs = session_store.get_messages("s1")
-    # c1's real result preserved; c2's synthetic result injected (this is the I-1 fix)
+    # c1 的真实 result 保留；c2 的合成 result 注入（这是 I-1 修复）
     tool_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_msgs) == 2
     assert tool_msgs[0]["tool_call_id"] == "c1" and tool_msgs[0]["content"] == "tool-saw:x"

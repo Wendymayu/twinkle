@@ -1,4 +1,4 @@
-"""PPT Generation Pipeline — 7 节点流水线，基于 LLM 内容生成 + python-pptx 导出。
+"""PPT 生成流水线 — 7 节点流水线，基于 LLM 内容生成 + python-pptx 导出。
 
 所有参数（主题、页数、受众、风格）均由 workflow 内部 LLM 从用户原文中提取。
 Agent 只需传入用户原话即可。
@@ -17,7 +17,7 @@ Agent 只需传入用户原话即可。
 """
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 辅助函数
 # ---------------------------------------------------------------------------
 
 def _collect_user_text(inputs: dict) -> str:
@@ -31,7 +31,7 @@ def _collect_user_text(inputs: dict) -> str:
         value = inputs.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    # Spec-mode fallback: synthesize from structured fields so LLM 节点有上下文
+    # Spec 模式兜底：从结构化字段合成文本，使 LLM 节点有上下文
     topic = inputs.get("topic", "")
     if isinstance(topic, str) and topic.strip():
         return topic.strip()
@@ -75,7 +75,7 @@ def _outline_to_pages(outline: list, topic: str) -> list[dict]:
     return pages
 
 # ---------------------------------------------------------------------------
-# Node implementations
+# 节点实现
 # ---------------------------------------------------------------------------
 
 class PipelineInitNode(PlanNode):
@@ -113,7 +113,7 @@ class IntentClassifyNode(PlanNode):
 
     async def _execute(self, inputs: dict):
         text = _collect_user_text(inputs)
-        # Spec-mode: agent 已提供 topic，直接采用，跳过 LLM 提取
+        # Spec 模式：agent 已提供 topic，直接采用，跳过 LLM 提取
         existing_topic = inputs.get("topic", "")
         if isinstance(existing_topic, str) and existing_topic.strip():
             topic = existing_topic.strip()
@@ -145,7 +145,7 @@ class RequirementCollectNode(PlanNode):
         text = _collect_user_text(inputs)
         topic = inputs.get("topic", "")
 
-        # Spec-mode: agent 已提供槽位，直接采用，跳过 LLM
+        # Spec 模式：agent 已提供槽位，直接采用，跳过 LLM
         provided_page_count = inputs.get("page_count")
         provided_audience = inputs.get("audience")
         provided_style = inputs.get("style_id") or inputs.get("style")
@@ -211,7 +211,7 @@ class ContentPlanNode(PlanNode):
         purpose = inputs.get("presentation_purpose", "汇报")
         total_pages = page_count + 2
 
-        # Spec-mode: agent 已提供大纲，直接转换为 pages_plan，跳过 LLM
+        # Spec 模式：agent 已提供大纲，直接转换为 pages_plan，跳过 LLM
         agent_outline = inputs.get("outline")
         if isinstance(agent_outline, list) and agent_outline:
             pages = _outline_to_pages(agent_outline, topic)
@@ -266,7 +266,7 @@ class ContentPlanNode(PlanNode):
             except Exception as e:
                 print(f"[ContentPlan] parse failed (attempt {attempt + 1}): {e}")
 
-        # Fallback
+        # 兜底
         print(f"[ContentPlan] using fallback outline")
         fallback_pages = [
             {"title": topic, "body": purpose + " — " + audience, "page_type": "cover"},
@@ -364,7 +364,7 @@ class PPTExportNode(PlanNode):
         output_dir = inputs.get("output_dir", "output/ppt-default")
         pages = inputs.get("pages", [])
 
-        # Sanitize topic for filename — never produce an empty/hidden basename
+        # 对 topic 做文件名清洗 — 永不产生空/隐藏的 basename
         safe_topic = "".join(c for c in topic if c.isalnum() or c in ("_", "-", " ", "."))[:50].strip()
         if not safe_topic:
             safe_topic = "presentation"
@@ -372,7 +372,7 @@ class PPTExportNode(PlanNode):
 
         print(f"[PPTExport] generating {pptx_path} with {len(pages)} pages...")
 
-        # Build JSON payload manually (sandbox has no json module)
+        # 手动构建 JSON payload（sandbox 无 json 模块）
         def _esc(s):
             return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         page_parts = []
@@ -424,7 +424,7 @@ class DeliveryNode(PlanNode):
                 print(f"[Delivery] file not found: {pptx_path}")
                 return {"node": "delivery", "status": "error", "error": "PPTX file not found"}
         except Exception:
-            pass  # binary file — expected
+            pass  # 二进制文件 — 预期行为
 
         print(f"[Delivery] done: {pptx_path}")
         return {
@@ -438,7 +438,7 @@ class DeliveryNode(PlanNode):
 
 
 # ---------------------------------------------------------------------------
-# Root pipeline
+# 根流水线
 # ---------------------------------------------------------------------------
 
 class PPTCraftPipeline(PlanNode):

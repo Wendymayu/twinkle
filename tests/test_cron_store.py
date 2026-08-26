@@ -1,4 +1,4 @@
-"""CronJobStore: single-file CRUD + atomic write + mtime."""
+"""CronJobStore:单文件 CRUD + 原子写 + mtime。"""
 from __future__ import annotations
 
 import asyncio

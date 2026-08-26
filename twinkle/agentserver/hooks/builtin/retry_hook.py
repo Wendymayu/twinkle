@@ -1,10 +1,10 @@
-"""RetryHook — retry transient model/tool exceptions once.
+"""RetryHook — 对瞬时 model/tool 异常重试一次。
 
-Plugs into the existing retry machinery (no new loop): on ON_MODEL_EXCEPTION /
-ON_TOOL_EXCEPTION, if the exception is transient and this is the first attempt,
-request a retry via ctx.request_retry(delay). The @hook decorator (tool path)
-and _inner_run_stream's model retry loop (agent_loop.py) consume the signal and
-re-execute. Non-transient errors and second attempts propagate untouched.
+接入既有 retry 机制（不新增循环）：在 ON_MODEL_EXCEPTION /
+ON_TOOL_EXCEPTION 时，若异常是瞬时的且为第一次尝试，
+通过 ctx.request_retry(delay) 请求 retry。@hook 装饰器（tool 路径）
+与 _inner_run_stream 的 model retry 循环（agent_loop.py）消费该信号并
+重新执行。非瞬时错误与第二次尝试原样传播。
 """
 from __future__ import annotations
 
@@ -18,10 +18,9 @@ from twinkle.agentserver.hooks.base import AgentHook, HookContext
 
 log = logging.getLogger("twinkle.hooks.retry")
 
-# Exceptions worth retrying: transient network / timeout / rate-limit / server
-# errors. Auth, bad-request, context-overflow and business errors (file not
-# found, permission denied, empty command) are NOT here — retrying them is
-# pointless or harmful.
+# 值得重试的异常：瞬时的网络 / 超时 / 限流 / 服务器错误。
+# 鉴权、bad-request、上下文溢出与业务错误（文件未找到、权限拒绝、
+# 空命令）不在内 — 重试它们无意义或有害。
 TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.APIConnectionError,
     openai.APITimeoutError,
@@ -33,14 +32,14 @@ TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 
 def is_transient(exc: BaseException | None) -> bool:
-    """Return True if *exc* is a transient exception worth retrying."""
+    """若 *exc* 是值得重试的瞬时异常则返回 True。"""
     return isinstance(exc, TRANSIENT_EXCEPTIONS)
 
 
 class RetryHook(AgentHook):
-    """Retry transient model + tool exceptions once.
+    """对瞬时 model + tool 异常重试一次。
 
-    priority=50 — functional layer: after security (100), before observers (0).
+    priority=50 — 功能层：在安全（100）之后、观察者（0）之前。
     """
 
     priority = 50

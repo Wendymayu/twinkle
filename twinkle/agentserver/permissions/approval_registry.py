@@ -41,16 +41,16 @@ class ApprovalRegistry:
     def __init__(self) -> None:
         self._futures: dict[str, asyncio.Future] = {}
 
-    # --- persistence helpers ---
+    # --- 持久化 helper ---
 
     def _pending_path(self, session_id: str) -> Path:
-        """Return path to the session's pending-approval file."""
+        """返回该 session 的 pending-approval 文件路径。"""
         from twinkle.config import SESSIONS_DIR
 
         return Path(SESSIONS_DIR) / session_id / ".approval_pending.json"
 
     def _read_pending_file(self, session_id: str) -> list[dict]:
-        """Read pending approvals from disk. Returns [] on missing/corrupt file."""
+        """从磁盘读取 pending approval。文件缺失/损坏时返回 []。"""
         path = self._pending_path(session_id)
         if not path.is_file():
             return []
@@ -61,7 +61,7 @@ class ApprovalRegistry:
             return []
 
     def _write_pending_file(self, session_id: str, records: list[dict]) -> None:
-        """Atomically write pending approvals to disk (.tmp + os.replace)."""
+        """原子性地把 pending approval 写入磁盘(.tmp + os.replace)。"""
         path = self._pending_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_suffix(".tmp")
@@ -73,32 +73,32 @@ class ApprovalRegistry:
             temp_path.unlink(missing_ok=True)
 
     def save_pending(self, session_id: str, record: ApprovalPendingRecord) -> None:
-        """Append a pending approval record to disk."""
+        """往磁盘追加一条 pending approval 记录。"""
         records = self._read_pending_file(session_id)
         records.append(asdict(record))
         self._write_pending_file(session_id, records)
 
     def clear_pending(self, session_id: str, approval_id: str) -> None:
-        """Remove a specific pending approval from disk."""
+        """从磁盘移除指定 pending approval。"""
         records = self._read_pending_file(session_id)
         remaining = [r for r in records if r.get("approval_id") != approval_id]
         if not remaining:
-            # Remove the file entirely when empty
+            # 为空时直接删除文件
             path = self._pending_path(session_id)
             path.unlink(missing_ok=True)
         else:
             self._write_pending_file(session_id, remaining)
 
     def get_pending(self, session_id: str) -> list[dict]:
-        """Read pending approvals for a session. Used by approval.check_pending RPC."""
+        """读取某 session 的 pending approval。供 approval.check_pending RPC 使用。"""
         return self._read_pending_file(session_id)
 
     def clear_all_pending(self, session_id: str) -> None:
-        """Remove all pending approvals for a session. Safety net in run_stream finally."""
+        """移除某 session 的全部 pending approval。run_stream finally 里的安全网。"""
         path = self._pending_path(session_id)
         path.unlink(missing_ok=True)
 
-    # --- in-memory Future management (unchanged) ---
+    # --- 内存态 Future 管理(不变) ---
 
     def register(self, approval_id: str) -> asyncio.Future:
         loop = asyncio.get_running_loop()
@@ -135,7 +135,7 @@ class ApprovalRegistry:
         await send(ack)
         if approval_id and ok:
             self._futures.pop(approval_id, None)
-            # Clear persisted state on successful resolve
+            # 成功 resolve 后清除持久化状态
             session_id = envelope.params.get("session_id") or envelope.session_id
             if session_id:
                 self.clear_pending(session_id, approval_id)

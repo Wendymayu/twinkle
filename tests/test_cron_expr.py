@@ -1,4 +1,4 @@
-"""cron_expr: validation + next-run + bad-date detection."""
+"""cron_expr:校验 + 下次运行 + 非法日期检测。"""
 from __future__ import annotations
 
 from datetime import datetime, timezone

@@ -1,8 +1,7 @@
-"""Tests for approval persistence (Phase 10 — HITL 中断/恢复).
+"""approval 持久化测试(Phase 10 — HITL 中断/恢复).
 
-Verifies that ApprovalRegistry.save_pending / clear_pending / get_pending /
-clear_all_pending correctly persist approval state to disk so that a browser
-reconnection can recover pending approval cards.
+验证 ApprovalRegistry.save_pending / clear_pending / get_pending /
+clear_all_pending 能把 approval 状态正确落到磁盘,使浏览器重连后能恢复待审批的 approval 卡片。
 """
 import asyncio
 import json
@@ -29,7 +28,7 @@ def _make_record(approval_id: str = "test-approval-id", session_id: str = "sess_
 
 
 def test_save_pending_writes_file(tmp_path, monkeypatch):
-    """save_pending writes .approval_pending.json to the session dir."""
+    """save_pending 把 .approval_pending.json 写到 session 目录。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_test"
     record = _make_record(session_id=session_id)
@@ -45,7 +44,7 @@ def test_save_pending_writes_file(tmp_path, monkeypatch):
 
 
 def test_get_pending_returns_saved(tmp_path, monkeypatch):
-    """get_pending reads back what was saved."""
+    """get_pending 读回此前保存的内容。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_test"
     record = _make_record(session_id=session_id)
@@ -58,7 +57,7 @@ def test_get_pending_returns_saved(tmp_path, monkeypatch):
 
 
 def test_clear_pending_removes_entry(tmp_path, monkeypatch):
-    """clear_pending removes the specific approval from the file."""
+    """clear_pending 从文件中删除指定 approval。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_test"
     record = _make_record(session_id=session_id)
@@ -68,13 +67,13 @@ def test_clear_pending_removes_entry(tmp_path, monkeypatch):
 
     pending = APPROVAL_REGISTRY.get_pending(session_id)
     assert len(pending) == 0
-    # File should be removed when empty
+    # 清空后应删除文件
     path = tmp_path / session_id / ".approval_pending.json"
     assert not path.is_file()
 
 
 def test_clear_pending_keeps_other_records(tmp_path, monkeypatch):
-    """clear_pending only removes the targeted approval_id, not others."""
+    """clear_pending 只删除目标 approval_id,不动其他记录。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_test"
 
@@ -88,7 +87,7 @@ def test_clear_pending_keeps_other_records(tmp_path, monkeypatch):
 
 
 def test_clear_all_pending_removes_file(tmp_path, monkeypatch):
-    """clear_all_pending removes the entire pending file."""
+    """clear_all_pending 删除整个 pending 文件。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_test"
     APPROVAL_REGISTRY.save_pending(session_id, _make_record(session_id=session_id))
@@ -100,14 +99,14 @@ def test_clear_all_pending_removes_file(tmp_path, monkeypatch):
 
 
 def test_get_pending_empty_session(tmp_path, monkeypatch):
-    """get_pending returns [] for a session with no pending file."""
+    """get_pending 对没有 pending 文件的 session 返回 []。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     pending = APPROVAL_REGISTRY.get_pending("sess_nonexistent")
     assert pending == []
 
 
 def test_get_pending_corrupt_file(tmp_path, monkeypatch):
-    """get_pending returns [] for a corrupt .approval_pending.json."""
+    """get_pending 对损坏的 .approval_pending.json 返回 []。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_test"
     session_dir = tmp_path / session_id
@@ -119,7 +118,7 @@ def test_get_pending_corrupt_file(tmp_path, monkeypatch):
 
 
 def test_save_pending_creates_session_dir(tmp_path, monkeypatch):
-    """save_pending creates the session dir if it doesn't exist."""
+    """save_pending 在 session 目录不存在时创建它。"""
     monkeypatch.setattr("twinkle.config.SESSIONS_DIR", str(tmp_path))
     session_id = "sess_new"
     record = _make_record(session_id=session_id)

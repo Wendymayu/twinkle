@@ -1,17 +1,16 @@
-"""Smoke-test the observability pipeline against a local OTLP collector.
+"""针对本地 OTLP collector 的可观测性链路冒烟测试。
 
-Drives a REAL ReActAgent / LLMClient / ToolManager (instrumented via
-apply_instrumentors) with a FAKE openai client — no API key needed — so the
-monkey-patched choke points emit real spans, exported via OTLP/gRPC to
-http://localhost:4317 (e.g. Labubu, UI at http://localhost:8080).
+用 FAKE openai client 驱动 REAL ReActAgent / LLMClient / ToolManager（经
+apply_instrumentors 插桩）——无需 API key——使 monkey-patch 的埋点发出真实 span，
+经 OTLP/gRPC 导出到 http://localhost:4317（如 Labubu，UI 在 http://localhost:8080）。
 
-Expected trace tree in the collector UI:
+collector UI 中预期的 trace 树：
   twinkle.agent.invoke
-  ├─ gen_ai.chat   (turn 1: model decides to call the echo tool)
-  ├─ gen_ai.tool    (echo)
-  └─ gen_ai.chat   (turn 2: final answer)
+  ├─ gen_ai.chat   （turn 1：模型决定调用 echo tool）
+  ├─ gen_ai.tool    （echo）
+  └─ gen_ai.chat   （turn 2：最终回答）
 
-Run:  python scripts/obs_smoke.py
+运行：python scripts/obs_smoke.py
 """
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ from twinkle.observability.metrics import Metrics
 ENDPOINT = "http://localhost:4317"
 
 
-# --- fake openai streaming shapes (mirrors tests/test_llm_client.py) ---
+# --- fake openai 流式分片形状（镜像 tests/test_llm_client.py） ---
 class _Func:
     def __init__(self, name=None, arguments=""):
         self.name = name
@@ -95,7 +94,7 @@ class _FakeClient:
 
 @tool
 async def echo(text: str) -> str:
-    """Echo the text back."""
+    """回显 text。"""
     return f"echo: {text}"
 
 
@@ -108,18 +107,18 @@ async def main() -> None:
         BatchSpanProcessor(OTLPSpanExporter(endpoint=ENDPOINT, insecure=True))
     )
     tracer = tp.get_tracer("twinkle")
-    # Metrics(None) -> all instruments fail-soft to no-op (smoke focuses on traces).
+    # Metrics(None) -> 所有 instrument 软失败为 no-op（冒烟只关注 trace）。
     apply_instrumentors(tracer, Metrics(None), cfg)
 
-    # Turn 1: model emits a tool_call for echo; Turn 2: final answer.
+    # Turn 1：模型发出对 echo 的 tool_call；Turn 2：最终回答。
     scripts = [
-        [  # turn 1 — accumulate a tool_call, then finish_reason=tool_calls
+        [  # turn 1 — 累积一个 tool_call，随后 finish_reason=tool_calls
             _Chunk([_Choice(_Delta(tool_calls=[_ToolCall(0, id="call_1", name="echo", arguments="")]))]),
             _Chunk([_Choice(_Delta(tool_calls=[_ToolCall(0, arguments='{"text":"hello"}')]))]),
             _Chunk([_Choice(_Delta(), finish_reason="tool_calls")]),
             _Chunk([], usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}),
         ],
-        [  # turn 2 — final text + stop
+        [  # turn 2 — 最终文本 + stop
             _Chunk([_Choice(_Delta(content="done"))]),
             _Chunk([_Choice(_Delta(), finish_reason="stop")]),
             _Chunk([], usage={"prompt_tokens": 14, "completion_tokens": 1, "total_tokens": 15}),
@@ -127,7 +126,7 @@ async def main() -> None:
     ]
 
     llm = LLMClient(base_url="x", api_key="y", model="smoke-model")
-    llm._client = _FakeClient(scripts)  # scripted fake (no real OpenAI call) — smoke-only injection
+    llm._client = _FakeClient(scripts)  # 脚本化的 fake（无真实 OpenAI 调用）——仅冒烟注入
     tools = ToolManager()
     tools.register(echo)
     loop = ReActAgent(llm=llm, store=SessionStore(SESSIONS_DIR), tools=tools)

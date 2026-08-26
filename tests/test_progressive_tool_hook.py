@@ -19,12 +19,12 @@ from twinkle.agentserver.tools.manager import ToolManager
 def _setup(eager):
     @tool
     async def read_file(path: str) -> str:
-        """read a file"""
+        """读取文件"""
         return f"content:{path}"
 
     @tool
     async def mcp_query(sql: str) -> str:
-        """query db"""
+        """查询数据库"""
         return f"rows:{sql}"
 
     m = ToolManager()
@@ -80,7 +80,7 @@ def test_no_deferred_is_noop():
     # 只有 eager 工具 + meta,无 deferred → before_invoke 不注导航
     @tool
     async def read_file(path: str) -> str:
-        """read"""
+        """读取"""
         return path
 
     m = ToolManager()
@@ -138,7 +138,7 @@ def _builtin_tm_with_deferred_mcp(tmp_path):
     # 模拟 MCP 灌入一个 deferred 工具
     @tool
     async def mcp_fake_query(sql: str) -> str:
-        """fake mcp db query"""
+        """模拟 mcp 数据库查询"""
         return f"rows:{sql}"
     tm.register(mcp_fake_query)
     return tm

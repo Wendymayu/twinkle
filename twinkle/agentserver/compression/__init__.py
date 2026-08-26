@@ -1,10 +1,9 @@
-"""Phase 3: long-conversation context compression.
+"""Phase 3：长会话上下文压缩。
 
-Sliding-window + LLM summary. When the estimated token count of the session
-messages exceeds a threshold, the middle is summarized into one system message,
-keeping the head (system prompt) and the recent tail (with tool_call/result
-pairs intact). Compression output is NOT written back to SessionStore —
-history.json stays lossless; this only shapes what the LLM sees.
+滑动窗口 + LLM 摘要。当会话消息的估算 token 数超过阈值时，把中段压成一条
+system 消息，保留头部（system prompt）和最近的尾部（tool_call/result
+配对完整不动）。压缩结果不写回 SessionStore——history.json 始终无损；
+这里只改变 LLM 看到的内容。
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ from twinkle.config import (
 
 
 def estimate_tokens(msgs: list[dict]) -> int:
-    """Char-based token estimate (//3, CN/EN compromise). No tiktoken dep."""
+    """基于字符数的 token 估算（//3，中英文折中）。不依赖 tiktoken。"""
     total = 0
     for m in msgs:
         c = m.get("content")
@@ -120,11 +119,10 @@ def precompress_messages(msgs: list[dict]) -> list[dict]:
 def split_messages_head_middle_tail(
     msgs: list[dict], tail_count: int
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Split into (head, middle, tail). head = first system message (if any).
-    tail = last tail_count msgs, but if the tail starts on a tool-result
-    message, walk left so its pairing assistant(tool_calls) is also in tail
-    (a tool result without its assistant call in front breaks the OpenAI
-    message contract)."""
+    """切分成 (head, middle, tail)。head = 首条 system 消息（若有）。
+    tail = 最后 tail_count 条消息；但如果 tail 起始在一条 tool-result 消息上，
+    就向左挪，使其配对的 assistant(tool_calls) 也落入 tail（tool result 前面
+    没有对应的 assistant 调用会破坏 OpenAI 消息契约）。"""
     n = len(msgs)
     if n <= tail_count:
         head = [msgs[0]] if msgs and msgs[0].get("role") == "system" else []
@@ -166,7 +164,7 @@ _STRUCTURED_SUMMARY_PROMPT = (
 
 
 async def _summarize(llm: LLMClient, summary_system_prompt: str, middle_text: str) -> str:
-    """Call llm.stream (tools=[]) and concatenate all TextDelta fragments.
+    """调用 llm.stream（tools=[]）并拼接所有 TextDelta 片段。
     summary_prompt_mode: structured → 用硬编码 4 节常量；free → 用传入的 summary_system_prompt。"""
     sys_prompt = (_STRUCTURED_SUMMARY_PROMPT if CONTEXT_SUMMARY_PROMPT_MODE == "structured"
                   else summary_system_prompt)

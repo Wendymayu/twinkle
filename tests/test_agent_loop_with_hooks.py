@@ -1,7 +1,7 @@
-"""Tests for AgentLoop integration with the Hook mechanism.
+"""AgentLoop 与 Hook 机制的集成测试。
 
-Verifies that hooks are called at the right events, in priority order,
-and that frame output is unchanged when hooks are present.
+验证 hook 在正确的事件、按 priority 顺序被调用，
+且有 hook 时 frame 输出不变。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from twinkle.agentserver.agent import AgentRequest
 
 
 class _CallOrderHook(AgentHook):
-    """Records the order of hook calls with their events."""
+    """记录 hook 调用顺序及其事件。"""
     priority = 50
 
     def __init__(self):
@@ -56,7 +56,7 @@ def _env(query, request_id="r1", session_id="s1"):
 
 
 class _ScriptedLLM:
-    """Returns one canned event-list per call, in order."""
+    """每次调用按顺序返回一组预设事件列表。"""
     def __init__(self, scripts):
         self._scripts = scripts
         self.calls = 0
@@ -82,7 +82,7 @@ def _reg_with_echo_tool():
 
 
 def test_hooks_called_on_plain_answer(session_store) -> None:
-    """Plain answer flow: BEFORE_INVOKE -> BEFORE_MODEL_CALL -> AFTER_MODEL_CALL -> AFTER_INVOKE."""
+    """纯回答流程：BEFORE_INVOKE -> BEFORE_MODEL_CALL -> AFTER_MODEL_CALL -> AFTER_INVOKE。"""
     store = session_store
     order_hook = _CallOrderHook()
     llm = _ScriptedLLM([
@@ -96,10 +96,10 @@ def test_hooks_called_on_plain_answer(session_store) -> None:
         return frames
 
     frames = asyncio.run(run())
-    # Verify frame output unchanged
+    # 验证 frame 输出不变
     assert frames[-1].response_kind == "e2a.complete"
 
-    # Verify hook call order
+    # 验证 hook 调用顺序
     events = [c[0] for c in order_hook.calls]
     assert events == [
         HookEvent.BEFORE_INVOKE,
@@ -110,15 +110,15 @@ def test_hooks_called_on_plain_answer(session_store) -> None:
 
 
 def test_hooks_called_on_tool_call_round_trip(session_store) -> None:
-    """Tool call flow: invoke -> model_call -> tool_call -> model_call -> invoke."""
+    """工具调用流程：invoke -> model_call -> tool_call -> model_call -> invoke。"""
     store = session_store
     order_hook = _CallOrderHook()
     llm = _ScriptedLLM([
-        # turn 1: model calls echo tool
+        # turn 1：model 调用 echo 工具
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "c1", "type": "function",
                               "function": {"name": "echo", "arguments": '{"text": "hi"}'}}]})],
-        # turn 2: model produces final answer
+        # turn 2：model 给出最终回答
         [TextDelta("ok"), Finish("stop", {"role": "assistant", "content": "ok", "tool_calls": None})],
     ])
     loop = AgentLoop(llm, store, _reg_with_echo_tool())
@@ -145,9 +145,8 @@ def test_hooks_called_on_tool_call_round_trip(session_store) -> None:
 
 
 def test_existing_tests_still_pass(session_store) -> None:
-    """AgentLoop without hooks produces identical output — existing tests
-    should pass unchanged. This is a meta-test: run the plain answer test
-    WITHOUT hooks and verify frames."""
+    """无 hook 的 AgentLoop 产出相同输出——既有测试
+    应原样通过。这是元测试：不带 hook 跑纯回答流程并验证 frame。"""
     store = session_store
     llm = _ScriptedLLM([
         [TextDelta("hel"), TextDelta("lo"),
@@ -168,7 +167,7 @@ def test_existing_tests_still_pass(session_store) -> None:
 
 
 def test_logging_hook_registers_and_works(session_store) -> None:
-    """LoggingHook can be registered and its get_callbacks returns 4 events."""
+    """LoggingHook 可被注册，其 get_callbacks 返回 4 个事件。"""
     store = session_store
     lh = LoggingHook()
     callbacks = lh.get_callbacks()

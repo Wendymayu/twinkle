@@ -1,4 +1,4 @@
-"""Tests for WorkflowExecutor — validate, sandbox, fallback, timeout, HookInterrupt."""
+"""WorkflowExecutor 的测试 —— validate、sandbox、fallback、timeout、HookInterrupt。"""
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +19,7 @@ from twinkle.config.schema import WorkflowConfig
 
 
 # ---------------------------------------------------------------------------
-# Helper: build executor with config
+# 辅助：按 config 构造 executor
 # ---------------------------------------------------------------------------
 
 def _make_executor(**config_overrides: Any) -> WorkflowExecutor:
@@ -33,12 +33,12 @@ def _make_executor(**config_overrides: Any) -> WorkflowExecutor:
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# 测试
 # ---------------------------------------------------------------------------
 
 def test_execute_simple_plan():
-    """Load and execute a simple plan_code that defines a root PlanNode."""
-    # PlanNode is already in the sandbox namespace — no import needed
+    """加载并执行一段定义了 root PlanNode 的简单 plan_code。"""
+    # PlanNode 已在 sandbox namespace 中 —— 无需 import
     plan_code = '''
 class MyNode(PlanNode):
     async def _execute(self, inputs):
@@ -52,7 +52,7 @@ root = MyNode(plan_name="simple", instruction="simple test")
 
 
 def test_execute_rejects_bad_syntax():
-    """Syntax errors in plan_code are rejected."""
+    """plan_code 中的语法错误会被拒绝。"""
     plan_code = "def broken(\n"
     executor = _make_executor()
     with pytest.raises(PlanCodeValidationError, match="Syntax error"):
@@ -60,7 +60,7 @@ def test_execute_rejects_bad_syntax():
 
 
 def test_execute_rejects_forbidden_import():
-    """Forbidden imports (e.g., import os) are rejected."""
+    """禁止的 import（如 import os）会被拒绝。"""
     plan_code = "import os\n"
     executor = _make_executor()
     with pytest.raises(PlanCodeValidationError, match="Forbidden import"):
@@ -68,7 +68,7 @@ def test_execute_rejects_forbidden_import():
 
 
 def test_execute_with_fallback():
-    """Node failure triggers SubagentExecutor fallback."""
+    """节点失败触发 SubagentExecutor fallback。"""
     plan_code = '''
 class FailNode(PlanNode):
     async def _execute(self, inputs):
@@ -76,7 +76,7 @@ class FailNode(PlanNode):
 
 root = FailNode(plan_name="fail", instruction="will fail")
 '''
-    # Mock subagent executor
+    # mock 一个 subagent executor
     mock_subagent = AsyncMock()
     mock_subagent.execute_subagent.return_value = type(
         "SubagentResult", (), {"success": True, "result": "fallback_result", "error": None}
@@ -95,8 +95,8 @@ root = FailNode(plan_name="fail", instruction="will fail")
 
 
 def test_execute_timeout():
-    """Execution timeout raises ExecutionTimeoutError."""
-    # asyncio is available in the sandbox namespace
+    """执行超时会抛 ExecutionTimeoutError。"""
+    # asyncio 在 sandbox namespace 中可用
     plan_code = '''
 class SlowNode(PlanNode):
     async def _execute(self, inputs):
@@ -111,8 +111,8 @@ root = SlowNode(plan_name="slow", instruction="slow test")
 
 
 def test_execute_hook_interrupt_propagates():
-    """HookInterrupt is not caught by fallback — it propagates up."""
-    # HookInterrupt is already in the sandbox namespace
+    """HookInterrupt 不会被 fallback 捕获 —— 一路上抛。"""
+    # HookInterrupt 已在 sandbox namespace 中
     plan_code = '''
 class InterruptNode(PlanNode):
     async def _execute(self, inputs):
@@ -130,19 +130,17 @@ root = InterruptNode(plan_name="hitl", instruction="interrupt test")
     )
     with pytest.raises(HookInterrupt, match="HITL approval needed"):
         asyncio.run(executor.execute_workflow(plan_code, {}))
-    # Fallback should NOT have been called
+    # fallback 不应被调用
     mock_subagent.execute_subagent.assert_not_called()
 
 
 def test_fallback_skips_infrastructure_errors():
-    """Infrastructure errors (connection/auth/rate-limit/timeout) bypass
-    subagent fallback and propagate to the caller — a subagent calls the same
-    LLM API and would fail identically, so retrying via subagent is pure waste.
+    """基础设施错误（连接/鉴权/限流/超时）绕过 subagent fallback，直接上抛给调用方 ——
+    subagent 调用的是同一个 LLM API，必然以同样方式失败，所以用 subagent 重试纯属浪费。
 
-    Regression: a workflow node raising APIConnectionError used to spawn a
-    subagent at every PlanNode tree level (2 levels = 2 subagents), all failing
-    against the same down API. The error should reach the main agent loop
-    (ReAct) to retry the whole workflow after infra recovers.
+    回归：曾出现 workflow 节点抛 APIConnectionError 时，在 PlanNode 树的每一层
+    都 spawn 一个 subagent（2 层 = 2 个 subagent），全部对着同一个挂掉的 API 失败。
+    此错误应直达主 agent loop（ReAct），等基础设施恢复后再重跑整个 workflow。
     """
     plan_code = '''
 class APIConnectionError(Exception):
@@ -162,20 +160,19 @@ root = FailNode(plan_name="fail", instruction="will fail")
         subagent_executor=mock_subagent,
         config=config,
     )
-    # Infra error must propagate, NOT be swallowed into a subagent retry
+    # 基础设施错误必须上抛，不能被吞进 subagent 重试
     with pytest.raises(Exception, match="Connection error"):
         asyncio.run(executor.execute_workflow(plan_code, {}))
     mock_subagent.execute_subagent.assert_not_called()
 
 
 def test_fallback_skips_timeout_errors():
-    """A timeout-class error bypasses fallback and propagates.
+    """超时类错误绕过 fallback 直接上抛。
 
-    Uses a sandbox-defined infra-named exception because the sandbox's
-    restricted asyncio proxy blocks ``asyncio.TimeoutError`` directly —
-    the matching logic walks class-hierarchy names, so any class whose name
-    contains an infra keyword (here "RequestTimeout" → "Timeout") is treated
-    as infrastructure, same as the real asyncio.TimeoutError / openai.APITimeoutError.
+    这里用 sandbox 内自定义的 infra 命名异常，是因为 sandbox 受限的 asyncio
+    代理直接挡住了 ``asyncio.TimeoutError`` —— 匹配逻辑会沿类继承链走查类名，
+    所以任何类名含 infra 关键字的类（此处 "RequestTimeout" → "Timeout"）都会
+    被当作基础设施错误，与真实的 asyncio.TimeoutError / openai.APITimeoutError 同等对待。
     """
     plan_code = '''
 class RequestTimeout(Exception):

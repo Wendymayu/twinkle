@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-# Skip whole file if [obs] not installed — keeps suite green without opentelemetry.
+# 若未安装 [obs] 则跳过整个文件 —— 在没有 opentelemetry 的情况下保持测试套件全绿。
 pytest.importorskip("opentelemetry.sdk")
 
 import types
@@ -26,7 +26,7 @@ from twinkle.observability.instrumentors import apply_instrumentors
 from twinkle.observability.metrics import Metrics
 
 
-# --- fixtures (mirrors tests/test_observability.py, module-isolated) ---
+# --- fixtures（镜像 tests/test_observability.py，模块隔离）---
 
 class CollectingSpanExporter(SpanExporter):
     def __init__(self):
@@ -74,8 +74,8 @@ class _Cfg:
 # --- fakes ---
 
 class _SummaryLLM:
-    """Yields a summary TextDelta + Finish. Reused as the patched llm class
-    so instrument_llm emits a nested gen_ai.chat span under the compression span."""
+    """产出一个 summary TextDelta + Finish。作为被 patch 的 llm 类复用，
+    使 instrument_llm 在 compression span 下产出一个嵌套的 gen_ai.chat span。"""
     def __init__(self):
         self._model = "summary-model"
 
@@ -91,7 +91,7 @@ class _SummaryLLM:
 class _RaisingLLM:
     async def stream(self, messages, tools):
         raise RuntimeError("summary outage")
-        yield  # makes this an async generator
+        yield  # 使其成为 async generator
 
 
 def _big_msgs():
@@ -105,28 +105,28 @@ def _tiny_msgs():
     return [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
 
 
-# --- compression: real-module integration (noop + fire + degrade, one patch) ---
+# --- compression：真实模块集成（noop + fire + degrade，一次 patch）---
 
 def test_compression_real_path_noop_fire_degrade(tracer_exporter, meter_metricreader):
     tracer, exp = tracer_exporter
     meter, _ = meter_metricreader
     metrics = Metrics(meter)
-    # Patch the REAL compression module (compression_mod=None -> lazy import).
+    # patch 真实 compression 模块（compression_mod=None -> 懒加载 import）。
     assert instrument_compression(tracer, metrics, _Cfg()) is True
-    # Patch the llm class so the summary call emits a nested gen_ai.chat.
+    # patch llm 类，使 summary 调用产出一个嵌套的 gen_ai.chat。
     instrument_llm(tracer, metrics, _Cfg(), llm_cls=_SummaryLLM)
 
     from twinkle.agentserver.compression import compress_messages, estimate_tokens
 
-    # Scenario A: under threshold -> should_compress False -> no do_compress call -> no span.
+    # 场景 A：低于阈值 -> should_compress 为 False -> 不调用 do_compress -> 无 span。
     n0 = len(exp.spans)
     out = asyncio.run(compress_messages(
         _tiny_msgs(), _SummaryLLM(), token_threshold=10 ** 9,
         keep_recent_pairs=6, summary_system_prompt="p"))
     assert out == _tiny_msgs()
-    assert len(exp.spans) == n0  # no new span
+    assert len(exp.spans) == n0  # 无新 span
 
-    # Scenario B: over threshold -> span + nested gen_ai.chat child.
+    # 场景 B：超阈值 -> span + 嵌套 gen_ai.chat 子 span。
     n1 = len(exp.spans)
     out = asyncio.run(compress_messages(
         _big_msgs(), _SummaryLLM(), token_threshold=10,
@@ -140,13 +140,13 @@ def test_compression_real_path_noop_fire_degrade(tracer_exporter, meter_metricre
     assert attrs[A.TWINKLE_COMPRESSION_COMPRESSED] is True
     assert attrs[A.TWINKLE_COMPRESSION_HAS_SUMMARY] is True
     assert attrs[A.TWINKLE_COMPRESSION_STRATEGY] == "inline_summary"
-    # nested gen_ai.chat child parents to the compression span
+    # 嵌套的 gen_ai.chat 子 span 挂到 compression span 下
     chat_spans = [s for s in exp.spans[n1:] if s.name == A.SPAN_GEN_AI_CHAT]
     assert len(chat_spans) == 1
     assert chat_spans[0].parent is not None
     assert chat_spans[0].parent.span_id == cs.context.span_id
 
-    # Scenario C: summary raises -> degrade -> has_summary False, compressed True.
+    # 场景 C：summary 抛异常 -> 降级 -> has_summary 为 False，compressed 为 True。
     n2 = len(exp.spans)
     out = asyncio.run(compress_messages(
         _big_msgs(), _RaisingLLM(), token_threshold=10,
@@ -158,7 +158,7 @@ def test_compression_real_path_noop_fire_degrade(tracer_exporter, meter_metricre
 
 
 def _fake_compression_mod():
-    """Fresh module-like object (isolated, not idempotent-blocked across tests)."""
+    """新鲜的 module-like 对象（隔离的，不会在跨测试时被幂等守卫拦截）。"""
     mod = types.ModuleType("fake_compression")
 
     async def do_compress(msgs, llm, *, keep_recent_pairs, summary_system_prompt):
@@ -176,13 +176,13 @@ def test_compression_idempotent(tracer_exporter):
     assert instrument_compression(tracer, Metrics(None), _Cfg(), compression_mod=fake) is False
 
 
-# --- evolution: patch OnlineEvolutionOrchestrator.evolve ---
+# --- evolution：patch OnlineEvolutionOrchestrator.evolve ---
 
 from twinkle.agentserver.evolution.orchestrator import EvolutionResult
 
 
 class _FakeEvoOrchestrator:
-    """Minimal orchestrator: evolve returns a staged EvolutionResult."""
+    """最小 orchestrator：evolve 返回一个已 staged 的 EvolutionResult。"""
     async def evolve(self, skill_name, conversation_messages, *args, **kwargs):
         return EvolutionResult(status="generated", skill_name=skill_name,
                                message="2 records staged")
@@ -240,8 +240,8 @@ def test_evolution_idempotent(tracer_exporter):
     tracer, _ = tracer_exporter
 
     class _FreshEvoOrchestrator:
-        """Fresh class per test so the first patch isn't blocked by a prior
-        test's wrapper marker (mirrors compression's fresh _fake_compression_mod)."""
+        """每个测试用全新类，使首次 patch 不被前一个测试的 wrapper 标记拦截
+        （镜像 compression 的全新 _fake_compression_mod）。"""
         async def evolve(self, skill_name, conversation_messages, *args, **kwargs):
             return EvolutionResult(status="generated", skill_name=skill_name,
                                    message="ok")
@@ -263,7 +263,7 @@ class _NoopLLM:
 
     async def stream(self, messages, tools):
         return
-        yield  # async generator
+        yield  # 使其成为 async generator
 
 
 class _NoopTool:

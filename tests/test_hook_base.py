@@ -1,4 +1,4 @@
-"""Tests for HookEvent enum and AgentHook base class."""
+"""HookEvent 枚举与 AgentHook 基类测试。"""
 from __future__ import annotations
 
 import enum
@@ -31,14 +31,14 @@ def test_base_hook_default_priority():
 
 
 def test_base_hook_get_callbacks_returns_empty():
-    """Base AgentHook with no overrides should return empty callbacks dict."""
+    """未重写任何方法的 base AgentHook 应返回空 callbacks dict。"""
     h = AgentHook()
     callbacks = h.get_callbacks()
     assert callbacks == {}
 
 
 def test_subclass_get_callbacks_returns_only_overridden():
-    """A subclass that overrides 2 methods should get 2 callbacks."""
+    """重写 2 个方法的子类应得到 2 个 callback。"""
     class TwoMethodHook(AgentHook):
         priority = 90
 
@@ -56,8 +56,8 @@ def test_subclass_get_callbacks_returns_only_overridden():
 
 
 def test_subclass_init_uninit_not_in_callbacks():
-    """init/uninit are lifecycle methods, not event callbacks — they should
-    never appear in get_callbacks()."""
+    """init/uninit 是生命周期方法,不是 event callback — 它们不应
+    出现在 get_callbacks() 中。"""
     class InitHook(AgentHook):
         def init(self, agent):
             pass
@@ -68,12 +68,12 @@ def test_subclass_init_uninit_not_in_callbacks():
     h = InitHook()
     callbacks = h.get_callbacks()
     assert HookEvent.BEFORE_INVOKE in callbacks
-    # init is NOT a HookEvent callback
+    # init 不是 HookEvent callback
     assert len(callbacks) == 1
 
 
 def test_subclass_priority_propagated_to_callbacks():
-    """All callbacks from the same Hook share its priority."""
+    """同一 Hook 的所有 callback 共享其 priority。"""
     class HighPriHook(AgentHook):
         priority = 100
 
@@ -94,7 +94,7 @@ def test_is_base_method_detects_override():
             pass
 
     h = OverrideHook()
-    # The overridden method should NOT be detected as "base"
+    # 被重写的方法不应被判定为 "base"
     assert not h._is_base_method(h.before_model_call)
-    # A method NOT overridden should be detected as "base"
+    # 未重写的方法应被判定为 "base"
     assert h._is_base_method(h.after_model_call)

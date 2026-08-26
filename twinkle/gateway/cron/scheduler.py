@@ -1,9 +1,9 @@
-"""CronSchedulerService — the gateway clock + two-phase wake→push engine.
+"""CronSchedulerService —— gateway 时钟 + 两阶段 wake→push 引擎。
 
-Min-heap of _Event(wake|push|push_update). wake_dt = push_dt - wake_offset;
-wake runs the agent and stores result_text in CronRunState; push delivers it
-(push_update补发 if agent still running). Driven by asyncio (wait_for on a
-reload_event + 5s mtime-poll). AgentServer is channel-agnostic.
+由 _Event(wake|push|push_update) 组成的 min-heap。wake_dt = push_dt - wake_offset；
+wake 运行 agent 并把 result_text 存入 CronRunState；push 投递它（agent 仍在跑则
+push_update 补发）。由 asyncio 驱动（wait_for 一个 reload_event + 5s mtime 轮询）。
+AgentServer 与 channel 无关。
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class CronSchedulerService:
         self._task: asyncio.Task | None = None
         self._sidecar_path = default_sidecar_path()
 
-    # --- event scheduling ---
+    # --- 事件调度 ---
     def _schedule_event(self, at_ts: float, kind: str, job_id: str, run_id: str) -> None:
         self._seq += 1
         ev = _Event(at_ts=at_ts, seq=self._seq, kind=kind, job_id=job_id, run_id=run_id)
@@ -63,7 +63,7 @@ class CronSchedulerService:
         run_id = f"{job.id}:{int(push_dt.timestamp())}"
         return push_dt, wake_dt, run_id
 
-    # --- store change detection (mtime) ---
+    # --- store 变更检测（mtime）---
     def _check_store_changed(self) -> bool:
         try:
             mtime = self._store._path.stat().st_mtime  # noqa: SLF001
@@ -76,7 +76,7 @@ class CronSchedulerService:
         self._last_mtime = mtime
         return changed
 
-    # --- reload: rebuild heap, preserve push_update ---
+    # --- reload：重建 heap，保留 push_update ---
     async def reload(self) -> None:
         # 先捕获 mtime：reload 期间的并发写会在下次 _check_store_changed 被发现
         # （若放在末尾，reload 内的写会把并发写的 mtime 吸收掉 → 漏检）
@@ -109,7 +109,7 @@ class CronSchedulerService:
             self._schedule_event(push_dt.timestamp(), "push", job.id, run_id)
         self._reload_event.set()
 
-    # --- run state helpers ---
+    # --- run state 辅助 ---
     def _get_or_create_state(self, ev: _Event) -> CronRunState | None:
         state = self._runs.get(ev.run_id)
         if state is not None:
@@ -131,7 +131,7 @@ class CronSchedulerService:
         self._runs[ev.run_id] = state
         return state
 
-    # --- wake: kick off agent run ---
+    # --- wake：启动 agent 运行 ---
     async def _on_wake(self, ev: _Event) -> None:
         job = self._jobs.get(ev.job_id)
         if job is None or not job.enabled:
@@ -143,7 +143,7 @@ class CronSchedulerService:
         task = asyncio.create_task(self._run_agent(job, state))
         self._run_tasks[ev.run_id] = task
 
-    # --- push: deliver result or placeholder ---
+    # --- push：投递结果或占位 ---
     async def _on_push(self, ev: _Event) -> None:
         job = self._jobs.get(ev.job_id)
         if job is None:
@@ -162,7 +162,7 @@ class CronSchedulerService:
             state.placeholder_sent = True
         await self._after_push(job, state)
 
-    # --- push_update: deliver real result after placeholder ---
+    # --- push_update：在占位之后投递真实结果 ---
     async def _on_push_update(self, ev: _Event) -> None:
         state = self._runs.get(ev.run_id)
         if state is None or state.pushed_final or not state.result_text:
@@ -190,7 +190,7 @@ class CronSchedulerService:
         self._schedule_event(wake_dt.timestamp(), "wake", job.id, run_id)
         self._schedule_event(push_dt.timestamp(), "push", job.id, run_id)
 
-    # --- run agent + extract result / handle approval ---
+    # --- 运行 agent + 提取结果 / 处理 approval ---
     async def _run_agent(self, job: CronJob, state: CronRunState) -> None:
         run_id = state.run_id
         request_id = f"cron-{run_id}"
@@ -259,7 +259,7 @@ class CronSchedulerService:
                 self._schedule_event(self._now(), "push_update", job.id, run_id)
                 self._reload_event.set()
 
-    # --- push to targets (web channel via enqueue_outbound) ---
+    # --- 推送到 targets（web channel 经 enqueue_outbound）---
     async def _push_to_targets(self, job: CronJob, state: CronRunState,
                                text: str, is_placeholder: bool) -> None:
         msg = Message(
@@ -271,7 +271,7 @@ class CronSchedulerService:
         )
         await self._message_handler.enqueue_outbound(msg)
 
-    # --- event dispatch (used by _loop) ---
+    # --- 事件分发（_loop 使用）---
     async def _handle_event(self, ev: _Event) -> None:
         job = self._jobs.get(ev.job_id)
         # push_update 即使 job disabled/expired 也放行
@@ -286,7 +286,7 @@ class CronSchedulerService:
         elif ev.kind == "push_update":
             await self._on_push_update(ev)
 
-    # --- trigger immediate run ---
+    # --- 触发立即运行 ---
     async def trigger_run_now(self, job_id: str) -> None:
         job = await self._store.get_job(job_id)
         if job is None:
@@ -299,7 +299,7 @@ class CronSchedulerService:
         self._schedule_event(now_ts, "push", job.id, run_id)
         self._reload_event.set()
 
-    # --- main loop (asyncio-driven, no thread) ---
+    # --- 主循环（asyncio 驱动，无线程）---
     async def _loop(self) -> None:
         while True:
             now_ts = self._now()

@@ -1,7 +1,7 @@
-"""End-to-end integration tests for the Workflow engine.
+"""Workflow 引擎的端到端集成测试。
 
-Covers: 3-layer PlanNode tree, fallback via SubagentExecutor, HookInterrupt
-bypassing fallback, and FallbackLimitExceededError.
+覆盖：3 层 PlanNode 树、经 SubagentExecutor 的 fallback、HookInterrupt
+绕过 fallback、以及 FallbackLimitExceededError。
 """
 from __future__ import annotations
 
@@ -20,19 +20,19 @@ from twinkle.config.schema import WorkflowConfig
 
 
 # ---------------------------------------------------------------------------
-# Custom PlanNode subclasses for tests
+# 测试用自定义 PlanNode 子类
 # ---------------------------------------------------------------------------
 
 
 class LeafNode(PlanNode):
-    """Doubles inputs['value'] and returns as leaf_result."""
+    """把 inputs['value'] 翻倍，作为 leaf_result 返回。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         return {"leaf_result": inputs["value"] * 2}
 
 
 class BranchNode(PlanNode):
-    """Executes two leaf sub-plans, stores results in inputs[sub.plan_name]."""
+    """执行两个 leaf sub-plan，按 sub.plan_name 收集结果到本地 dict 后返回。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         results: dict[str, Any] = {}
@@ -43,7 +43,7 @@ class BranchNode(PlanNode):
 
 
 class RootNode(PlanNode):
-    """Orchestrates branch sub-plans, updates inputs with sub-plan results."""
+    """编排 branch sub-plan，按 sub.plan_name 收集结果到本地 dict 后返回。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         results: dict[str, Any] = {}
@@ -54,26 +54,26 @@ class RootNode(PlanNode):
 
 
 class FailNode(PlanNode):
-    """Always raises RuntimeError."""
+    """总是抛出 RuntimeError。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         raise RuntimeError("deliberate failure")
 
 
 class InterruptNode(PlanNode):
-    """Always raises HookInterrupt."""
+    """总是抛出 HookInterrupt。"""
 
     async def _execute(self, inputs: dict[str, Any]) -> Any:
         raise HookInterrupt("HITL approval needed")
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 辅助
 # ---------------------------------------------------------------------------
 
 
 class FakeSubagentExecutor:
-    """Minimal fake that returns a successful SubagentResult with degraded status."""
+    """最小化的 fake，返回成功但状态为 degraded 的 SubagentResult。"""
 
     async def execute_subagent(
         self,
@@ -93,15 +93,15 @@ class FakeSubagentExecutor:
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# 测试
 # ---------------------------------------------------------------------------
 
 
 def test_three_layer_tree():
-    """3-layer tree: root -> branch -> leaf, inputs correctly passed.
+    """3 层树：root -> branch -> leaf，inputs 正确传递。
 
-    LeafNode doubles inputs["value"]; BranchNode executes two leaf sub-plans
-    and stores results keyed by plan_name; RootNode orchestrates.
+    LeafNode 把 inputs["value"] 翻倍；BranchNode 执行两个 leaf sub-plan
+    并按 plan_name 收集结果；RootNode 负责编排。
     """
     leaf1 = LeafNode(plan_name="leaf1", instruction="double value")
     leaf2 = LeafNode(plan_name="leaf2", instruction="double value")
@@ -123,7 +123,7 @@ def test_three_layer_tree():
         config=WorkflowConfig(enable_fallback=False),
     )
 
-    # Bind callbacks manually (as the brief specifies)
+    # 手动绑定 callbacks（按 brief 要求）
     root.set_runtime_callbacks(
         has_tool=executor._has_tool_wrapper,
         call_tool=executor._call_tool_wrapper,
@@ -139,7 +139,7 @@ def test_three_layer_tree():
 
 
 def test_fallback_with_subagent_executor():
-    """Node failure triggers SubagentExecutor fallback."""
+    """节点失败触发 SubagentExecutor fallback。"""
     root = FailNode(plan_name="fail", instruction="will fail")
 
     fake_subagent = FakeSubagentExecutor()
@@ -165,7 +165,7 @@ def test_fallback_with_subagent_executor():
 
 
 def test_hook_interrupt_not_caught():
-    """HookInterrupt never caught by fallback — it propagates up."""
+    """HookInterrupt 不会被 fallback 捕获 —— 一路上抛。"""
     root = InterruptNode(plan_name="hitl", instruction="interrupt test")
 
     fake_subagent = FakeSubagentExecutor()
@@ -190,10 +190,10 @@ def test_hook_interrupt_not_caught():
 
 
 def test_fallback_limit():
-    """Exceeding max_fallback_count raises FallbackLimitExceededError.
+    """超过 max_fallback_count 会抛 FallbackLimitExceededError。
 
-    Two FailNode sub-plans, FakeSubagentExecutor, max_fallback_count=1.
-    First fallback succeeds, second exceeds limit.
+    两个 FailNode sub-plan，FakeSubagentExecutor，max_fallback_count=1。
+    第一次 fallback 成功，第二次超限。
     """
     leaf1 = FailNode(plan_name="fail1", instruction="fail 1")
     leaf2 = FailNode(plan_name="fail2", instruction="fail 2")
@@ -221,7 +221,7 @@ def test_fallback_limit():
         extract_json=executor._extract_json_wrapper,
     )
 
-    # Reset fallback count as executor would do
+    # 重置 fallback 计数，模拟 executor 的行为
     executor._fallback_count = 0
 
     with pytest.raises(FallbackLimitExceededError):

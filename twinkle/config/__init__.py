@@ -1,16 +1,15 @@
-"""Runtime configuration — loaded from resources/config.yaml.
+"""运行时 configuration —— 从 resources/config.yaml 加载。
 
-The YAML (twinkle/resources/config.yaml) is the user-facing source of truth:
-sections + comments + Literal 取值域, with ${ENV:-default} for secrets/deploy
-vars and literals for tunables. The loader (config.loader) reads + resolves +
-parses it; the schema (config.schema) validates it (bad tier/mode -> startup
-error). This package's __init__ flattens the validated `settings` into the same
-module-level constants the rest of the codebase already imports
-(`from twinkle.config import X`), so consumers don't change.
+YAML（twinkle/resources/config.yaml）是面向用户的真相源：sections + 注释 +
+Literal 取值域，secrets/deploy 变量用 ${ENV:-default}，可调项用字面量。
+loader（config.loader）读取 + 解析 + 处理它；schema（config.schema）校验它
+（错误的 tier/mode -> 启动报错）。本包的 __init__ 把已校验的 `settings`
+摊平为代码库其余部分已在导入的同一批模块级常量
+（`from twinkle.config import X`），故消费方无需改动。
 
-Mirrors jiuwenswarm/resources/config.yaml. observability still reads its own
-OTEL_* env (observability/config.py) — not folded here (v1). Workspace
-bootstrap (ensure_workspace_dir) lives in twinkle/workspace.py.
+镜像 jiuwenswarm/resources/config.yaml。observability 仍读自己的 OTEL_* env
+（observability/config.py）——此处不并入（v1）。Workspace 引导
+（ensure_workspace_dir）位于 twinkle/workspace.py。
 """
 from .loader import load_config
 from .schema import TwinkleConfig
@@ -23,7 +22,7 @@ AGENTSERVER_PORT = settings.agentserver.port
 GATEWAY_HOST = settings.gateway.host
 GATEWAY_PORT = settings.gateway.port
 
-# --- workspace + derived dirs (sandbox + persistence roots) ---
+# --- workspace + 派生目录（sandbox + 持久化根）---
 WORKSPACE_DIR = settings.workspace.dir
 LOG_DIR = settings.logging.dir
 SESSIONS_DIR = settings.sessions.dir
@@ -62,7 +61,7 @@ MEMORY_DREAMING_MAX_MEMORY_CHARS = settings.memory.dreaming.max_memory_chars
 MEMORY_DREAMING_MAX_DELETE_FRACTION = settings.memory.dreaming.max_delete_fraction
 MEMORY_DREAMING_MAX_INFECTIOUS_FRACTION = settings.memory.dreaming.max_infectious_fraction
 
-# --- LLM (OpenAI-compatible) ---
+# --- LLM（OpenAI 兼容）---
 LLM_BASE_URL = settings.llm.base_url
 LLM_API_KEY = settings.llm.api_key
 LLM_MODEL = settings.llm.model

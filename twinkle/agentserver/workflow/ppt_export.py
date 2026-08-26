@@ -1,19 +1,19 @@
-"""PPTX export helper — reads JSON from stdin, writes .pptx via python-pptx.
+"""PPTX 导出辅助 — 从 stdin 读 JSON，用 python-pptx 写 .pptx。
 
-Called from workflow nodes via command_exec:
+由 workflow 节点经 command_exec 调用：
   echo '<json>' | python -m twinkle.agentserver.workflow.ppt_export
 
-Expected JSON shape:
+期望的 JSON 结构：
   {"output_path": "output/ppt-xxx/主题.pptx", "topic": "...", "pages": [
       {"title": "...", "body": "...", "page_type": "cover|data|ending"},
       ...
   ]}
 
-Layout rules (Phase 11b-1):
+布局规则（Phase 11b-1）：
   - cover: 居中标题(Pt44 bold) + 副标题(Pt20) + 日期
   - ending: 居中感谢语(Pt40 bold) + 副文本(Pt18)
   - data: 顶部标题栏(Pt32 bold) + 正文列表(Pt18)
-  - Slide size: 13.333" x 7.5" (widescreen 16:9)
+  - Slide 尺寸: 13.333" x 7.5"（宽屏 16:9）
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from pptx.util import Inches, Pt
 
 
 def _add_textbox(slide, left, top, width, height):
-    """Add a textbox and return its text_frame."""
+    """添加一个文本框并返回其 text_frame。"""
     txBox = slide.shapes.add_textbox(
         Inches(left), Inches(top), Inches(width), Inches(height)
     )
@@ -37,7 +37,7 @@ def _add_textbox(slide, left, top, width, height):
 
 
 def _fill_first_paragraph(tf, text, size=18, bold=False, alignment=PP_ALIGN.LEFT):
-    """Fill the first (default) paragraph in a text_frame."""
+    """填充 text_frame 中的第一个（默认）段落。"""
     p = tf.paragraphs[0]
     p.text = text
     p.font.size = Pt(size)
@@ -47,7 +47,7 @@ def _fill_first_paragraph(tf, text, size=18, bold=False, alignment=PP_ALIGN.LEFT
 
 
 def generate_pptx(output_path: str, topic: str, pages: list[dict]) -> str:
-    """Generate .pptx from page data. Returns output_path on success."""
+    """从页面数据生成 .pptx。成功时返回 output_path。"""
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
@@ -58,14 +58,14 @@ def generate_pptx(output_path: str, topic: str, pages: list[dict]) -> str:
         body = page.get("body", "")
 
         if page_type == "cover":
-            slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank layout
-            # Title
+            slide = prs.slides.add_slide(prs.slide_layouts[6])  # 空白版式
+            # 标题
             tf = _add_textbox(slide, 1.0, 2.5, 11.333, 1.5)
             _fill_first_paragraph(tf, title, size=44, bold=True, alignment=PP_ALIGN.CENTER)
-            # Subtitle
+            # 副标题
             tf2 = _add_textbox(slide, 1.0, 4.2, 11.333, 1.0)
             _fill_first_paragraph(tf2, body, size=20, alignment=PP_ALIGN.CENTER)
-            # Date
+            # 日期
             tf3 = _add_textbox(slide, 1.0, 5.5, 11.333, 0.5)
             _fill_first_paragraph(tf3, str(date.today()), size=14, alignment=PP_ALIGN.CENTER)
 
@@ -80,10 +80,10 @@ def generate_pptx(output_path: str, topic: str, pages: list[dict]) -> str:
 
         else:  # data / default
             slide = prs.slides.add_slide(prs.slide_layouts[6])
-            # Title bar at top
+            # 顶部标题栏
             tf = _add_textbox(slide, 0.5, 0.3, 12.333, 0.8)
             _fill_first_paragraph(tf, title, size=32, bold=True)
-            # Body content — each line as a paragraph
+            # 正文内容 — 每行作为一个段落
             tf2 = _add_textbox(slide, 0.8, 1.5, 11.533, 5.5)
             lines = body.split("\n") if body else [""]
             for i, line in enumerate(lines):
@@ -103,7 +103,7 @@ def generate_pptx(output_path: str, topic: str, pages: list[dict]) -> str:
 
 
 def main():
-    """Entry point: read JSON from stdin, generate PPTX."""
+    """入口：从 stdin 读 JSON，生成 PPTX。"""
     raw = sys.stdin.read()
     try:
         data = json.loads(raw)

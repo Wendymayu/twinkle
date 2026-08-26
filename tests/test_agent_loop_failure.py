@@ -1,13 +1,11 @@
-"""AgentLoop failure handling: tool-exception catch + RetryHook retry.
+"""AgentLoop 失败处理：工具异常捕获 + RetryHook 重试。
 
-Covers the three behaviours added to fix the failure-handling gaps:
-- A tool raising a non-transient exception becomes a "[tool error] ..." tool_result
-  and the loop continues (does not crash) — the catch lives in agent_loop, not
-  ToolManager.execute.
-- A tool raising a transient exception is retried once (by RetryHook via @hook),
-  then if still failing becomes a "[tool error] ..." tool_result.
-- A model call raising a transient exception is retried once, with a backoff
-  sleep before the retry.
+覆盖为修复失败处理缺口而新增的三种行为：
+- 工具抛非瞬态异常时，变成 "[tool error] ..." tool_result，
+  循环继续（不崩）——该捕获在 agent_loop，而非 ToolManager.execute。
+- 工具抛瞬态异常时重试一次（由 RetryHook 经 @hook 触发），
+  仍失败则变成 "[tool error] ..." tool_result。
+- model 调用抛瞬态异常时重试一次，重试前有 backoff 睡眠。
 """
 from __future__ import annotations
 
@@ -30,7 +28,7 @@ def _env(query, request_id="r1", session_id="s1"):
 
 
 class _ScriptedLLM:
-    """Returns one canned event-list per stream() call, in order."""
+    """每次 stream() 调用按顺序返回一组预设事件列表。"""
     def __init__(self, scripts):
         self._scripts = scripts
         self.calls = 0
@@ -63,8 +61,8 @@ def _reg_with(tool_fn):
 
 
 def test_tool_non_transient_becomes_tool_error_and_loop_continues(session_store):
-    """Non-transient tool exception (ValueError) is NOT retried; it becomes a
-    "[tool error] ..." tool_result and the loop continues to a final answer."""
+    """非瞬态工具异常（ValueError）不重试；变成
+    "[tool error] ..." tool_result，循环继续到最终回答。"""
     store = session_store
     calls = {"n": 0}
 
@@ -86,16 +84,16 @@ def test_tool_non_transient_becomes_tool_error_and_loop_continues(session_store)
 
     frames = asyncio.run(run())
 
-    assert calls["n"] == 1                       # no retry for non-transient
+    assert calls["n"] == 1                       # 非瞬态不重试
     assert frames[-1].response_kind == "e2a.complete"
     tool_msgs = [m for m in store.get_messages("s1") if m.get("role") == "tool"]
     assert tool_msgs and tool_msgs[0]["content"] == "[tool error] ValueError: boom"
 
 
 def test_tool_transient_retried_once_then_becomes_tool_error(session_store):
-    """Transient tool exception (httpx.ConnectError) is retried once (called
-    twice total); when it keeps failing it becomes a "[tool error] ..." tool_result
-    and the loop continues."""
+    """瞬态工具异常（httpx.ConnectError）重试一次（总共调用
+    两次）；持续失败则变成 "[tool error] ..." tool_result，
+    循环继续。"""
     store = session_store
     calls = {"n": 0}
 
@@ -117,7 +115,7 @@ def test_tool_transient_retried_once_then_becomes_tool_error(session_store):
 
     frames = asyncio.run(run())
 
-    assert calls["n"] == 2                       # 1 retry for transient
+    assert calls["n"] == 2                       # 瞬态重试 1 次
     assert frames[-1].response_kind == "e2a.complete"
     tool_msgs = [m for m in store.get_messages("s1") if m.get("role") == "tool"]
     assert tool_msgs and tool_msgs[0]["content"].startswith("[tool error]")
@@ -125,7 +123,7 @@ def test_tool_transient_retried_once_then_becomes_tool_error(session_store):
 
 
 class _FlakyLLM:
-    """Raises asyncio.TimeoutError on the first stream() call, then succeeds."""
+    """首次 stream() 调用抛 asyncio.TimeoutError，之后成功。"""
     def __init__(self, scripts):
         self._scripts = scripts
         self.calls = 0
@@ -139,8 +137,8 @@ class _FlakyLLM:
 
 
 def test_model_transient_retried_with_backoff_sleep(session_store, monkeypatch):
-    """A transient model exception is retried once, and the retry loop sleeps
-    the retry delay (backoff) before retrying."""
+    """瞬态 model 异常重试一次，且重试循环在重试前
+    睡 retry delay（backoff）。"""
     store = session_store
     sleeps = []
 
@@ -158,9 +156,9 @@ def test_model_transient_retried_with_backoff_sleep(session_store, monkeypatch):
 
     frames = asyncio.run(run())
 
-    assert llm.calls == 2                         # 1 retry
+    assert llm.calls == 2                         # 重试 1 次
     assert frames[-1].response_kind == "e2a.complete"
-    assert 0.5 in sleeps                          # backoff slept before retry
+    assert 0.5 in sleeps                          # 重试前睡了 backoff
 
 
 @tool

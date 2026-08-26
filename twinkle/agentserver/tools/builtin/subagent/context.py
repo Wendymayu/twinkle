@@ -1,8 +1,8 @@
-"""Subagent ContextVar bridge — lets the spawn_subagent tool find the current
-executor + parent session/request id at runtime.
+"""Subagent ContextVar 桥接 —— 让 spawn_subagent 工具能在运行时
+找到当前 executor + 父 session/request id。
 
-Set by SubagentContextHook.before_invoke on the PARENT loop only (the child has
-no spawn_subagent, so it never reads these). Mirrors plan_todo_context.py.
+仅由 PARENT loop 上的 SubagentContextHook.before_invoke 设置(子 agent
+没有 spawn_subagent,故永不读取这些)。对照 plan_todo_context.py。
 """
 from __future__ import annotations
 

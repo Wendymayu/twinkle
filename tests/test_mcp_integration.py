@@ -36,7 +36,7 @@ def test_create_agent_injects_mcp_tools(session_store, tmp_path) -> None:
 
 
 def test_create_agent_no_mcp_still_works(session_store, tmp_path) -> None:
-    _set_mcp_manager(None)  # mcp disabled/no-started → register_into no-op
+    _set_mcp_manager(None)  # mcp 未启用/未启动 → register_into 空操作
     from twinkle.agentserver.server import create_agent
     agent = create_agent(session_store, hooks=[])
     names = {t.card.name for t in agent._tool_manager.list()}

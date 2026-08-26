@@ -1,9 +1,9 @@
-"""AgentServer tools package + default manager builder.
+"""AgentServer tools 包 + 默认 manager 构建器。
 
-Framework layer (``Tool`` / ``ToolCard`` / ``LocalFunction`` / ``@tool`` /
-``ToolManager``) lives here at the top level; concrete tool implementations
-live in the :mod:`twinkle.agentserver.tools.builtin` subpackage. Add a new
-tool under ``builtin/``, then register it in :func:`tool_manager`.
+框架层(``Tool`` / ``ToolCard`` / ``LocalFunction`` / ``@tool`` /
+``ToolManager``)在顶层此处;具体 tool 实现在
+:mod:`twinkle.agentserver.tools.builtin` 子包中。在 ``builtin/`` 下新增 tool,
+然后在 :func:`tool_manager` 中注册。
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from twinkle.agentserver.tools.manager import ToolManager
 
 
 def tool_manager() -> ToolManager:
-    """Build a ToolManager pre-loaded with the default tools."""
+    """构建一个预装默认工具的 ToolManager。"""
     tm = ToolManager()
     tm.register(web_fetch.web_fetch)
     tm.register(web_search.web_search)
@@ -42,7 +42,7 @@ def tool_manager() -> ToolManager:
     tm.register(cron_tools.cron_delete_job)
     tm.register(cron_tools.cron_run_now)
     tm.register(subagent.spawn_subagent)
-    # Dynamic description — lists available workflows so the LLM knows what to call
+    # 动态 description —— 列出可用 workflow,让 LLM 知道该调什么
     wf_tool = workflow_tools.execute_workflow
     wf_tool.card.description = workflow_tools._build_tool_description()
     tm.register(wf_tool)

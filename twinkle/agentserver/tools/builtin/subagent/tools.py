@@ -1,8 +1,8 @@
-"""spawn_subagent — delegate an isolated subtask to a fresh child agent (black-box).
+"""spawn_subagent —— 把一个隔离子任务委派给一个全新子 agent(黑盒)。
 
-Reads the executor + parent session/request id from the subagent_context
-ContextVars (set by SubagentContextHook on the parent loop). Runs the child to
-convergence, returns its final answer (+ stop hint) as a tool_result string.
+从 subagent_context 的 ContextVars 读取 executor + 父 session/request id
+(由父 loop 上的 SubagentContextHook 设置)。运行子 agent 到收敛,
+把其最终答案(+ 停止提示)作为 tool_result 字符串返回。
 """
 from __future__ import annotations
 
@@ -33,24 +33,24 @@ def _wrap(result: SubagentResult) -> str:
 
 @tool
 async def spawn_subagent(objective: str, prompt: str = "") -> str:
-    """Delegate an isolated subtask to a fresh sub-agent that runs its own ReAct
-    loop in an isolated session and returns only its final answer.
+    """把一个隔离子任务委派给一个全新子 agent,后者在隔离 session 中
+    跑自己的 ReAct loop,只返回最终答案。
 
-    WHEN to delegate:
-    - The subtask is complex / multi-step and benefits from focused ReAct.
-    - You want it isolated (fresh context, can't pollute this conversation).
-    - Different subtasks are independent (call spawn_subagent once each).
+    何时委派:
+    - 子任务复杂 / 多步,值得聚焦的 ReAct。
+    - 你想要隔离(全新 context,不会污染本次对话)。
+    - 不同子任务相互独立(每个各调一次 spawn_subagent)。
 
-    WHEN NOT to delegate:
-    - One tool call or a direct answer suffices — do it yourself.
-    - The subtask needs this conversation's history — pass it explicitly in
-      `objective` instead (the sub-agent CANNOT see this agent's history).
+    何时不要委派:
+    - 一次 tool 调用或直接回答就够 —— 自己做。
+    - 子任务需要本次对话历史 —— 在 `objective` 里显式传给子 agent
+      (子 agent 看不到本 agent 的历史)。
 
-    `objective` must be self-contained: goal + constraints + all context the
-    sub-agent needs (it sees nothing else). `prompt` may carry extra instructions
-    (e.g. output format). The sub-agent cannot ask the user; it must converge or
-    return a failure note. Its final answer (truncated if huge) becomes your
-    tool_result — summarize it to the user; do not re-delegate the same task.
+    `objective` 须自包含:目标 + 约束 + 子 agent 所需的一切上下文
+    (它别的都看不到)。`prompt` 可携带额外指令(如输出格式)。
+    子 agent 不能问用户;它必须收敛或返回失败说明。其最终答案
+    (过大则截断)成为你的 tool_result —— 把它总结给用户;
+    不要对同一任务重复委派。
     """
     executor = get_subagent_executor()
     parent_session_id = get_subagent_parent_session_id()

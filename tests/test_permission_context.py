@@ -11,7 +11,7 @@ def test_set_and_get():
     try:
         assert get_permission_channel() == "web"
     finally:
-        # Python 3.14 removed Token.reset(); use ContextVar.reset(token)
-        # (same call the project's observability _Token wrapper makes).
+        # Python 3.14 移除了 Token.reset()；改用 ContextVar.reset(token)
+        # （与项目 observability 的 _Token wrapper 调用相同）。
         APPROVAL_CHANNEL.reset(tok)
     assert get_permission_channel() == "default"

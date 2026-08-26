@@ -1,10 +1,9 @@
-"""MemoryManager — markdown-authoritative + SQLite-retrieval long-term memory.
+"""MemoryManager —— markdown 为准 + SQLite 检索的长期记忆。
 
-Mirrors jiuwenswarm's MemoryIndexManager (6 tables, hybrid vector+FTS, mtime
-incremental indexing, embedding cache) but slimmed for Twinkle. Vectors are
-opt-in (sqlite-vec optional extra); without it or without an embedding API key,
-search degrades to FTS-only. All public methods return strings or lists — never
-raise on bad input (errors go through returned strings, like skill_tools).
+对齐 jiuwenswarm 的 MemoryIndexManager(6 张表,向量+FTS 混合,mtime 增量
+索引,embedding 缓存),但为 Twinkle 精简。向量可选(sqlite-vec 可选额外依赖);
+没有它或没有 embedding API key 时,search 降级到纯 FTS。所有公开方法返回字符串
+或列表——绝不因错误输入抛异常(错误经返回的字符串传递,同 skill_tools)。
 """
 from __future__ import annotations
 
@@ -81,9 +80,9 @@ class MemoryManager:
 
     @property
     def memory_dir(self) -> Path:
-        """Resolved memory directory (read-only). Exposed for dreaming's sidecar
-        (dreaming_state.json) which lives next to MEMORY.md but outside the
-        write-whitelist (raw pathlib, not mgr.write)."""
+        """resolve 后的 memory 目录(只读)。暴露给 dreaming 的 sidecar
+        (dreaming_state.json)——它紧挨 MEMORY.md 但在写白名单之外
+        (裸 pathlib,不经 mgr.write)。"""
         return self._dir
 
     # --- schema -----------------------------------------------------------
@@ -114,10 +113,10 @@ class MemoryManager:
             log.warning("sqlite-vec unavailable; memory degrades to FTS-only")
         db.commit()
 
-    # --- path validation --------------------------------------------------
+    # --- path 校验 --------------------------------------------------
     def _resolve_relative_path(self, path: str) -> str | None:
-        """Whitelist: USER.md / MEMORY.md (root) or daily_memory/YYYY-MM-DD.md.
-        Returns the resolved-relative path, or None if invalid."""
+        """白名单:USER.md / MEMORY.md(根)或 daily_memory/YYYY-MM-DD.md。
+        返回校验通过的相对路径,无效返回 None。"""
         if path in _ROOT_FILES:
             relative_path = path
         elif path.startswith("daily_memory/"):
@@ -135,7 +134,7 @@ class MemoryManager:
             return None
         return relative_path
 
-    # --- listing / reading -----------------------------------------------
+    # --- 列出 / 读取 -----------------------------------------------
     def list_files(self) -> list[str]:
         out: list[str] = []
         for p in sorted(self._dir.rglob("*.md")):
@@ -163,7 +162,7 @@ class MemoryManager:
         end = None if limit is None else start + limit
         return "\n".join(lines[start:end])
 
-    # --- writing + indexing ----------------------------------------------
+    # --- 写入 + 索引 ----------------------------------------------
     def write(self, path: str, content: str, append: bool = False) -> str:
         relative_path = self._resolve_relative_path(path)
         if relative_path is None:
@@ -202,11 +201,10 @@ class MemoryManager:
         return f"Edited {relative_path}."
 
     def replace(self, path: str, content: str) -> str:
-        """Atomic full overwrite — write to a temp file then rename onto the
-        target in one step (rename is atomic on the same filesystem). Used by
-        dreaming's consolidation step to rewrite MEMORY.md after a read
-        snapshot: the atomic rename prevents a torn write racing an agent
-        append, and the rebuild via _index_file reflects the new content."""
+        """原子全量覆盖——写到临时文件再一步 rename 到目标(同文件系统上
+        rename 是原子的)。供 dreaming 的整合步骤在读快照后重写 MEMORY.md
+        使用:原子 rename 防止与 agent append 的写竞争产生撕裂写,且经
+        _index_file 重建反映新内容。"""
         relative_path = self._resolve_relative_path(path)
         if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
@@ -274,15 +272,14 @@ class MemoryManager:
                 "SELECT mtime, size, hash FROM files WHERE path=?", (relative_path,)).fetchone()
             if (fingerprint and fingerprint["mtime"] == stat.st_mtime
                     and fingerprint["size"] == stat.st_size and fingerprint["hash"] == file_hash):
-                return  # unchanged — skip re-index
+                return  # 未变 —— 跳过重索引
 
-            # Wrap the whole mutation in a transaction so a mid-index failure
-            # (e.g. a vec0 dims-mismatch INSERT) rolls back cleanly. Without this
-            # the open transaction leaks onto the next write on this singleton
-            # connection and commits the broken file's partial state. Mirrors
-            # jiuwenswarm manager.py _index_file try/rollback.
+            # 把整个 mutation 包进事务,中途失败(如 vec0 dims 不匹配的 INSERT)
+            # 干净回滚。否则未提交事务会泄漏到这个单例连接的下一次 write,
+            # 把坏文件的部分状态提交。对齐 jiuwenswarm manager.py _index_file
+            # 的 try/rollback。
             try:
-                # delete old chunks for this file (collect rowids first)
+                # 删除该文件的旧 chunk(先收集 rowid)
                 stale_row_ids = [r["rowid"] for r in self._db.execute(
                     "SELECT rowid FROM chunks WHERE path=?", (relative_path,)).fetchall()]
                 if stale_row_ids:
@@ -300,10 +297,10 @@ class MemoryManager:
                 embed_model = self._provider.model if self._provider else ""
                 for chunk, emb in zip(chunks, embeddings):
                     chunk_id = f"{relative_path}:{chunk.start}:{chunk.end}"
-                    # _embed_chunks already returns serialized blobs (it calls
-                    # _serialize on the float list). Don't double-serialize — that
-                    # treats the blob's bytes as a float list and inflates dims
-                    # (8 floats -> 32-byte blob -> 32 dims -> vec0 mismatch).
+                    # _embed_chunks 已返回序列化后的 blob(它在 float list 上
+                    # 调了 _serialize)。不要二次序列化——那会把 blob 的字节当
+                    # float list,撑大 dims(8 floats -> 32 字节 blob -> 32 dims
+                    # -> vec0 不匹配)。
                     blob = emb
                     cur = self._db.execute(
                         "INSERT INTO chunks(id,path,source,start_line,end_line,hash,model,"
@@ -345,7 +342,7 @@ class MemoryManager:
             out.append(Chunk(i + 1, j, "\n".join(lines[i:j])))
             if j >= n:
                 break
-            # backtrack into the tail for overlap so the next chunk shares lines
+            # 往回退进尾部做 overlap,使下一 chunk 共享行
             overlap_bytes, backtrack_to = 0, j
             while backtrack_to > i + 1 and overlap_bytes < overlap:
                 backtrack_to -= 1
@@ -378,9 +375,9 @@ class MemoryManager:
                         (h, blob, self._dims, now))
                     new[h] = blob
             except Exception as exc:
-                # Chunks are FTS-indexed below without vectors; the files/meta
-                # stamp in _index_file means they won't auto-retry until the
-                # file content changes again (no retry scheduler in 5a).
+                # 这些 chunk 会在下面以无向量方式建 FTS 索引;_index_file 里的
+                # files/meta 戳意味着它们不会自动重试,直到文件内容再次变化
+                # (5a 无重试调度器)。
                 log.warning("embedding failed; chunks indexed FTS-only (no vectors), "
                             "not retried until file changes: %s", exc)
         for t in texts:
@@ -428,18 +425,18 @@ class MemoryManager:
                 self._db.execute("DELETE FROM chunks_vec")
             self._db.execute("DELETE FROM embedding_cache")
             self._db.execute("DELETE FROM files")
-            # clear the stale embed_model stamp — the next _index_file call
-            # re-stamps it via INSERT OR REPLACE. Leaving it would make the
-            # recorded model name outlive the chunks it described.
+            # 清掉过期的 embed_model 戳——下一次 _index_file 调用会经
+            # INSERT OR REPLACE 重新盖戳。留着会让记录的 model 名比它所
+            # 描述的 chunk 活得更久。
             self._db.execute("DELETE FROM meta WHERE key='embed_model'")
             self._db.commit()
 
     # --- search ----------------------------------------------------------
     def search(self, query: str, max_results: int | None = None) -> list[dict]:
-        """Hybrid retrieval, ranked + top-N capped (no score cutoff, mirroring
-        jiuwenswarm's no-cutoff FTS). FTS-only (no sqlite-vec or no provider):
-        matches in SQL bm25 order (best first). Hybrid: fuse vector similarity
-        + FTS bm25 score (both best=high) and rank by the fused score."""
+        """混合检索,排序 + top-N 截断(无分数截断,对齐 jiuwenswarm 的无截断
+        FTS)。纯 FTS(无 sqlite-vec 或无 provider):按 SQL bm25 顺序匹配
+        (最优在前)。混合:融合向量相似度 + FTS bm25 分(两者越大越优)按
+        融合分排序。"""
         # 兜底:写入零索引后,刚写的内容可能还在 dirty 集未索引→搜不到。
         # search 前同步 flush 保证可见性(对齐 jiuwenswarm search 前确保索引最新)。
         if self._dirty_paths:
@@ -447,7 +444,7 @@ class MemoryManager:
         max_results = max_results or self._max_results
         candidates = min(200, max(1, int(max_results * self._candidate_multiplier)))
         with self._db_lock:
-            fts_rows = self._fts_search(query, candidates)  # ORDER BY bm -> best first
+            fts_rows = self._fts_search(query, candidates)  # ORDER BY bm -> 最优在前
             fts_by_rowid = {r["rowid"]: r for r in fts_rows}
 
             if not (self._vec_enabled and self._provider is not None):
@@ -501,21 +498,20 @@ class MemoryManager:
         rows = self._db.execute(
             "SELECT rowid, distance FROM chunks_vec WHERE embedding MATCH ? "
             "ORDER BY distance LIMIT ?", (self._serialize(qvec), limit)).fetchall()
-        # cosine distance ∈ [0,2] → similarity = 1 - distance/2, clamped [0,1]
+        # cosine distance ∈ [0,2] → similarity = 1 - distance/2,夹到 [0,1]
         return {r["rowid"]: max(0.0, 1.0 - r["distance"] / 2.0) for r in rows}
 
     @staticmethod
     def _hit(row, score: float) -> dict:
-        """Uniform result shape for both FTS-only + hybrid paths (path/score/
-        text/start_line/end_line). Centralizing prevents shape drift."""
+        """统一纯 FTS 和混合两条路径的结果形状(path/score/text/start_line/
+        end_line)。集中构造防止形状漂移。"""
         return {"path": row["path"], "score": round(score, 4),
                 "text": row["text"], "start_line": row["start_line"],
                 "end_line": row["end_line"]}
 
     @staticmethod
     def _text_sim(bm: float) -> float:
-        # bm25() is <= 0 for matches (more negative = more relevant). Map to
-        # [0,1] with best (most negative) -> ~1.0. No score cutoff is applied
-        # (see search()) — retrieval is ranked + top-N capped.
+        # bm25() 对匹配 <= 0(越负越相关)。映射到 [0,1],最优(最负)-> ~1.0。
+        # 不做分数截断(见 search())——检索只排序 + top-N 截断。
         a = abs(bm)
         return a / (1.0 + a)

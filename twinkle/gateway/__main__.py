@@ -1,12 +1,13 @@
-"""Gateway entry point: `python -m twinkle.gateway`.
+"""Gateway 入口：`python -m twinkle.gateway`。
 
-Wires AgentClient -> MessageHandler -> ChannelManager -> WebChannel and runs
-the two async servers (browser ws + agentserver client) in one process.
+串联 AgentClient -> MessageHandler -> ChannelManager -> WebChannel，在同一进程里
+跑两个 async server（浏览器 ws + agentserver client）。另启动 CronSchedulerService
+（gateway 侧 cron 时钟）。
 
-Dependency direction (aligned with jiuwenclaw, unidirectional):
-  MessageHandler(agent_client)                — only knows AgentClient
-  ChannelManager(message_handler)             — knows MessageHandler (inbound + outbound Queue)
-No circular reference at all.
+依赖方向（对齐 jiuwenclaw，单向）：
+  MessageHandler(agent_client)                — 只持有 AgentClient
+  ChannelManager(message_handler)             — 持有 MessageHandler（inbound + outbound Queue）
+完全没有循环引用。
 """
 import asyncio
 
@@ -40,7 +41,7 @@ async def main() -> None:
     await cron_scheduler.start()
 
     await channel_manager.start()
-    # runs forever (WebChannel.start blocks on asyncio.Future)
+    # 永久运行（WebChannel.start 阻塞在 asyncio.Future 上）
     await web_channel.start()
 
 

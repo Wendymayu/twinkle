@@ -27,7 +27,7 @@ class _Tools:
 
 
 class _LLM:
-    """Records the last messages received via stream(); returns ok."""
+    """记录经 stream() 收到的最后 messages；返回 ok。"""
 
     def __init__(self):
         self.seen = None
@@ -80,6 +80,6 @@ def test_run_stream_no_compress_under_threshold():
 
     asyncio.run(collect())
     assert real_llm.seen is not None
-    # Under threshold: no summary message inserted
+    # 阈值以下：不插入 summary message
     assert not any("[prior context summary]" in m.get("content", "") for m in real_llm.seen)
     assert frames and frames[-1].response_kind == "e2a.complete"

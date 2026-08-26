@@ -1,12 +1,12 @@
-"""SubagentContextHook — sets the subagent ContextVar bridge at run_stream entry.
+"""SubagentContextHook — 在 run_stream 入口设置 subagent 的 ContextVar 桥接。
 
-Auto-wired by create_agent (which builds the executor and passes it here —
-mirroring jiuwenswarm's adapter binding the executor onto its stream rail).
-before_invoke fires once per run_stream (same entry point where run_stream
-itself sets PLAN_TODO_SESSION_ID etc.) and sets the executor + parent
-session/request id into the ContextVars that the parameter-less spawn_subagent
-tool reads at runtime. Registered on the PARENT loop only; the child has no
-spawn_subagent so it never reads these.
+由 create_agent 自动装配（它构造 executor 并传到此处 —
+镜像 jiuwenswarm 的 adapter 把 executor 绑到其 stream rail）。
+before_invoke 每次 run_stream 触发一次（与 run_stream 自身设置
+PLAN_TODO_SESSION_ID 等的同一入口），把 executor + 父
+session/request id 写入 ContextVar，供无参的 spawn_subagent
+tool 在运行时读取。仅注册在 PARENT loop 上；子 loop 没有
+spawn_subagent，故永不读取这些。
 """
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
-"""Tests for AgentClient fail-fast on AgentServer disconnect.
+"""AgentClient 在 AgentServer 断连时 fail-fast 的测试.
 
-When the recv loop ends (AgentServer crashed / ws closed), pending
-send_request_stream calls must raise ConnectionError instead of hanging forever
-on an empty queue.
+当 recv loop 结束(AgentServer 崩溃 / ws 关闭)时,挂起的
+send_request_stream 调用必须抛出 ConnectionError,而不是在空 queue 上永久挂起。
 """
 from __future__ import annotations
 
@@ -15,13 +14,13 @@ from twinkle.gateway.agent_client import AgentClient
 
 
 class _NoopWS:
-    """Fake ws whose send() is a no-op (lets _send succeed for the test)."""
+    """假的 ws,send() 是空操作(让 _send 在测试中成功)。"""
     async def send(self, data):
         pass
 
 
 def test_fail_pending_pushes_disconnect_error_to_all_queues():
-    """_fail_pending pushes a ConnectionError into every pending request queue."""
+    """_fail_pending 往每个 pending request queue 推一个 ConnectionError。"""
     async def run():
         client = AgentClient("ws://ignored")
         q1, q2 = asyncio.Queue(), asyncio.Queue()
@@ -35,9 +34,9 @@ def test_fail_pending_pushes_disconnect_error_to_all_queues():
 
 
 def test_send_request_stream_raises_when_recv_loop_pushes_disconnect_error():
-    """When the recv loop pushes a ConnectionError into the pending queue,
-    send_request_stream raises it (does NOT hang, does NOT feed it to
-    E2AResponse.model_validate)."""
+    """当 recv loop 往 pending queue 推一个 ConnectionError 时,
+    send_request_stream 抛出它(不挂起,也不把它喂给
+    E2AResponse.model_validate)。"""
     async def run():
         client = AgentClient("ws://ignored")
         client._ws = _NoopWS()  # bypass connect(); _send becomes a no-op
@@ -49,10 +48,10 @@ def test_send_request_stream_raises_when_recv_loop_pushes_disconnect_error():
                 pass
 
         task = asyncio.create_task(_consume())
-        # Let the consumer register its queue and reach `await q.get()`.
+        # 让消费者注册 queue 并走到 `await q.get()`.
         await asyncio.sleep(0)
         await asyncio.sleep(0)
-        # Simulate recv loop exit pushing a disconnect error into the queue.
+        # 模拟 recv loop 退出,往 queue 推一个 disconnect 错误。
         client._queues["r1"].put_nowait(
             ConnectionError("agent server disconnected"))
         with pytest.raises(ConnectionError):

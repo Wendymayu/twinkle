@@ -1,8 +1,8 @@
-"""ToolManager — container of Tool. Knows only the Tool interface.
+"""ToolManager —— Tool 的容器。只知 Tool 接口。
 
-Aligned with openjiuwen core/single_agent/ability_manager.py, cut to a
-minimal subset: register/unregister/list/get/schemas/execute. No catalog()
-(YAGNI — list() covers enumeration, schemas() covers the model view).
+对齐 openjiuwen core/single_agent/ability_manager.py,裁剪到最小子集:
+register/unregister/list/get/schemas/execute。无 catalog()(YAGNI ——
+list() 已覆盖枚举,schemas() 已覆盖模型视图)。
 """
 from __future__ import annotations
 
@@ -46,8 +46,8 @@ class ToolManager:
         t = self._tools.get(name)
         if t is None:
             raise ToolError(f"unknown tool: {name}", kind="validation")
-        # Tool exceptions propagate (not swallowed here) so the @hook-decorated
-        # _hooked_tool_call can fire ON_TOOL_EXCEPTION and RetryHook can retry
-        # transient ones. The agent loop turns non-retried / exhausted failures
-        # into a "[tool error] ..." tool_result string — loop still doesn't crash.
+        # Tool 抛出的异常在此传播(不被吞掉),以便 @hook 装饰的
+        # _hooked_tool_call 能触发 ON_TOOL_EXCEPTION,RetryHook 能重试
+        # 瞬时失败。agent loop 把未重试/耗尽重试的失败转成
+        # "[tool error] ..." tool_result 字符串 —— loop 仍不会崩溃。
         return await t.invoke(args)

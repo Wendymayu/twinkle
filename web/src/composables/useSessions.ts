@@ -10,7 +10,7 @@ export interface SessionItem {
 export interface ChatMsg {
   role: 'user' | 'assistant' | 'tool'
   content: string
-  // approval-card fields — only meaningful when kind === 'approval'
+  // approval-card 字段——仅在 kind === 'approval' 时有意义
   kind?: 'approval'
   approvalId?: string
   tool?: string
@@ -32,7 +32,7 @@ const connected = ref(false)
 const busy = ref(false)
 const loading = ref(false)
 const todo = ref<TodoState | null>(null)
-// true while an approval.ask is awaiting a user decision — disables the chat input
+// approval.ask 等待用户决策期间为 true——禁用聊天输入
 const inputDisabled = ref(false)
 
 type NavKey = 'chat' | 'sessions' | 'skills'
@@ -66,7 +66,7 @@ function box(status: TodoTask['status']): string {
 }
 
 function fromHistory(records: any[]): ChatMsg[] {
-  // system messages are the todo-guidance prompt — skip in the UI.
+  // system 消息是 todo 指导 prompt——在 UI 中跳过。
   return records
     .filter((r) => r.role !== 'system')
     .map((r) => ({ role: r.role, content: r.content ?? '' }))
@@ -116,7 +116,7 @@ async function loadSessionFiles(sid: string) {
   selectedSessionId.value = sid
   const payload = await client.request('session.files', { session_id: sid })
   sessionFiles.value = payload?.files ?? []
-  // auto-select the first file
+  // 自动选中第一个文件
   const first = sessionFiles.value.find((f) => !f.is_dir)
   if (first) {
     await readSessionFile(sid, first.name)
@@ -141,7 +141,7 @@ async function readSessionFile(sid: string, name: string) {
 }
 
 async function restoreSession(sid: string) {
-  await selectSession(sid) // loads chat history + sets currentSessionId
+  await selectSession(sid) // 加载聊天历史 + 设置 currentSessionId
   setNav('chat')
 }
 
@@ -214,7 +214,7 @@ function init() {
       (delta, rid) => {
         if (rid !== client.getLastRequestId()) return
         const last = messages.value[messages.value.length - 1]
-        // don't append resumed deltas onto an approval card — start a fresh bubble
+        // 不要把恢复的 delta 追加到 approval card 上——开一个新气泡
         if (last && last.role === 'assistant' && last.kind !== 'approval') last.content += delta
         else messages.value.push({ role: 'assistant', content: delta })
       },
@@ -225,14 +225,14 @@ function init() {
           messages.value.push({ role: 'assistant', content: text })
         else if (!last.content) last.content = text
         busy.value = false
-        inputDisabled.value = false // defensive: clear in case an approval was still pending
-        loadSessions() // refresh to pick up a fresh auto-title
+        inputDisabled.value = false // 防御性清理：以防仍有 approval 在等待
+        loadSessions() // 刷新以获取新的自动标题
       },
       (t) => { todo.value = t },
       (payload, rid) => {
-        // approval.ask: payload={approval_id,tool,args,tool_call_id,reason},
-        // rid is the ORIGINAL chat.send request_id — store it so the card can
-        // pass it back as original_request_id when responding.
+        // approval.ask：payload={approval_id,tool,args,tool_call_id,reason}，
+        // rid 是原始 chat.send 的 request_id——存下来，使 card 在响应时
+        // 能把它作为 original_request_id 传回。
         messages.value.push({
           role: 'assistant',
           kind: 'approval',
@@ -244,7 +244,7 @@ function init() {
           requestId: rid,
           decided: null,
         })
-        inputDisabled.value = true // disable input while an approval is pending
+        inputDisabled.value = true // approval 等待期间禁用输入
       },
     )
     // 连接就绪即拉已装 skill:SkillsView.onMounted 的 loadInstalled 可能在 ws.onopen 前
@@ -255,18 +255,18 @@ function init() {
     loadSessions()
       .then(() => (saved ? selectSession(saved).catch(() => createSession()) : createSession()))
       .then(() => checkAndRestorePendingApproval())
-      .catch(() => { /* session bootstrap failed — user can retry via the + 新对话 button */ })
+      .catch(() => { /* session bootstrap 失败——用户可通过 + 新对话 按钮重试 */ })
   })
 }
 
-/** After (re)connection, check for pending approvals and restore approval cards
- *  so the user can resume from a breakpoint after closing the browser. */
+/** （重）连接后，检查待处理 approval 并恢复 approval card，
+ *  使用户关闭浏览器后可从断点继续。 */
 async function checkAndRestorePendingApproval() {
   try {
     const result = await client.checkPendingApprovals(client.getSessionId())
     const pending = result?.pending ?? []
     for (const p of pending) {
-      // Avoid duplicate cards (e.g. network blip without full page reload)
+      // 避免重复 card（如网络抖动但未整页刷新）
       const exists = messages.value.some(m => m.kind === 'approval' && m.approvalId === p.approval_id)
       if (!exists) {
         messages.value.push({
@@ -284,12 +284,12 @@ async function checkAndRestorePendingApproval() {
       }
     }
   } catch {
-    // Non-critical — if it fails, the user can still interact normally
+    // 非关键——失败时用户仍可正常交互
   }
 }
 
-/** Mark an approval card as decided so its action buttons swap for a result
- * label. Mutates the message in-place — reactive because messages is a deep ref. */
+/** 将 approval card 标记为已决策，使其动作按钮换成结果
+ * 标签。原地修改 message——因 messages 是 deep ref 而保持响应式。 */
 function markApprovalDecided(approvalId: string, decision: ApprovalDecision) {
   for (const m of messages.value) {
     if (m.kind === 'approval' && m.approvalId === approvalId) {

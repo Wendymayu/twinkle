@@ -1,4 +1,4 @@
-"""Tests for HookContext, HookInputs subclasses, and control flow signals."""
+"""HookContext、HookInputs 子类及控制流信号测试。"""
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +43,7 @@ def test_hook_context_extra_dict_shared_across_access():
     )
     ctx.extra["key1"] = "value1"
     assert ctx.extra["key1"] == "value1"
-    # Different ctx.extra dicts are independent
+    # 不同 ctx 的 extra dict 相互独立
     ctx2 = HookContext(
         agent=None,
         event=HookEvent.BEFORE_MODEL_CALL,
@@ -86,16 +86,16 @@ def test_request_retry_and_consume():
         session_id="s1",
         request_id="r1",
     )
-    # Initially no retry request
+    # 初始无 retry 请求
     assert ctx.consume_retry_request() is None
 
-    # Set retry request
+    # 设置 retry 请求
     ctx.request_retry(delay=0.5)
     req = ctx.consume_retry_request()
     assert req is not None
     assert req.delay == 0.5
 
-    # Consumed — second call returns None
+    # 已消费 — 第二次调用返回 None
     assert ctx.consume_retry_request() is None
 
 
@@ -107,16 +107,16 @@ def test_request_force_finish_and_consume():
         session_id="s1",
         request_id="r1",
     )
-    # Initially no force finish request
+    # 初始无 force finish 请求
     assert ctx.consume_force_finish_request() is None
 
-    # Set force finish request
+    # 设置 force finish 请求
     ctx.request_force_finish(result="denied")
     ff = ctx.consume_force_finish_request()
     assert ff is not None
     assert ff.result == "denied"
 
-    # Consumed — second call returns None
+    # 已消费 — 第二次调用返回 None
     assert ctx.consume_force_finish_request() is None
 
 
@@ -124,7 +124,7 @@ def test_hook_interrupt_exception():
     exc = HookInterrupt(message="need approval", data={"tool": "rm"})
     assert str(exc) == "need approval"
     assert exc.data == {"tool": "rm"}
-    # Default data is empty dict
+    # 默认 data 是空 dict
     exc2 = HookInterrupt(message="stop")
     assert exc2.data == {}
 

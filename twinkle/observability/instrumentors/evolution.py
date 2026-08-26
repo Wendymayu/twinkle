@@ -1,11 +1,11 @@
-"""Instrument OnlineEvolutionOrchestrator.evolve -> twinkle.skill.evolution span.
+"""Instrument OnlineEvolutionOrchestrator.evolve -> twinkle.skill.evolution span。
 
-Patches ``evolve`` (per-skill, contains the signal-detection + experience-
-generation LLM calls, returns an ``EvolutionResult`` with ``.status``). The
-internal LLM calls' ``gen_ai.chat`` spans nest under this span (current via
-``start_as_current_span``). ``run_feedback_loop`` is NOT patched — it returns
-None (no status), so a span there has low diagnostic value; its LLM calls stay
-indistinguishable ``gen_ai.chat`` (accepted, YAGNI).
+patch ``evolve``（按 skill，含 signal-detection + experience-generation 的
+LLM 调用，返回带 ``.status`` 的 ``EvolutionResult``）。内部 LLM 调用的
+``gen_ai.chat`` span 嵌套在本 span 下（经 ``start_as_current_span`` 成为
+current）。``run_feedback_loop`` 不 patch——它返回 None（无 status），
+故该处 span 诊断价值低；其 LLM 调用仍是不可区分的 ``gen_ai.chat``
+（接受，YAGNI）。
 """
 from __future__ import annotations
 
@@ -16,12 +16,11 @@ from twinkle.observability.instrumentors.llm import _stamp_ctx, _trunc
 
 
 def instrument_evolution(tracer, metrics, cfg, *, orchestrator_cls=None) -> bool:
-    """Patch ``OnlineEvolutionOrchestrator.evolve`` to emit a
-    ``twinkle.skill.evolution`` span carrying ``skill.name`` / ``evolution.status``
-    / ``evolution.message``.
+    """Patch ``OnlineEvolutionOrchestrator.evolve`` 以发出
+    ``twinkle.skill.evolution`` span，携带 ``skill.name`` / ``evolution.status``
+    / ``evolution.message``。
 
-    ``metrics`` is accepted for signature parity but unused (evolution is
-    low-frequency; spans suffice).
+    ``metrics`` 为签名对齐而保留，但未使用（evolution 低频；span 足矣）。
     """
     if orchestrator_cls is None:
         from twinkle.agentserver.evolution.orchestrator import (

@@ -1,7 +1,7 @@
-"""RepeatToolCallDetectorHook — sliding window + stable hash detection of repeated tool calls.
+"""RepeatToolCallDetectorHook — 滑动窗口 + 稳定哈希检测重复 tool call。
 
-4-tier severity (LOW→CRITICAL), edge-triggered, auto-injects remediation system
-messages on loops. Rate-limited: at most N injections per minute per session.
+4 档严重度（LOW→CRITICAL），边沿触发，检测到循环时自动注入纠偏 system
+消息。限流：每 session 每分钟最多 N 次注入。
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ log = logging.getLogger("twinkle.hooks.repeat_tool_detection")
 
 
 class Severity(IntEnum):
-    """4-tier severity — higher rank means more severe."""
+    """4 档严重度 — rank 高者更严重。"""
     LOW = 1
     MEDIUM = 2
     HIGH = 3
@@ -29,7 +29,7 @@ class Severity(IntEnum):
 
 @dataclass
 class _SessionState:
-    """Per-session runtime state for the detector."""
+    """检测器的 per-session 运行时状态。"""
     history: deque = field(default_factory=lambda: deque(maxlen=30))
     pending_call_key: str | None = None
     fired_severity: Severity | None = None
@@ -37,27 +37,27 @@ class _SessionState:
 
 
 def stable_call_hash(name: str, args: dict) -> str:
-    """Stable hash of tool name + sorted args — parameter order does not affect detection."""
+    """tool name + 排序后 args 的稳定哈希 — 参数顺序不影响检测。"""
     payload = json.dumps({"name": name, "args": args}, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def stable_result_hash(result: str) -> str:
-    """Stable hash of tool result — distinguishes 'repeated calls with changing results' vs 'same results'."""
+    """tool result 的稳定哈希 — 区分"重复调用但结果在变"与"结果相同"。"""
     return hashlib.sha256(result.encode()).hexdigest()[:16]
 
 
 class RepeatToolCallDetectorHook(AgentHook):
-    """Repeat / loop tool-call detector + auto-remediator.
+    """重复/循环 tool-call 检测器 + 自动纠偏。
 
-    Priority 88: after SkillHook(90), before MemoryHook(80).
-    Needs to see messages after compression, but inject remediation before memory injection.
+    Priority 88：在 SkillHook(90) 之后、MemoryHook(80) 之前。
+    需在压缩之后看到 messages，但在 memory 注入之前注入纠偏。
 
-    Events:
-    - before_tool_call: record call_key
-    - after_tool_call: record outcome_key + classify detection
-    - on_tool_exception: record error as outcome_key + classify detection
-    - before_model_call: inject remediation system message if loop detected
+    事件：
+    - before_tool_call：记录 call_key
+    - after_tool_call：记录 outcome_key + 分类检测
+    - on_tool_exception：把错误记为 outcome_key + 分类检测
+    - before_model_call：检测到循环则注入纠偏 system message
     """
 
     priority = 88
@@ -79,11 +79,11 @@ class RepeatToolCallDetectorHook(AgentHook):
         self._global_stop = global_stop
         self._remediation_max_per_minute = remediation_max_per_minute
 
-        # Per-session runtime state — keyed by session_id
+        # per-session 运行时状态 — 以 session_id 为键
         self._states: dict[str, _SessionState] = {}
 
     def _get_state(self, ctx: HookContext) -> _SessionState:
-        """Get or create per-session state."""
+        """获取或创建 per-session 状态。"""
         session_id = ctx.session_id or "_default"
         if session_id not in self._states:
             self._states[session_id] = _SessionState(
@@ -109,18 +109,17 @@ class RepeatToolCallDetectorHook(AgentHook):
         self._record_and_classify(ctx, outcome)
 
     async def before_model_call(self, ctx: HookContext) -> None:
-        """Hard-stop on CRITICAL loops; inject remediation nudge on MEDIUM/HIGH.
+        """CRITICAL 循环硬停；MEDIUM/HIGH 注入纠偏提示。
 
-        CRITICAL (trailing identical call+outcome >= global_stop) means the
-        agent is making zero progress — force_finish the run instead of nudging.
-        This bypasses the remediation rate-limiter: a stuck loop must stop,
-        not be warned at. MEDIUM/HIGH stay soft remediation (model still has
-        a chance to change strategy).
+        CRITICAL（尾部相同 call+outcome >= global_stop）意味着
+        agent 毫无进展 — 用 force_finish 结束本次 run，而非提示。
+        此处绕过纠偏限流器：卡死的循环必须停，而不是被警告。
+        MEDIUM/HIGH 仍是软纠偏（模型仍有机会换策略）。
         """
         state = self._get_state(ctx)
         if state.fired_severity is None or state.fired_severity < Severity.MEDIUM:
             return
-        # CRITICAL: hard-stop the loop.
+        # CRITICAL：硬停循环。
         if state.fired_severity >= Severity.CRITICAL:
             ctx.request_force_finish(
                 result=(
@@ -133,7 +132,7 @@ class RepeatToolCallDetectorHook(AgentHook):
                 (state.history[-1][0][:8] if state.history else "?"),
             )
             return
-        # MEDIUM/HIGH: soft remediation nudge (rate-limited).
+        # MEDIUM/HIGH：软纠偏提示（限流）。
         if not self._check_remediation_budget(state):
             return
         severity_label = state.fired_severity.name
@@ -151,10 +150,10 @@ class RepeatToolCallDetectorHook(AgentHook):
             severity_label,
         )
 
-    # --- Internal methods ---
+    # --- 内部方法 ---
 
     def _record_and_classify(self, ctx: HookContext, outcome: str) -> None:
-        """Record completed call and run classification detection."""
+        """记录已完成的 call 并运行分类检测。"""
         state = self._get_state(ctx)
         if state.pending_call_key is None:
             return
@@ -166,7 +165,7 @@ class RepeatToolCallDetectorHook(AgentHook):
         severity = self._classify(state, call_key)
         if severity is None:
             return
-        # Edge-triggered: only fire when severity rises
+        # 边沿触发：仅当严重度上升时触发
         if state.fired_severity is not None and severity <= state.fired_severity:
             return
         state.fired_severity = severity
@@ -176,25 +175,25 @@ class RepeatToolCallDetectorHook(AgentHook):
         )
 
     def _classify(self, state: _SessionState, call_key: str) -> Severity | None:
-        """4-tier classification detection, returns highest severity."""
+        """4 档分类检测，返回最高严重度。"""
         repeat_warn = self._repeat_warn or _get_repeat_warn()
         pingpong_warn = self._pingpong_warn or _get_pingpong_warn()
         loop_block = self._loop_block or _get_loop_block()
         global_stop = self._global_stop or _get_global_stop()
 
-        # CRITICAL / HIGH: trailing identical (call+outcome)
+        # CRITICAL / HIGH：尾部相同（call+outcome）
         trailing = self._trailing_identical(state)
         if trailing >= global_stop:
             return Severity.CRITICAL
         if trailing >= loop_block:
             return Severity.HIGH
 
-        # MEDIUM: A-B-A-B alternation
+        # MEDIUM：A-B-A-B 交替
         alternation = self._trailing_alternation(state)
         if alternation >= pingpong_warn:
             return Severity.MEDIUM
 
-        # LOW: same call_key repeated in window
+        # LOW：窗口内同一 call_key 重复
         repeats = sum(1 for history_key, _ in state.history if history_key == call_key)
         if repeats >= repeat_warn:
             return Severity.LOW
@@ -202,7 +201,7 @@ class RepeatToolCallDetectorHook(AgentHook):
         return None
 
     def _trailing_identical(self, state: _SessionState) -> int:
-        """Count of trailing consecutive identical (call_key, outcome_key) pairs."""
+        """尾部连续相同 (call_key, outcome_key) 对的数量。"""
         if not state.history:
             return 0
         last = state.history[-1]
@@ -215,7 +214,7 @@ class RepeatToolCallDetectorHook(AgentHook):
         return count
 
     def _trailing_alternation(self, state: _SessionState) -> int:
-        """Count of trailing A-B-A-B alternation pattern."""
+        """尾部 A-B-A-B 交替模式的数量。"""
         if len(state.history) < 2:
             return 0
         sequence = list(reversed(state.history))
@@ -233,7 +232,7 @@ class RepeatToolCallDetectorHook(AgentHook):
         return count
 
     def _check_remediation_budget(self, state: _SessionState) -> bool:
-        """Rate-limit: at most N injections per minute."""
+        """限流：每分钟最多 N 次注入。"""
         max_per_minute = self._remediation_max_per_minute or _get_remediation_max_per_minute()
         now = time.monotonic()
         state.remediation_timestamps = [
@@ -242,7 +241,7 @@ class RepeatToolCallDetectorHook(AgentHook):
         return len(state.remediation_timestamps) < max_per_minute
 
 
-# --- Config lazy reads ---
+# --- config 懒读 ---
 
 def _get_history_size() -> int:
     from twinkle.config import settings

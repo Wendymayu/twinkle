@@ -10,7 +10,7 @@ from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeExecutor:
-    """Captures the task + parent ids; returns a canned result."""
+    """捕获 task 与 parent 的 id；返回一个预设结果。"""
     def __init__(self, result):
         self._result = result
         self.captured = []
@@ -36,7 +36,7 @@ def test_spawn_subagent_returns_final_plus_stop_hint(session_store):
     assert "the answer" in out
     assert "[SYSTEM]" in out
     assert "Do NOT call spawn_subagent again" in out
-    # executor received the right parent ids from ContextVar
+    # executor 从 ContextVar 收到正确的 parent id
     assert fake.captured[0][1] == "p1"
     assert fake.captured[0][2] == "r1"
 
@@ -61,7 +61,7 @@ def test_spawn_subagent_failure_returns_error_plus_stop_hint(session_store):
 
 def test_spawn_subagent_no_executor_returns_unavailable():
     from twinkle.agentserver.tools.builtin.subagent import spawn_subagent
-    # no ContextVar set -> raises ToolError (unavailable)
+    # 未设置 ContextVar -> 抛出 ToolError（不可用）
     with pytest.raises(ToolError, match="subagent executor not initialized"):
         asyncio.run(spawn_subagent.invoke(
             {"objective": "x", "prompt": ""}))
@@ -72,6 +72,6 @@ def test_spawn_subagent_is_a_streaming_free_tool():
     from twinkle.agentserver.tools.builtin.subagent import spawn_subagent
     assert isinstance(spawn_subagent, Tool)
     assert spawn_subagent.card.name == "spawn_subagent"
-    # schema is auto-derived from the signature
+    # schema 由签名自动推导
     params = spawn_subagent.card.parameters
     assert "objective" in params.get("required", [])

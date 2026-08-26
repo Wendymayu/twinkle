@@ -1,14 +1,14 @@
-"""ObservabilityConfig — env-driven, default-off.
+"""ObservabilityConfig —— env 驱动，默认关。
 
-Mirrors jiuwenswarm-instrumentor config.py. OTEL_ENABLED=false (default)
-=> setup() is a zero-cost no-op. Importing twinkle.config triggers the
-repo-root .env loader (side effect) so os.getenv sees .env values too.
+镜像 jiuwenswarm-instrumentor config.py。OTEL_ENABLED=false（默认）
+=> setup() 是零开销 no-op。导入 twinkle.config 触发仓库根目录的
+.env loader（副作用），使 os.getenv 也能看到 .env 的值。
 """
 from __future__ import annotations
 
 import os
 
-import twinkle.config  # noqa: F401 — triggers .env loading
+import twinkle.config  # noqa: F401 —— 触发 .env 加载
 
 
 def _get_bool(key: str, default: bool) -> bool:

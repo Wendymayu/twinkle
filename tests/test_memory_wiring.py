@@ -24,14 +24,14 @@ def test_no_long_term_memory_references_in_core():
 
 
 def test_memory_stub_replaced_by_package():
-    import twinkle.agentserver.memory as mem  # the package (not the old stub)
+    import twinkle.agentserver.memory as mem  # 包（非旧 stub）
     from twinkle.agentserver.memory.store import MemoryManager
     assert hasattr(mem, "get_memory_manager")
     assert MemoryManager is not None
 
 
 def test_memory_hook_in_default_loop_hooks():
-    """create_agent + main() register MemoryHook alongside SkillHook."""
-    # main() builds hooks explicitly; we check MemoryHook is exported + instantiable.
+    """create_agent + main() 把 MemoryHook 与 SkillHook 一起注册。"""
+    # main() 显式构造 hooks 列表；这里校验 MemoryHook 已导出且可实例化。
     from twinkle.agentserver.hooks.builtin import MemoryHook, SkillHook
     assert MemoryHook.priority < SkillHook.priority  # 80 < 90

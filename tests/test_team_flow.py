@@ -1,8 +1,8 @@
-"""End-to-end team flow tests — spec §6 validation (Task 8).
+"""端到端 team flow 测试 —— spec §6 验证(Task 8)。
 
-Verifies the full chain: leader create_task (with dependency) → member
-claim/complete → dependency lift → second member claim → complete.
-Plus steer injection into a member run.
+验证完整链路:leader create_task(带 dependency)→ member
+claim/complete → dependency 解除 → 第二个 member claim → complete。
+外加向 member run 注入 steer。
 """
 import asyncio
 

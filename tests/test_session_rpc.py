@@ -84,15 +84,14 @@ def test_session_delete_cleans_todo(session_store, isolated_todo_store):
     frames = _run(_frames(_env("session.delete", session_id="s1"), session_store))
     f = frames[0]
     assert f.body["type"] == "session.delete"
-    # todo file cleaned up by the RPC -> list returns []
+    # todo 文件由 RPC 清理 -> list 返回 []
     assert _run(isolated_todo_store.list("s1")) == []
 
 
 def test_unknown_session_method_returns_no_frames(session_store):
-    # dispatch_session_rpc only handles session.*/history.get; an unknown
-    # method yields nothing (the caller — server.py — falls through to the
-    # AgentLoop for chat.send). We assert it yields no frames for a method
-    # it does not own.
+    # dispatch_session_rpc 只处理 session.*/history.get/file.read；未知
+    # method 不 yield 任何帧（调用方 server.py 对 chat.send 会回落到
+    # AgentLoop）。这里断言：对它不负责的 method 不 yield 任何帧。
     frames = _run(_frames(_env("chat.send"), session_store))
     assert frames == []
 

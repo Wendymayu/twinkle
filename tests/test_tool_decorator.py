@@ -4,7 +4,7 @@ from twinkle.agentserver.tools.decorator import tool
 
 
 async def _fetch(url: str, max_chars: int = 8000) -> str:
-    """Fetch a URL."""
+    """抓取一个 URL。"""
     return url
 
 
@@ -16,7 +16,7 @@ async def _plain(url: str) -> str:
 
 @tool()
 async def _called(url: str) -> str:
-    """Called-no-args decorated."""
+    """调用形式（无参）decorated。"""
     return url
 
 

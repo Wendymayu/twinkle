@@ -1,12 +1,12 @@
-"""Typed config schema — pydantic models with Literal 取值域 + derived paths.
+"""带类型的 config schema —— pydantic models，含 Literal 取值域 + 派生路径。
 
-Loaded by config_loader from twinkle/resources/config.yaml. Field defaults mirror
-the packaged config.yaml so the model is self-documenting and TwinkleConfig() with
-no args produces the valid shipped defaults. The YAML is the user-facing source of
-truth; this model validates it (bad tier / bad mode -> startup ValidationError).
+由 config_loader 从 twinkle/resources/config.yaml 加载。字段默认值镜像随包
+config.yaml，使模型自文档化，且无参 TwinkleConfig() 即产出有效的出厂默认值。
+YAML 是面向用户的真相源；本模型校验它（错误的 tier / mode -> 启动时
+ValidationError）。
 
-Mirrors jiuwenswarm/resources/config.yaml field shapes (permissions.tools/rules,
-skill_mode, telemetry omitted here — observability keeps its own OTEL_* env, v1).
+镜像 jiuwenswarm/resources/config.yaml 的字段形状（permissions.tools/rules、
+skill_mode，telemetry 此处省略——observability 自带 OTEL_* env，v1）。
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ McpTransport = Literal["stdio", "streamable-http"]
 
 
 class _StrictModel(BaseModel):
-    """Base: reject unknown keys so a YAML typo (e.g. `permission:` vs `permissions:`,
-    or `enbaled:`) fails loudly at startup instead of silently disabling a subsystem."""
+    """基类：拒绝未知键，使 YAML 拼写错误（如 `permission:` vs `permissions:`，
+    或 `enbaled:`）在启动时显式失败，而非静默禁用某子系统。"""
     model_config = ConfigDict(extra="forbid")
 
 
@@ -57,7 +57,7 @@ class LLMConfig(_StrictModel):
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o-mini"
     api_key: str = ""
-    timeout: float = 120.0  # per-chunk read timeout (s); hung model -> APITimeoutError
+    timeout: float = 120.0  # 单块读取超时（秒）；卡住的 model -> APITimeoutError
 
 
 class AgentConfig(_StrictModel):
@@ -95,7 +95,7 @@ class ContextCompressionConfig(_StrictModel):
 class SkillsConfig(_StrictModel):
     dir: str = ""  # "" -> <workspace>/skills
     mode: SkillMode = "all"
-    enabled: list[str] = []  # [] = all skills open
+    enabled: list[str] = []  # [] = 全部 skill 开放
     skillnet_api_url: str = "http://api-skillnet.openkg.cn"  # SkillNet 公开搜索服务(关键词搜索)
     skillhub_api_url: str = "https://api.skillhub.cn"  # SkillHub 公开列表/下载 API(关键词搜索 + zip 下载)
     github_token: str = ""  # "" = anonymous (60/hour) — GitHub 下载用
@@ -146,7 +146,7 @@ class MemoryDreamingConfig(_StrictModel):
     max_memory_chars: int = 10000   # MEMORY.md 容量预算，超限 compact 丢最老提升行
     max_delete_fraction: float = 0.25  # 整合步单次删除行数上限比例（安全阀，防 LLM 误删）
     max_infectious_fraction: float = 0.5  # 注入去毒单次剔除上限(安全阀,防 LLM 删空文件;不受 max_delete_fraction 25% 约束)
-    # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；见 docs/design/dreaming-redesign.md §9
+    # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；见 docs/design/memory-system-design.md §9.4
 
 
 class MemoryConfig(_StrictModel):
@@ -179,7 +179,7 @@ class PermissionsConfig(_StrictModel):
         "read_memory": "allow",
         "edit_memory": "allow",
     }
-    rules: list[dict] = []  # jiuwenswarm rules[] shape; v1 unvalidated internals
+    rules: list[dict] = []  # jiuwenswarm rules[] 形状；v1 未校验内部
     approval_overrides: dict = {}
     overrides_file: str = ""  # "" -> <workspace>/.twinkle_data/permission_overrides.json
     audit_file: str = ""  # "" -> <logging.dir>/audit/permission_audit.jsonl
@@ -198,12 +198,12 @@ class AuditConfig(_StrictModel):
 
 class SubagentConfig(_StrictModel):
     max_steps: int = 50                 # DEPRECATED: child ReAct 已无步数上限(主/子全 itertools.count() 无界);值保留,代码忽略
-    hard_timeout: float = 3000.0        # absolute cap (asyncio.wait_for on the whole child run); 对齐 jiuwenswarm 3000
-    soft_timeout: float = 600.0         # no-streaming-activity reset; 对齐 jiuwenswarm 600
-    abort_timeout: float = 30.0          # grace window for a cooperative child to finish cancellation cleanup; does NOT bound a non-cooperative child (one that swallows CancelledError hangs wait_for — real guarantee is the child's awaits being cancellable)
-    child_permissions: bool = False      # v1 MUST be false (true needs streaming -> startup reject)
-    max_result_chars: int = 8000         # truncate child final to protect parent context
-    list_sessions_filter: bool = True    # hide __sub_ sessions from session.list
+    hard_timeout: float = 3000.0        # 绝对上限（对整个 child run 的 asyncio.wait_for）；对齐 jiuwenswarm 3000
+    soft_timeout: float = 600.0         # 无流式活动则重置；对齐 jiuwenswarm 600
+    abort_timeout: float = 30.0          # 协作型 child 完成取消清理的宽限窗口；不约束非协作型 child（吞掉 CancelledError 的会挂起 wait_for——真实保证靠 child 的 await 可被取消）
+    child_permissions: bool = False      # v1 必须为 false（true 需流式 -> 启动时拒绝）
+    max_result_chars: int = 8000         # 截断 child 最终结果以保护 parent context
+    list_sessions_filter: bool = True    # 从 session.list 隐藏 __sub_ session
 
     @model_validator(mode="after")
     def _reject_child_permissions_v1(self) -> "SubagentConfig":
@@ -216,8 +216,8 @@ class SubagentConfig(_StrictModel):
 
 
 class OverflowRecoveryConfig(_StrictModel):
-    max_recovery_attempts: int = 3          # consecutive overflow recovery max attempts
-    aggressive_keep_recent: int = 3         # keep_recent_pairs reduced to this on overflow
+    max_recovery_attempts: int = 3          # 连续 overflow recovery 最大尝试次数
+    aggressive_keep_recent: int = 3         # overflow 时 keep_recent_pairs 降为此值
     context_window_limit_tokens: int = 0    # >0 = 手动覆盖窗口(优先于字典);0 = 字典/128000 兜底
 
 
@@ -251,12 +251,12 @@ class EvolutionConfig(_StrictModel):
 
 
 class RepeatToolDetectionConfig(_StrictModel):
-    history_size: int = 30                  # sliding window size
-    repeat_warn: int = 10                   # LOW threshold
-    pingpong_warn: int = 10                 # MEDIUM threshold
-    loop_block: int = 20                    # HIGH threshold
-    global_stop: int = 30                   # CRITICAL threshold
-    remediation_max_per_minute: int = 5     # remediation injection rate limit
+    history_size: int = 30                  # 滑动窗口大小
+    repeat_warn: int = 10                   # LOW 阈值
+    pingpong_warn: int = 10                 # MEDIUM 阈值
+    loop_block: int = 20                    # HIGH 阈值
+    global_stop: int = 30                   # CRITICAL 阈值
+    remediation_max_per_minute: int = 5     # remediation 注入速率限制
 
 
 class WorkflowConfig(_StrictModel):
@@ -330,11 +330,11 @@ class TwinkleConfig(_StrictModel):
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "TwinkleConfig":
-        # workspace first — everything else hangs off it.
+        # 先 workspace——其余都挂在其下。
         ws = self.workspace.dir or str(Path.home() / ".twinkle")
         ws = os.path.expanduser(ws)
         self.workspace.dir = ws
-        # explicit user paths get ~ expanded too; empty ones derive from workspace.
+        # 用户显式路径也展开 ~；空路径从 workspace 派生。
         if not self.logging.dir:
             self.logging.dir = str(Path(ws) / "logs")
         else:

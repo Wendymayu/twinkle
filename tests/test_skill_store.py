@@ -127,7 +127,7 @@ def test_skill_manager_mtime_reload(tmp_path):
     assert mgr.list_skills()[0].description == "v1"
     p = tmp_path / "a" / "SKILL.md"
     p.write_text("---\nname: a\ndescription: v2\n---\n\nbody\n", encoding="utf-8")
-    # NTFS mtime resolution can make two rapid writes share st_mtime — force a later mtime
+    # NTFS mtime 精度可能让两次快速写入共享 st_mtime —— 强制一个更晚的 mtime
     later = time.time() + 5
     os.utime(p, (later, later))
     assert mgr.list_skills()[0].description == "v2"

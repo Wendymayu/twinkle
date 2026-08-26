@@ -1,4 +1,4 @@
-"""Integration test: translate workflow with mock LLM."""
+"""集成测试：用 mock LLM 跑 translate workflow。"""
 import asyncio
 import json
 import pytest
@@ -8,16 +8,16 @@ from twinkle.agentserver.workflow.node import PlanNode
 from twinkle.config.schema import WorkflowConfig
 
 
-# --- Mock LLM that returns context-aware translations ---
+# --- 按上下文返回翻译的 mock LLM ---
 
 async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
-    """Mock LLM: returns translations based on prompt content."""
+    """Mock LLM：根据 prompt 内容返回翻译。"""
     if "法语" in prompt and "翻译成" in prompt:
         return "Bonjour le monde"
     if "西班牙语" in prompt and "翻译成" in prompt:
         return "Hola mundo"
     if "审校" in prompt:
-        # Review node: always return the best translation (never "通过")
+        # Review 节点：永远返回最佳翻译（绝不返回"通过"）
         if "法语" in prompt:
             return "Bonjour le monde"
         if "西班牙语" in prompt:
@@ -27,7 +27,7 @@ async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
 
 
 class FakeLLM:
-    """Duck-type LLMClient — just enough for _call_llm_wrapper."""
+    """鸭子类型的 LLMClient —— 仅满足 _call_llm_wrapper 的需要。"""
     async def stream(self, messages, tools=None):
         from twinkle.agentserver.llm_client import TextDelta
         prompt = messages[-1]["content"]
@@ -45,7 +45,7 @@ def _make_executor():
 
 
 def _load_translate_workflow():
-    """Load the translate root.py from the workflows directory."""
+    """从 workflows 目录加载 translate 的 root.py。"""
     from pathlib import Path
     root_path = Path.home() / ".twinkle" / "workflows" / "translate" / "root.py"
     if not root_path.exists():
@@ -54,7 +54,7 @@ def _load_translate_workflow():
 
 
 def test_translate_workflow_e2e():
-    """Full pipeline: fr + es translation with review."""
+    """完整管道：fr + es 翻译带审校。"""
     plan_code = _load_translate_workflow()
     executor = _make_executor()
 
@@ -70,7 +70,7 @@ def test_translate_workflow_e2e():
 
 
 def test_translate_workflow_validates():
-    """The translate root.py should pass AST validation."""
+    """translate 的 root.py 应通过 AST 校验。"""
     from twinkle.agentserver.workflow.validator import PlanCodeValidator
     plan_code = _load_translate_workflow()
     errors = PlanCodeValidator().validate(plan_code)
@@ -78,7 +78,7 @@ def test_translate_workflow_validates():
 
 
 def test_translate_workflow_sandbox_loads():
-    """The translate root.py should load in the sandbox namespace."""
+    """translate 的 root.py 应能在 sandbox namespace 中加载。"""
     from twinkle.agentserver.workflow.sandbox import build_namespace
     plan_code = _load_translate_workflow()
     namespace = build_namespace()

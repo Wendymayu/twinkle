@@ -1,8 +1,8 @@
-"""Embedding providers for long-term memory.
+"""长期记忆的 embedding provider。
 
-OpenAICompatibleEmbeddingProvider = production (reuses LLM_BASE_URL + LLM_API_KEY).
-MockEmbeddingProvider = TEST-ONLY (deterministic hash pseudo-vectors). Never used
-as a production fallback — no-key degrades to FTS-only (see store.MemoryManager).
+OpenAICompatibleEmbeddingProvider = 生产用(复用 LLM_BASE_URL + LLM_API_KEY)。
+MockEmbeddingProvider = 仅测试(确定性 hash 伪向量)。从不作为生产降级——无 key 时
+降级到纯 FTS(见 store.MemoryManager)。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class EmbeddingProvider(Protocol):
 
 
 class OpenAICompatibleEmbeddingProvider:
-    """POST {base_url}/embeddings (OpenAI/DashScope/OpenRouter compatible)."""
+    """POST {base_url}/embeddings(兼容 OpenAI/DashScope/OpenRouter)。"""
 
     def __init__(self, base_url: str, api_key: str, model: str, dims: int) -> None:
         self._base_url = base_url.rstrip("/")
@@ -53,7 +53,7 @@ class OpenAICompatibleEmbeddingProvider:
 
 
 class MockEmbeddingProvider:
-    """TEST-ONLY. Deterministic md5-based pseudo-vectors. Not for production."""
+    """仅测试。基于 md5 的确定性伪向量。不用于生产。"""
 
     def __init__(self, dims: int = 1536, model: str = "mock") -> None:
         self._dims = dims

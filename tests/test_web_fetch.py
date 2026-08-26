@@ -8,7 +8,7 @@ from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeResp:
-    """Minimal httpx-shaped response for tests."""
+    """用于测试的最小 httpx 形态 response。"""
 
     def __init__(self, *, text: str = "", status_code: int = 200, json_data=None):
         self.text = text
@@ -41,7 +41,7 @@ _TAVILY_EXTRACT_JSON = {
 
 
 def _install_fake_http(monkeypatch, responder):
-    """Route every _http_request call through `responder(method, url, **kw)`."""
+    """将每个 _http_request 调用都经 `responder(method, url, **kw)` 路由。"""
     async def fake_request(method, url, *, headers=None, params=None,
                            data=None, json=None, timeout=15.0):
         return responder(method, url, headers=headers, params=params,
@@ -57,8 +57,8 @@ def test_direct_get_strips_tags_and_clips(monkeypatch) -> None:
         web_fetch.web_fetch.invoke({"url": "http://x", "max_chars": 8000})
     )
     assert "hello" in out and "world" in out
-    assert "bad" not in out  # script dropped
-    assert "<" not in out  # tags stripped
+    assert "bad" not in out  # script 已丢弃
+    assert "<" not in out  # 标签已剥离
 
 
 def test_truncates_over_max(monkeypatch) -> None:
@@ -73,8 +73,8 @@ def test_truncates_over_max(monkeypatch) -> None:
 
 
 def test_403_falls_back_to_tavily_extract(monkeypatch) -> None:
-    """Real scenario from issue #12: Wikipedia returns 403 to a direct GET;
-    web_fetch must fall back to Tavily extract and return real page content."""
+    """issue #12 的真实场景：Wikipedia 对直接 GET 返回 403；
+    web_fetch 必须回退到 Tavily extract 并返回真实页面内容。"""
     calls = []
 
     def responder(method, url, *, headers=None, params=None, data=None,
@@ -92,16 +92,16 @@ def test_403_falls_back_to_tavily_extract(monkeypatch) -> None:
     out = asyncio.run(
         web_fetch.web_fetch.invoke({"url": "https://en.wikipedia.org/wiki/Moon"})
     )
-    assert "356400" in out  # real content from Tavily, not the 403 body
+    assert "356400" in out  # 来自 Tavily 的真实内容，而非 403 响应体
     assert "[error]" not in out.lower()
-    # both paths exercised: direct GET then Tavily extract
+    # 两条路径都已走到：先 direct GET 再 Tavily extract
     assert any(m == "GET" and "wikipedia.org" in u for m, u in calls)
     assert any(m == "POST" and "tavily" in u for m, u in calls)
 
 
 def test_403_no_key_returns_honest_error_with_hint(monkeypatch) -> None:
-    """Without a Tavily key, an anti-bot 403 must surface a clear, actionable
-    error mentioning TAVILY_API_KEY — not '(empty page)'."""
+    """没有 Tavily key 时，反爬 403 必须抛出清晰、可操作的错误并提及
+    TAVILY_API_KEY —— 而不是 '(empty page)'。"""
     _install_fake_http(
         monkeypatch, lambda *a, **k: _FakeResp(text="denied", status_code=403)
     )
@@ -114,7 +114,7 @@ def test_403_no_key_returns_honest_error_with_hint(monkeypatch) -> None:
 
 
 def test_tavily_failure_after_403_aggregates_errors(monkeypatch) -> None:
-    """Direct GET 403 AND Tavily extract also fails → one aggregated error."""
+    """直接 GET 403 且 Tavily extract 也失败 → 聚合成一个错误。"""
 
     def responder(method, url, *, headers=None, params=None, data=None,
                   json=None, timeout=15.0):

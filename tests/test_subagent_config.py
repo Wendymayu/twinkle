@@ -19,7 +19,7 @@ def test_twinkle_config_has_subagent_section():
 
 
 def test_child_permissions_true_rejected_at_startup():
-    """v1 has no streaming, so child HITL would deadlock — reject child_permissions=True."""
+    """v1 无流式，因此子 agent 的 HITL 会死锁——拒绝 child_permissions=True。"""
     from pydantic import ValidationError
     try:
         SubagentConfig(child_permissions=True)

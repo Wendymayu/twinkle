@@ -13,7 +13,7 @@ from twinkle.agentserver.tools.decorator import tool
 
 @tool
 async def list_skill() -> str:
-    """List available skills (name + description). Call before read_skill to see the catalog of skills."""
+    """列出可用 skill(name + description)。调用 read_skill 前先调本工具查看 skill 清单。"""
     skills = get_skill_manager().list_skills()
     if not skills:
         return "No skills available."
@@ -23,7 +23,7 @@ async def list_skill() -> str:
 
 @tool
 async def read_skill(skill_name: str, relative_file_path: str = "SKILL.md") -> str:
-    """Load a skill's instructions. Pass the skill_name from list_skill; default reads SKILL.md."""
+    """载入一个 skill 的指令。传入从 list_skill 获得的 skill_name;默认读取 SKILL.md。"""
     skill = get_skill_manager().get_skill(skill_name)
     if skill is None:
         return f"Skill '{skill_name}' not found. Call list_skill to see available skills."

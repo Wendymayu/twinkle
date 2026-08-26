@@ -1,4 +1,4 @@
-"""JSON extraction utilities — robustly extract JSON from LLM output."""
+"""JSON 提取工具 — 从 LLM 输出中稳健地提取 JSON。"""
 
 from __future__ import annotations
 
@@ -12,47 +12,47 @@ def extract_llm_json(
     expected_type: type = dict,
 ) -> Any:
     """
-    Robustly extract JSON from LLM output.
+    从 LLM 输出中稳健地提取 JSON。
 
-    Handles four return forms:
-      1. Already dict/list → return as-is
-      2. Pure JSON string → parse
-      3. ```json ... ``` code block → extract and parse
-      4. JSON embedded in text → bracket counting extraction
+    处理四种返回形式：
+      1. 已是 dict/list → 原样返回
+      2. 纯 JSON 字符串 → 解析
+      3. ```json ... ``` 代码块 → 提取并解析
+      4. 嵌入文本中的 JSON → 括号计数提取
 
     Args:
-        raw: Raw LLM output data
-        expected_type: Expected JSON type (dict or list)
+        raw: 原始 LLM 输出数据
+        expected_type: 期望的 JSON 类型（dict 或 list）
 
     Returns:
-        Parsed JSON object
+        解析后的 JSON 对象
 
     Raises:
-        ValueError: When JSON cannot be parsed
+        ValueError: JSON 无法解析时抛出
     """
-    # Already the target type — return as-is
+    # 已是目标类型 — 原样返回
     if isinstance(raw, expected_type):
         return raw
 
-    # Accept other structured types too
+    # 也接受其他结构化类型
     if isinstance(raw, (dict, list)):
         return raw
 
     if not isinstance(raw, str):
         raise ValueError(f"LLM返回了未预期的类型: {type(raw)}")
 
-    # Try direct parse
+    # 尝试直接解析
     first_error: json.JSONDecodeError | None = None
     try:
         result = json.loads(raw)
         if isinstance(result, expected_type):
             return result
-        # Parsed successfully but type mismatch
+        # 解析成功但类型不匹配
         first_error = None
     except json.JSONDecodeError as e:
         first_error = e
 
-    # Extract ```json ... ``` / ``` ... ``` code block
+    # 提取 ```json ... ``` / ``` ... ``` 代码块
     code_block = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
     if code_block:
         try:
@@ -62,7 +62,7 @@ def extract_llm_json(
         except json.JSONDecodeError:
             pass
 
-    # Bracket counting extraction for the first complete JSON structure
+    # 用括号计数提取第一个完整的 JSON 结构
     open_char = "[" if expected_type == list else "{"
     close_char = "]" if expected_type == list else "}"
     candidate = _extract_outermost_json(raw, open_char, close_char)
@@ -74,7 +74,7 @@ def extract_llm_json(
         except json.JSONDecodeError:
             pass
 
-    # Build error message with context
+    # 构建带上下文的错误信息
     if first_error is not None:
         context_start = max(0, first_error.pos - 80)
         context_end = min(len(raw), first_error.pos + 80)
@@ -95,15 +95,15 @@ def _extract_outermost_json(
     close_char: str,
 ) -> str | None:
     """
-    Extract the outermost complete JSON structure using bracket counting.
+    用括号计数提取最外层完整的 JSON 结构。
 
     Args:
-        text: Raw text
-        open_char: Opening bracket character ({ or [)
-        close_char: Closing bracket character (} or ])
+        text: 原始文本
+        open_char: 开括号字符（{ 或 [）
+        close_char: 闭括号字符（} 或 ]）
 
     Returns:
-        Extracted JSON string, or None if not found
+        提取出的 JSON 字符串，未找到则返回 None
     """
     depth = 0
     start_idx = -1

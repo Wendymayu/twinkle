@@ -1,9 +1,9 @@
-"""cron expression validation + next-run computation.
+"""cron 表达式校验 + 下次运行时间计算。
 
-Lazily imports croniter so the rest of the system runs fine when cron is
-unused. Supports 5-field (recurring) and 7-field (one-shot with second+year).
-IANA timezone via zoneinfo. CroniterBadDateError (no next date, e.g. expired
-one-shot) is detected by class name / message — see _is_croniter_no_next_date.
+懒加载 croniter，使得 cron 未使用时系统的其余部分照常运行。支持 5 字段（循环
+触发）和 7 字段（含秒+年的一次性触发）。通过 zoneinfo 使用 IANA 时区。
+CroniterBadDateError（无下一个日期，例如已过期的一次性触发）通过类名 / 消息
+识别 —— 见 _is_croniter_no_next_date。
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _cron_field_count(expr: str) -> int:
 
 
 def validate_cron_expression(expr: str, timezone: str = "UTC") -> None:
-    """Raise ValueError if expr is not a valid 5/7-field cron or timezone bad."""
+    """若 expr 不是合法的 5/7 字段 cron 或时区不合法，则 raise ValueError。"""
     from croniter import croniter
     n = _cron_field_count(expr)
     if n not in (5, 7):
@@ -30,7 +30,7 @@ def validate_cron_expression(expr: str, timezone: str = "UTC") -> None:
 
 
 def _cron_next_push_dt(expr: str, base_dt: datetime) -> datetime:
-    """Next push datetime at/after base_dt (timezone-aware)."""
+    """base_dt 之后的下次 push 时刻（带时区）。"""
     from croniter import croniter
     nxt = croniter(expr, base_dt).get_next(datetime)
     if nxt.tzinfo is None:
@@ -39,6 +39,6 @@ def _cron_next_push_dt(expr: str, base_dt: datetime) -> datetime:
 
 
 def _is_croniter_no_next_date(exc: BaseException) -> bool:
-    """True if exc means 'no future date' (expired one-shot)."""
+    """若 exc 表示'无未来日期'（已过期的一次性触发），返回 True。"""
     name = exc.__class__.__name__
     return name == "CroniterBadDateError" or "failed to find next date" in str(exc)

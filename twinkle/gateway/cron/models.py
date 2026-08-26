@@ -1,9 +1,8 @@
-"""Cron data models — CronJob (persisted) / CronRunState (in-memory) / _Event (heap node).
+"""Cron 数据模型 —— CronJob（持久化）/ CronRunState（内存中）/ _Event（堆节点）。
 
-CronJob is persisted to cron_jobs.json; CronRunState tracks a single run in
-memory (not persisted — reload() rebuilds future events, in-flight run state
-is lost on restart, see spec §8 known limitation). _Event is the min-heap node.
-"""
+CronJob 持久化到 cron_jobs.json；CronRunState 在内存中跟踪单次运行（不持久化
+—— reload() 重建未来事件，运行中的状态在重启时丢失，见 spec §8 已知限制）。
+_Event 是 min-heap 节点。"""
 from __future__ import annotations
 
 from dataclasses import dataclass

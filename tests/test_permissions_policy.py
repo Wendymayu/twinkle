@@ -43,7 +43,7 @@ def test_allow_always_override_shell_head_wildcard(tmp_path):
     p = _policy(tmp_path, tools={"command_exec": "require-approval"},
                  overrides={"command_exec": ["git *"]})
     assert p.check("command_exec", {"command": "git status"}).level == "allow"
-    # not blessed
+    # 未被 bless
     assert p.check("command_exec", {"command": "rm -rf x"}).level == "deny"
     assert p.check("command_exec", {"command": "npm install"}).level == "ask"
 
@@ -60,8 +60,8 @@ def test_persist_allow_always_shell_writes_two_token_pattern(tmp_path):
     asyncio.run(p.persist_allow_always(
         {"tool": "command_exec", "args": {"command": "npm run build"}}))
     d = p.check("command_exec", {"command": "npm run build"})
-    assert d.level == "allow"  # override now blesses it
-    # safety: a single-token-only blessing must NOT bless npm install -g
+    assert d.level == "allow"  # override 现在 bless 了它
+    # 安全性：仅单 token 的 blessing 不能 bless npm install -g
     assert p.check("command_exec", {"command": "npm install -g pkg"}).level == "ask"
 
 
@@ -76,9 +76,9 @@ def test_persist_allow_always_non_shell(tmp_path):
 def test_override_does_not_bless_metacharacter_chain(tmp_path):
     p = _policy(tmp_path, tools={"command_exec": "require-approval"},
                  overrides={"command_exec": ["npm run *"]})
-    # chained dangerous command must NOT be blessed — falls through to deny
+    # 链式危险命令不能被 bless——落入 deny
     assert p.check("command_exec", {"command": "npm run build && rm -rf /"}).level == "deny"
-    # but the plain blessed command still works
+    # 但纯 blessed 命令仍然生效
     assert p.check("command_exec", {"command": "npm run build"}).level == "allow"
 
 
@@ -102,9 +102,9 @@ def test_allow_always_blesses_bare_command(tmp_path):
     import asyncio
     asyncio.run(p.persist_allow_always(
         {"tool": "command_exec", "args": {"command": "git status"}}))
-    # the persisted pattern is "git status *"; the BARE "git status" (no args) must be blessed too
+    # 持久化的 pattern 是 "git status *"；bare 的 "git status"（无参数）也必须被 bless
     assert p.check("command_exec", {"command": "git status"}).level == "allow"
-    # and a command with args still works
+    # 且带参数的命令仍然生效
     assert p.check("command_exec", {"command": "git status --short"}).level == "allow"
-    # and a different command is NOT blessed
+    # 而不同的命令不被 bless
     assert p.check("command_exec", {"command": "npm install"}).level == "ask"

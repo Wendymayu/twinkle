@@ -1,11 +1,11 @@
-"""Cron agent tools — 5 @tool wrappers over CronJobStore.
+"""Cron agent 工具 —— 包在 CronJobStore 之上的 5 个 @tool。
 
-list/create/update/delete/run_now. All write the shared <workspace>/cron_jobs.json
-(gateway scheduler hot-reloads via mtime). run_now writes a sidecar file
-(<workspace>/cron_trigger_now.json) because there is no reverse WS channel
-(AgentServer -> Gateway); the gateway _loop detects it and calls
-trigger_run_now, then deletes the sidecar. Errors are returned as strings
-(never raised) so a bad call doesn't crash ReAct — mirrors memory_tools.
+list/create/update/delete/run_now。全部写共享的 <workspace>/cron_jobs.json
+(gateway 调度器按 mtime 热加载)。run_now 写一个 sidecar 文件
+(<workspace>/cron_trigger_now.json),因为没有反向 WS channel
+(AgentServer -> Gateway);gateway 的 _loop 检测到它后调用
+trigger_run_now,然后删除该 sidecar。错误以字符串返回(绝不抛出),
+这样一次坏调用不会炸掉 ReAct —— 对照 memory_tools。
 """
 from __future__ import annotations
 

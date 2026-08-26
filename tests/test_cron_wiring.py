@@ -24,7 +24,7 @@ def test_tool_manager_has_cron_tools():
     from twinkle.agentserver.tools import tool_manager
 
     tm = tool_manager()
-    # _tools is dict[str, Tool] keyed by tool.card.name (see manager.py:14,17)
+    # _tools 是 dict[str, Tool]，以 tool.card.name 为键（见 manager.py:14,17）
     names = set(tm._tools.keys())
     for n in ("cron_list_jobs", "cron_create_job", "cron_update_job",
               "cron_delete_job", "cron_run_now"):

@@ -1,8 +1,8 @@
-"""TeamContextHook — sets CURRENT_TEAM ContextVar before each invoke.
+"""TeamContextHook — 在每次 invoke 前设置 CURRENT_TEAM ContextVar。
 
-Auto-wired by create_agent when team.enabled is true. Mirrors the pattern
-of SubagentContextHook: before_invoke → ContextVar.set, so the
-parameter-less delegate_to_member tool can read the Team at runtime.
+当 team.enabled 为 true 时由 create_agent 自动装配。镜像
+SubagentContextHook 的模式：before_invoke → ContextVar.set，使
+无参的 delegate_to_member tool 能在运行时读取 Team。
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 
 
 class TeamContextHook(AgentHook):
-    """Set CURRENT_TEAM ContextVar before each agent invocation."""
+    """在每次 agent 调用前设置 CURRENT_TEAM ContextVar。"""
 
-    priority = 45  # runs before SubagentContextHook (50) and most others
+    priority = 45  # 在 SubagentContextHook(50) 之后运行（before_invoke 事件中靠后）
 
     def __init__(self, team_manager: "TeamManager") -> None:
         self._manager = team_manager

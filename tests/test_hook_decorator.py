@@ -1,4 +1,4 @@
-"""Tests for the @hook decorator — before/after/exception/force_finish/retry."""
+"""@hook 装饰器测试 — before/after/exception/force_finish/retry。"""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +17,7 @@ from twinkle.agentserver.hooks.decorator import hook
 from twinkle.agentserver.hooks.manager import HookManager
 
 
-# --- Helper: a minimal "agent" with a HookManager --- #
+# --- 辅助:一个带 HookManager 的最小 "agent" --- #
 
 class _FakeAgent:
     def __init__(self):
@@ -26,7 +26,7 @@ class _FakeAgent:
 
 
 class _RecorderHook(AgentHook):
-    """Records events it receives."""
+    """记录收到的事件。"""
     priority = 50
 
     def __init__(self):
@@ -43,7 +43,7 @@ class _RecorderHook(AgentHook):
 
 
 def test_hook_decorator_triggers_before_then_body_then_after():
-    """@hook(BEFORE, AFTER) wraps a method: before -> body -> after."""
+    """@hook(BEFORE, AFTER) 包装方法:before -> body -> after。"""
     agent = _FakeAgent()
     rec = _RecorderHook()
     agent._hook_manager.register_hook(rec)
@@ -67,7 +67,7 @@ def test_hook_decorator_triggers_before_then_body_then_after():
 
 
 def test_hook_decorator_on_exception_triggers_exception_hook():
-    """When method raises, on_exception hook is called."""
+    """方法抛异常时调用 on_exception hook。"""
     agent = _FakeAgent()
     rec = _RecorderHook()
     agent._hook_manager.register_hook(rec)
@@ -91,12 +91,12 @@ def test_hook_decorator_on_exception_triggers_exception_hook():
         pass
     assert agent.call_log == ["body"]
     assert rec.calls == ["before_model_call", "on_model_exception"]
-    # after should NOT be called on exception
+    # 异常时不应调用 after
     assert "after_model_call" not in rec.calls
 
 
 def test_hook_decorator_force_finish_skips_body():
-    """If a before-hook sets force_finish, the method body is skipped."""
+    """若 before-hook 设置了 force_finish,方法体被跳过。"""
     class ForceFinishHook(AgentHook):
         priority = 100
         async def before_model_call(self, ctx):
@@ -107,7 +107,7 @@ def test_hook_decorator_force_finish_skips_body():
 
     @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL)
     async def do_work(self, ctx):
-        self.call_log.append("body")  # should NOT execute
+        self.call_log.append("body")  # 不应执行
         return "done"
 
     ctx = HookContext(
@@ -123,7 +123,7 @@ def test_hook_decorator_force_finish_skips_body():
 
 
 def test_hook_decorator_retry_re_executes_body():
-    """If on_exception hook requests retry, the method body is re-executed."""
+    """若 on_exception hook 请求 retry,方法体被重新执行。"""
     class RetryHook(AgentHook):
         priority = 100
         fail_count = 0
@@ -160,8 +160,8 @@ def test_hook_decorator_retry_re_executes_body():
 
 
 def test_hook_decorator_interrupt_propagates_immediately():
-    """HookInterrupt raised inside a @hook-decorated method propagates
-    without triggering on_exception."""
+    """@hook 装饰的方法内抛出 HookInterrupt 会直接向上传播,
+    不触发 on_exception。"""
     agent = _FakeAgent()
     rec = _RecorderHook()
     agent._hook_manager.register_hook(rec)
@@ -182,13 +182,13 @@ def test_hook_decorator_interrupt_propagates_immediately():
         asyncio.run(interrupting_work(agent, ctx))
     except HookInterrupt:
         pass
-    # on_model_exception should NOT be called for HookInterrupt
+    # HookInterrupt 不应触发 on_model_exception
     assert "on_model_exception" not in rec.calls
 
 
 def test_hook_decorator_cancelled_error_propagates_immediately():
-    """asyncio.CancelledError propagates through @hook without triggering
-    on_exception or after hooks."""
+    """asyncio.CancelledError 穿过 @hook 向上传播,
+    不触发 on_exception 或 after hook。"""
     agent = _FakeAgent()
     rec = _RecorderHook()
     agent._hook_manager.register_hook(rec)
@@ -209,16 +209,16 @@ def test_hook_decorator_cancelled_error_propagates_immediately():
         asyncio.run(cancelling_work(agent, ctx))
     except asyncio.CancelledError:
         pass
-    # CancelledError should propagate immediately — no exception or after hooks
+    # CancelledError 应立即向上传播 — 不触发 exception 或 after hook
     assert "on_model_exception" not in rec.calls
     assert "after_model_call" not in rec.calls
-    # Only the before hook should have fired
+    # 只有 before hook 被触发
     assert rec.calls == ["before_model_call"]
 
 
 def test_hook_decorator_max_retries_exceeded_boundary():
-    """When on_exception keeps requesting retry, the method is executed
-    original + 3 retries (4 total), then the exception is re-raised."""
+    """当 on_exception 持续请求 retry 时,方法执行 original + 3 次 retry
+    (共 4 次),随后异常被重新抛出。"""
     class AlwaysRetryHook(AgentHook):
         priority = 100
         retry_count = 0
@@ -250,15 +250,15 @@ def test_hook_decorator_max_retries_exceeded_boundary():
         asyncio.run(always_failing_work(agent, ctx))
     except ValueError as e:
         assert str(e) == "persistent failure"
-    # 4 total executions: original (attempt=0) + 3 retries (attempt=1,2,3)
+    # 共 4 次执行:original(attempt=0)+ 3 次 retry(attempt=1,2,3)
     assert agent.exec_count == 4
-    # on_exception was called 4 times (one per failed execution)
+    # on_exception 被调用 4 次(每次失败执行一次)
     assert always_retry.retry_count == 4
 
 
 def test_hook_decorator_on_exception_none_propagates_without_hooks():
-    """When on_exception=None and the method raises, the exception propagates
-    directly — no exception hook is triggered, and after is NOT called."""
+    """当 on_exception=None 且方法抛异常时,异常直接向上传播
+    — 不触发 exception hook,也不调用 after。"""
     agent = _FakeAgent()
     rec = _RecorderHook()
     agent._hook_manager.register_hook(rec)
@@ -281,14 +281,14 @@ def test_hook_decorator_on_exception_none_propagates_without_hooks():
     except ValueError as e:
         assert str(e) == "unhandled"
     assert agent.call_log == ["body"]
-    # before hook fires, but no exception hook and no after hook
+    # before hook 触发,但无 exception hook 也无 after hook
     assert rec.calls == ["before_model_call"]
     assert "on_model_exception" not in rec.calls
     assert "after_model_call" not in rec.calls
 
 
 def test_after_event_receives_tool_result():
-    """decorator stores method return value in ctx.extra['_tool_result'] before after-event."""
+    """装饰器在 after-event 之前把方法返回值存入 ctx.extra['_tool_result']。"""
     results = {}
 
     class SpyHook(AgentHook):

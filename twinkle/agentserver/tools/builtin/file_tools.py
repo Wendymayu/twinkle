@@ -1,14 +1,14 @@
-"""file_tools — read/write/edit/list/glob files under the workspace.
+"""file_tools —— 在 workspace 下读/写/编辑/列目录/glob 文件。
 
-Reference: openjiuwen SDK harness/tools/filesystem.py (2032 lines, 6 tools).
-Twinkle keeps 5 (read_file/write_file/edit_file/list_files/glob); drops grep
-(use command_exec rg/findstr), delete/move (use command_exec rm/mv), image/
-PDF/Notebook read, mtime/size stale-write check, .agent_history, OS sandbox,
-approval rails.
+参考:openjiuwen SDK harness/tools/filesystem.py(2032 行,6 个 tool)。
+Twinkle 保留 5 个(read_file/write_file/edit_file/list_files/glob);去掉
+grep(用 command_exec rg/findstr)、delete/move(用 command_exec rm/mv)、
+image/PDF/Notebook 读取、mtime/size stale-write 检查、.agent_history、
+OS 沙箱、审批护栏。
 
-Safety (approach b): workspace path confinement (mirror command_exec
-_resolve_workdir) + forced read-before-write via a per-session FileReadRegistry
-(prevents blind overwrite); no stale check.
+安全(方案 b):workspace 路径限制(对照 command_exec 的
+_resolve_workdir)+ 经 per-session FileReadRegistry 强制 read-before-write
+(防盲写);无 stale 检查。
 """
 from __future__ import annotations
 
@@ -33,12 +33,12 @@ _WRITE_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
 
 
 def _resolve_file_path(file_path: str) -> Path:
-    """Resolve `file_path` against the active workspace; reject paths escaping it.
+    """把 `file_path` 相对当前 workspace 解析;拒绝逃逸出 workspace 的路径。
 
-    Checks MEMBER_WORKSPACE ContextVar first (set when running team members),
-    falls back to WORKSPACE_DIR. Relative paths are joined under the workspace
-    root; absolute paths are accepted only if they resolve inside it.
-    Raises ValueError on escape.
+    先检查 MEMBER_WORKSPACE ContextVar(运行 team member 时设置),
+    回退到 WORKSPACE_DIR。相对路径拼接到 workspace 根下;绝对路径
+    仅当解析后仍在 workspace 内时才接受。
+    逃逸时抛 ValueError。
     """
     from twinkle.agentserver.team.context import MEMBER_WORKSPACE
     ws_override = MEMBER_WORKSPACE.get()
@@ -52,24 +52,24 @@ def _resolve_file_path(file_path: str) -> Path:
 
 
 def _is_binary(path: Path) -> bool:
-    """Heuristic: known binary extensions, or a NUL byte in the first 8 KiB."""
+    """启发式:已知二进制扩展名,或前 8 KiB 中出现 NUL 字节。"""
     if path.suffix.lower() in _BINARY_EXTS:
         return True
     try:
         with path.open("rb") as file_handle:
             chunk = file_handle.read(8192)
     except OSError:
-        return False  # let the caller surface read errors uniformly
+        return False  # 让调用方统一暴露读错误
     return b"\x00" in chunk
 
 
 class FileReadRegistry:
-    """Per-session set of resolved paths the agent has read this session.
+    """per-session 的已读路径集合:本 session 内 agent 读过的(已解析)路径。
 
-    Drives the read-before-write guard for write_file/edit_file. Sync methods:
-    set.add / membership are atomic on a single event loop (no await inside,
-    no TOCTOU), so no asyncio.Lock is needed (a long-lived lock would also bind
-    to one event loop and break across asyncio.run test loops).
+    驱动 write_file/edit_file 的 read-before-write 守卫。同步方法:
+    set.add / 成员判定在单个 event loop 上是原子的(内部无 await,
+    无 TOCTOU),故无需 asyncio.Lock(一把长生命周期锁还会绑定到
+    单个 event loop,跨 asyncio.run 测试 loop 会坏掉)。
     """
 
     def __init__(self) -> None:
@@ -85,12 +85,12 @@ class FileReadRegistry:
         self._read.pop(session_id, None)
 
 
-_registry = FileReadRegistry()  # module-level singleton; session-routed via ContextVar
+_registry = FileReadRegistry()  # 模块级单例;经 ContextVar 按 session 路由
 
 
 @tool
 async def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
-    """Read a text file under the workspace with offset/limit pagination. Records the read so write_file/edit_file can enforce read-before-write. Rejects binary files."""
+    """读取 workspace 下的文本文件,带 offset/limit 分页。记录本次读取,以便 write_file/edit_file 强制 read-before-write。拒绝二进制文件。"""
     if not file_path:
         raise ToolError("file_path is required.", kind="validation")
     try:
@@ -136,7 +136,7 @@ async def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
 
 @tool
 async def write_file(file_path: str, content: str) -> str:
-    """Write full content to a file under the workspace. Overwriting an existing file requires a prior read_file in this session; new files can be created directly. Content capped at 5 MiB."""
+    """向 workspace 下的文件写入完整内容。覆盖已有文件要求本 session 先读过;新文件可直接创建。内容上限 5 MiB。"""
     if not file_path:
         raise ToolError("file_path is required.", kind="validation")
     content = content or ""
@@ -173,7 +173,7 @@ async def write_file(file_path: str, content: str) -> str:
 
 @tool
 async def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
-    """Replace old_string with new_string in a file under the workspace. Requires a prior read_file in this session. old_string must be non-empty (use write_file for new files). Set replace_all to replace multiple occurrences."""
+    """把文件中的 old_string 替换为 new_string(workspace 下)。要求本 session 先读过。old_string 须非空(新建文件用 write_file)。设 replace_all 替换多处出现。"""
     if not file_path:
         raise ToolError("file_path is required.", kind="validation")
     if not old_string:
@@ -205,7 +205,7 @@ async def edit_file(file_path: str, old_string: str, new_string: str, replace_al
         raise ToolError(f"old_string not found in {file_path}", kind="failed")
     if count > 1 and not replace_all:
         raise ToolError(f"old_string matches {count} times; set replace_all=True or provide a more specific old_string.", kind="validation")
-    # str.replace replaces ALL by default; single replace needs an explicit count of 1.
+    # str.replace 默认替换全部;单次替换需显式传 count=1。
     new_content = content.replace(old_string, new_string) if replace_all else content.replace(old_string, new_string, 1)
     n = count if replace_all else 1
 
@@ -224,7 +224,7 @@ async def edit_file(file_path: str, old_string: str, new_string: str, replace_al
 
 @tool
 async def list_files(path: str = ".", show_hidden: bool = False) -> str:
-    """List entries in a directory under the workspace. Set show_hidden to include dotfiles."""
+    """列出 workspace 下某目录的条目。设 show_hidden 以包含 dotfile。"""
     if not path:
         path = "."
     try:
@@ -260,7 +260,7 @@ async def list_files(path: str = ".", show_hidden: bool = False) -> str:
 
 @tool
 async def glob(pattern: str, path: str = ".") -> str:
-    """Find files under the workspace matching a glob pattern (stdlib pathlib, no ripgrep). path is the base directory; pattern must not contain '..'."""
+    """查找 workspace 下匹配 glob 模式的文件(标准库 pathlib,无 ripgrep)。path 是基目录;pattern 不得包含 '..'。"""
     if not pattern:
         raise ToolError("pattern is required.", kind="validation")
     if ".." in pattern:
@@ -282,7 +282,7 @@ async def glob(pattern: str, path: str = ".") -> str:
             try:
                 rel = p.resolve().relative_to(root)
             except ValueError:
-                continue  # defense-in-depth: drop any result that escapes the workspace
+                continue  # 纵深防御:丢弃任何逃逸出 workspace 的结果
             matches.append(str(rel))
         return sorted(matches)
 

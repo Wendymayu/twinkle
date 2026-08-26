@@ -40,7 +40,7 @@ def test_tool_card_name_prefixed() -> None:
 
 
 class _FakeClient:
-    """fake McpClient:call_tool 返回固定值或抛异常。"""
+    """模拟 McpClient:call_tool 返回固定值或抛异常。"""
     def __init__(self, call_result="ok", call_exc=None):
         self._result = call_result
         self._exc = call_exc

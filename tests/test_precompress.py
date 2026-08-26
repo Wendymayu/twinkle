@@ -117,7 +117,7 @@ from twinkle.agentserver.llm_client import TextDelta, Finish
 
 
 class _RecordingLLM:
-    """Counts stream() calls — 0 means LLM summary was skipped."""
+    """统计 stream() 调用次数 —— 0 表示跳过了 LLM 摘要。"""
     def __init__(self):
         self.calls = 0
 

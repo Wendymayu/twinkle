@@ -134,6 +134,6 @@ def get_mcp_manager(config=None) -> McpManager:
 
 
 def _set_mcp_manager(mgr: McpManager | None) -> None:
-    """Test hook."""
+    """测试钩子。"""
     global _MCP_MANAGER
     _MCP_MANAGER = mgr

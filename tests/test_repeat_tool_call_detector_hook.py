@@ -1,5 +1,5 @@
-"""Tests for RepeatToolCallDetectorHook — stable hash, 4-tier detection,
-remediation injection, rate limiting, edge-triggered behavior."""
+"""RepeatToolCallDetectorHook 的测试 —— 稳定 hash、4 档检测、
+remediation 注入、rate limiting、edge-triggered 行为。"""
 
 import asyncio
 
@@ -12,42 +12,42 @@ from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
 )
 
 
-# --- stable hash tests ---
+# --- 稳定 hash 测试 ---
 
 def test_stable_call_hash_order_independent():
-    """Parameter order should not affect hash."""
+    """参数顺序不应影响 hash。"""
     h1 = stable_call_hash("read_file", {"path": "a.txt", "offset": 0})
     h2 = stable_call_hash("read_file", {"offset": 0, "path": "a.txt"})
     assert h1 == h2
 
 
 def test_stable_call_hash_different_args():
-    """Different args should produce different hashes."""
+    """不同 args 应产生不同 hash。"""
     h1 = stable_call_hash("read_file", {"path": "a.txt"})
     h2 = stable_call_hash("read_file", {"path": "b.txt"})
     assert h1 != h2
 
 
 def test_stable_result_hash_same_content():
-    """Same content should produce same hash."""
+    """相同 content 应产生相同 hash。"""
     h1 = stable_result_hash("result content")
     h2 = stable_result_hash("result content")
     assert h1 == h2
 
 
 def test_stable_result_hash_different_content():
-    """Different content should produce different hashes."""
+    """不同 content 应产生不同 hash。"""
     h1 = stable_result_hash("result A")
     h2 = stable_result_hash("result B")
     assert h1 != h2
 
 
-# --- Helper to simulate tool calls ---
+# --- 模拟 tool 调用的 helper ---
 
 _SESSION_ID = "test-session"
 
 def _make_tool_ctx(name, args, result=""):
-    """Create a HookContext with ToolCallInputs."""
+    """构造一个带 ToolCallInputs 的 HookContext。"""
     return HookContext(
         agent=None, event=None,
         inputs=ToolCallInputs(name=name, args=args, tool_call_id="tc1"),
@@ -57,7 +57,7 @@ def _make_tool_ctx(name, args, result=""):
 
 
 def _make_model_ctx(messages):
-    """Create a HookContext with ModelCallInputs."""
+    """构造一个带 ModelCallInputs 的 HookContext。"""
     return HookContext(
         agent=None, event=None,
         inputs=ModelCallInputs(messages=messages, tools=[]),
@@ -67,7 +67,7 @@ def _make_model_ctx(messages):
 
 
 async def _simulate_tool_call_sequence(hook, calls):
-    """Simulate a sequence of tool calls. Each call is (name, args, result)."""
+    """模拟一串 tool 调用。每次调用是 (name, args, result)。"""
     for name, args, result in calls:
         # before_tool_call
         ctx = _make_tool_ctx(name, args)
@@ -77,10 +77,10 @@ async def _simulate_tool_call_sequence(hook, calls):
         await hook.after_tool_call(ctx)
 
 
-# --- Detection tests ---
+# --- 检测测试 ---
 
 def test_detects_repeat_calls_low():
-    """Same tool+args appearing >= repeat_warn times -> LOW."""
+    """相同 tool+args 出现 >= repeat_warn 次 -> LOW。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=3, pingpong_warn=10, loop_block=20, global_stop=30)
     calls = [("read_file", {"path": "a.txt"}, "content")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
@@ -89,9 +89,9 @@ def test_detects_repeat_calls_low():
 
 
 def test_detects_pingpong_medium():
-    """A-B-A-B alternation >= pingpong_warn -> MEDIUM."""
+    """A-B-A-B 交替 >= pingpong_warn 次 -> MEDIUM。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=4, loop_block=20, global_stop=30)
-    # A-B-A-B pattern (4 alternations)
+    # A-B-A-B 模式(4 次交替)
     calls = [
         ("read_file", {"path": "a.txt"}, "result_a"),
         ("read_file", {"path": "b.txt"}, "result_b"),
@@ -108,7 +108,7 @@ def test_detects_pingpong_medium():
 
 
 def test_detects_trailing_identical_high():
-    """Trailing identical (call+outcome) >= loop_block -> HIGH."""
+    """尾部相同(调用+结果) >= loop_block -> HIGH。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=3, global_stop=30)
     calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
@@ -117,7 +117,7 @@ def test_detects_trailing_identical_high():
 
 
 def test_detects_critical_loop():
-    """Trailing identical >= global_stop -> CRITICAL."""
+    """尾部相同 >= global_stop -> CRITICAL。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=3)
     calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
@@ -126,7 +126,7 @@ def test_detects_critical_loop():
 
 
 def test_no_detection_under_threshold():
-    """Below all thresholds -> no detection."""
+    """低于所有阈值 -> 不检测。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=30)
     calls = [("read_file", {"path": "a.txt"}, "content")] * 2
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
@@ -135,28 +135,28 @@ def test_no_detection_under_threshold():
 
 
 def test_edge_triggered_only_escalates():
-    """Severity only rises, never falls — edge-triggered."""
+    """severity 只升不降 —— edge-triggered。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=3, pingpong_warn=10, loop_block=20, global_stop=30)
-    # 3 repeats -> LOW
+    # 3 次重复 -> LOW
     calls = [("read_file", {"path": "a.txt"}, "content")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
     state = hook._states.get(_SESSION_ID)
     assert state.fired_severity == Severity.LOW
 
-    # 1 more different call — severity should not drop
+    # 再来 1 次不同调用 —— severity 不应下降
     calls2 = [("write_file", {"path": "b.txt"}, "ok")]
     asyncio.run(_simulate_tool_call_sequence(hook, calls2))
-    # fired_severity stays LOW (not reset, not escalated)
+    # fired_severity 保持 LOW(未重置、未升级)
     state = hook._states.get(_SESSION_ID)
     assert state.fired_severity == Severity.LOW
 
 
-# --- Remediation injection tests ---
+# --- remediation 注入测试 ---
 
 def test_injects_remediation_message_at_medium():
-    """MEDIUM+ severity triggers remediation message injection in before_model_call."""
+    """MEDIUM 及以上 severity 在 before_model_call 触发 remediation 消息注入。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=4, loop_block=20, global_stop=30)
-    # Trigger MEDIUM
+    # 触发 MEDIUM
     calls = [
         ("read_file", {"path": "a.txt"}, "result_a"),
         ("read_file", {"path": "b.txt"}, "result_b"),
@@ -169,19 +169,19 @@ def test_injects_remediation_message_at_medium():
     ]
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
 
-    # Now call before_model_call
+    # 现在调用 before_model_call
     msgs = [{"role": "system", "content": "s"}]
     ctx = _make_model_ctx(msgs)
     asyncio.run(hook.before_model_call(ctx))
 
-    # Check remediation message was injected
+    # 检查 remediation 消息是否已注入
     assert any("[DETECTION]" in m.get("content", "") for m in ctx.inputs.messages)
 
 
 def test_no_injection_below_medium():
-    """LOW severity does not trigger remediation injection."""
+    """LOW severity 不触发 remediation 注入。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=3, pingpong_warn=10, loop_block=20, global_stop=30)
-    # Trigger LOW
+    # 触发 LOW
     calls = [("read_file", {"path": "a.txt"}, "content")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
 
@@ -189,17 +189,17 @@ def test_no_injection_below_medium():
     ctx = _make_model_ctx(msgs)
     asyncio.run(hook.before_model_call(ctx))
 
-    # No remediation message
+    # 无 remediation 消息
     assert not any("[DETECTION]" in m.get("content", "") for m in ctx.inputs.messages)
 
 
 def test_remediation_rate_limit():
-    """Remediation injection is rate-limited to max_per_minute."""
+    """remediation 注入受 max_per_minute 限流。"""
     hook = RepeatToolCallDetectorHook(
         repeat_warn=10, pingpong_warn=4, loop_block=20, global_stop=30,
         remediation_max_per_minute=2,
     )
-    # Trigger MEDIUM
+    # 触发 MEDIUM
     calls = [
         ("read_file", {"path": "a.txt"}, "result_a"),
         ("read_file", {"path": "b.txt"}, "result_b"),
@@ -212,42 +212,42 @@ def test_remediation_rate_limit():
     ]
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
 
-    # First 2 injections should succeed
+    # 前 2 次注入应成功
     for _ in range(2):
         msgs = [{"role": "system", "content": "s"}]
         ctx = _make_model_ctx(msgs)
         asyncio.run(hook.before_model_call(ctx))
         assert any("[DETECTION]" in m.get("content", "") for m in ctx.inputs.messages)
 
-    # 3rd should be rate-limited
+    # 第 3 次应被限流
     msgs = [{"role": "system", "content": "s"}]
     ctx = _make_model_ctx(msgs)
     asyncio.run(hook.before_model_call(ctx))
-    # Count how many [DETECTION] messages — should be 0 (rate-limited)
+    # 统计 [DETECTION] 消息数 —— 应为 0(被限流)
     detection_count = sum(1 for m in ctx.inputs.messages if "[DETECTION]" in m.get("content", ""))
     assert detection_count == 0
 
 
 def test_different_results_not_counted_as_loop():
-    """Same tool+args but different results = progress, not a loop."""
+    """相同 tool+args 但结果不同 = 有进展,不是 loop。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=3, global_stop=30)
-    # Same call, different results each time
+    # 相同调用,每次结果不同
     calls = [
         ("read_file", {"path": "a.txt"}, "result_1"),
         ("read_file", {"path": "a.txt"}, "result_2"),
         ("read_file", {"path": "a.txt"}, "result_3"),
     ]
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
-    # trailing_identical should be 0 (different outcomes), so no HIGH
+    # trailing_identical 应为 0(结果不同),故无 HIGH
     state = hook._states.get(_SESSION_ID)
     assert state.fired_severity is None
 
 
-# --- CRITICAL hard-stop tests ---
+# --- CRITICAL 硬停测试 ---
 
 def test_critical_requests_force_finish_hard_stop():
-    """CRITICAL severity -> before_model_call requests force_finish to hard-stop
-    the loop, not just a soft remediation nudge."""
+    """CRITICAL severity -> before_model_call 请求 force_finish 硬停 loop,
+    而非软性 remediation 提醒。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=3)
     calls = [("read_file", {"path": "a.txt"}, "same_result")] * 3
     asyncio.run(_simulate_tool_call_sequence(hook, calls))
@@ -262,8 +262,8 @@ def test_critical_requests_force_finish_hard_stop():
 
 
 def test_critical_force_finish_bypasses_remediation_rate_limit():
-    """CRITICAL hard-stop must not be subject to the remediation rate-limiter —
-    even with remediation_max_per_minute=0, CRITICAL still force_finishes."""
+    """CRITICAL 硬停不应受 remediation rate-limiter 约束 ——
+    即便 remediation_max_per_minute=0,CRITICAL 仍会 force_finish。"""
     hook = RepeatToolCallDetectorHook(
         repeat_warn=10, pingpong_warn=10, loop_block=20, global_stop=3,
         remediation_max_per_minute=0,
@@ -279,7 +279,7 @@ def test_critical_force_finish_bypasses_remediation_rate_limit():
 
 
 def test_medium_still_soft_remediation_not_force_finish():
-    """MEDIUM severity stays a soft remediation nudge — must NOT force_finish."""
+    """MEDIUM severity 保持软性 remediation 提醒 —— 不得 force_finish。"""
     hook = RepeatToolCallDetectorHook(repeat_warn=10, pingpong_warn=4, loop_block=20, global_stop=30)
     calls = [
         ("read_file", {"path": "a.txt"}, "result_a"),

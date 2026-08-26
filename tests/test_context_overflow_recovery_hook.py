@@ -1,5 +1,4 @@
-"""Tests for ContextOverflowRecoveryHook — 413 detection, token parsing,
-forced compression + retry, circuit-break, count reset."""
+"""ContextOverflowRecoveryHook 测试 —— 413 检测、token 解析、强制压缩 + 重试、熔断、计数重置。"""
 
 import asyncio
 import httpx
@@ -14,14 +13,14 @@ from twinkle.agentserver.hooks.builtin.context_overflow_recovery_hook import (
 
 
 class _FakeLLM:
-    """Fake LLM for compress_messages — yields fixed summary."""
+    """compress_messages 用的假 LLM —— 产出固定摘要。"""
     async def stream(self, messages, tools):
         from twinkle.agentserver.llm_client import TextDelta
         yield TextDelta("摘要")
 
 
 class _Ctx:
-    """Minimal ctx stub: hook touches ctx.inputs.messages, ctx.exception, ctx.extra, ctx.session_id."""
+    """最小 ctx stub：hook 碰 ctx.inputs.messages、ctx.exception、ctx.extra、ctx.session_id。"""
     def __init__(self, messages, exception=None, session_id="test-session"):
         self.inputs = ModelCallInputs(messages=messages, tools=[])
         self.exception = exception
@@ -37,7 +36,7 @@ class _Ctx:
         self._force_finish_request = result
 
 
-# --- _is_context_overflow_error tests ---
+# --- _is_context_overflow_error 测试 ---
 
 class _Exc413(Exception):
     status_code = 413
@@ -91,7 +90,7 @@ def test_ignores_rate_limit_error():
     assert _is_context_overflow_error(exc) is False
 
 
-# --- _parse_token_limits tests ---
+# --- _parse_token_limits 测试 ---
 
 def test_parse_anthropic_format():
     actual, limit = _parse_token_limits(Exception("prompt is too long: 10000 tokens > 8000"))
@@ -111,7 +110,7 @@ def test_parse_no_match():
     assert limit is None
 
 
-# --- Hook behavior tests ---
+# --- Hook 行为测试 ---
 
 def _big_messages():
     msgs = [{"role": "system", "content": "s"}]
@@ -130,9 +129,9 @@ def test_compresses_and_requests_retry_on_413():
 
     asyncio.run(hook.on_model_exception(ctx))
 
-    # Messages should be compressed (fewer tokens)
+    # 消息应被压缩（token 更少）
     assert estimate_tokens(ctx.inputs.messages) < estimate_tokens(big)
-    # Retry was requested
+    # 已请求重试
     assert ctx._retry_request is not None
 
 
@@ -142,7 +141,7 @@ def test_no_retry_on_non_overflow_error():
 
     asyncio.run(hook.on_model_exception(ctx))
 
-    # No retry requested
+    # 未请求重试
     assert ctx._retry_request is None
 
 
@@ -151,28 +150,28 @@ def test_circuit_break_after_max_attempts():
         llm=_FakeLLM(), max_recovery_attempts=2,
         aggressive_keep_recent=2, trigger_ratio=0.8,
     )
-    # Simulate 2 consecutive overflow errors
+    # 模拟连续 2 次溢出错误
     ctx1 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
     asyncio.run(hook.on_model_exception(ctx1))
     ctx2 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
     asyncio.run(hook.on_model_exception(ctx2))
-    # 3rd should trigger circuit break
+    # 第 3 次应触发熔断
     ctx3 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
     asyncio.run(hook.on_model_exception(ctx3))
 
-    # Circuit break: requests force_finish so user gets a graceful message (not another 413)
+    # 熔断：请求 force_finish 让用户拿到优雅提示（而非又一次 413）
     assert ctx3._force_finish_request is not None
     assert "上下文持续溢出" in ctx3._force_finish_request
 
 
 def test_resets_count_on_success():
     hook = ContextOverflowRecoveryHook(llm=_FakeLLM(), max_recovery_attempts=3)
-    # Simulate 1 overflow
+    # 模拟 1 次溢出
     ctx1 = _Ctx(_big_messages(), exception=_Exc413("overflow"))
     asyncio.run(hook.on_model_exception(ctx1))
     assert hook._overflow_counts.get("test-session", 0) == 1
 
-    # Successful model call resets count
+    # 成功的 model call 重置计数
     ctx2 = _Ctx([{"role": "system", "content": "s"}], exception=None)
     asyncio.run(hook.after_model_call(ctx2))
     assert hook._overflow_counts.get("test-session", 0) == 0
@@ -189,7 +188,7 @@ def test_uses_parsed_limit_for_threshold():
 
     asyncio.run(hook.on_model_exception(ctx))
 
-    # Compression should have been applied (result is shorter)
+    # 应已应用压缩（结果更短）
     assert estimate_tokens(ctx.inputs.messages) < estimate_tokens(big)
     assert ctx._retry_request is not None
 

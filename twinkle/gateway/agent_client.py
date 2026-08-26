@@ -1,10 +1,10 @@
-"""AgentServer WebSocket client (Gateway side).
+"""AgentServer 的 WebSocket client（Gateway 侧）。
 
-Connects to the AgentServer ws endpoint, reads the connection.ack first frame,
-then demuxes inbound frames by request_id into per-request asyncio.Queues.
-Exposes send_request_stream (async generator) — stream-only, no unary mode.
+连接到 AgentServer ws endpoint，先读 connection.ack 首帧，然后按 request_id 把
+inbound 帧分路到 per-request asyncio.Queue。暴露 send_request_stream
+（async generator）—— 只支持流式，无 unary 模式。
 
-Minimal mirror of jiuwenclaw/gateway/agent_client.py:153 / :205 / :336.
+是 jiuwenclaw/gateway/agent_client.py:153 / :205 / :336 的精简镜像。
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class AgentClient:
             ping_timeout=300,
             max_size=8 * 1024 * 1024,
         )
-        # first frame must be connection.ack
+        # 首帧必须是 connection.ack
         raw = await self._ws.recv()
         try:
             data = json.loads(raw)
@@ -73,9 +73,9 @@ class AgentClient:
             self._fail_pending("agent server disconnected")
 
     def _fail_pending(self, reason: str) -> None:
-        """Fail-fast: push a ConnectionError into every pending request queue so
-        a suspended send_request_stream unblocks instead of hanging forever when
-        the recv loop ends (AgentServer disconnected)."""
+        """快速失败：向每个 pending request queue 推入一个 ConnectionError，使得被挂起的
+        send_request_stream 在 recv loop 结束时（AgentServer 断开连接）能解除阻塞，
+        而不是永远挂起。"""
         err = ConnectionError(reason)
         for request_queue in list(self._queues.values()):
             request_queue.put_nowait(err)
@@ -93,7 +93,7 @@ class AgentClient:
             while True:
                 data = await request_queue.get()
                 if isinstance(data, BaseException):
-                    raise data  # recv loop ended — fail fast instead of hanging
+                    raise data  # recv loop 已结束 —— 快速失败而非挂起
                 resp = E2AResponse.model_validate(data)
                 yield resp
                 if resp.is_final:

@@ -1,16 +1,16 @@
-"""MessageHandler — inbound routing + stream fan-out (Gateway side).
+"""MessageHandler —— inbound 路由 + stream fan-out（Gateway 侧）。
 
-Inbound: a browser chat.send Message -> wrap as E2AEnvelope -> call the
-AgentClient stream. Outbound: each E2A chunk becomes a chat.delta Message
-(terminal chunk -> chat.final) put into the _robot_messages Queue for
-ChannelManager dispatch. Stream-only; no unary mode.
+inbound：浏览器 chat.send Message -> 包装成 E2AEnvelope -> 调用 AgentClient
+stream。outbound：每个 E2A chunk 变成一个 chat.delta Message（末个 chunk ->
+chat.final）放入 _robot_messages Queue 供 ChannelManager 分发。只支持流式；
+无 unary 模式。
 
-Dependency direction (aligned with jiuwenclaw): MessageHandler only holds
-AgentClient + its own outbound Queue. It does NOT hold ChannelManager.
-ChannelManager consumes from this Queue via consume_robot_message().
+依赖方向（对齐 jiuwenclaw）：MessageHandler 只持有 AgentClient + 自己的
+outbound Queue。它不持有 ChannelManager。ChannelManager 通过
+dequeue_outbound() 从该 Queue 消费。
 
-Minimal mirror of jiuwenclaw/gateway/message_handler.py:2408-2484 (process_stream)
-and jiuwenclaw's publish_robot_messages / consume_robot_messages Queue pattern.
+是 jiuwenclaw/gateway/message_handler.py:2408-2484（process_stream）及
+jiuwenclaw 的 publish_robot_messages / consume_robot_messages Queue 模式的精简镜像。
 """
 from __future__ import annotations
 
@@ -106,13 +106,13 @@ class MessageHandler:
             )
             await self.enqueue_outbound(error_message)
 
-    # --- outbound Queue (consumed by ChannelManager) ---
-    # outbound = Agent responses flowing toward the browser.
+    # --- outbound Queue（由 ChannelManager 消费）---
+    # outbound = 流向浏览器的 Agent 响应。
 
     async def enqueue_outbound(self, msg: Message) -> None:
-        """Put an outbound (Agent→browser) message into the Queue."""
+        """把一个 outbound（Agent→browser）message 放入 Queue。"""
         await self._robot_messages.put(msg)
 
     async def dequeue_outbound(self) -> Message:
-        """Get the next outbound message from the Queue (blocking)."""
+        """从 Queue 取下一个 outbound message（阻塞）。"""
         return await self._robot_messages.get()

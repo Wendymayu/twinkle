@@ -1,6 +1,6 @@
 """MemoryHook — before_invoke 注 strategy + opt-in 静态召回(USER.md/MEMORY.md)到 ctx.extra["frozen_sections"]。
 
-No-op when the memory store is empty. 注入走 ctx.extra["frozen_sections"](loop 每步套用到 builder):
+memory store 为空时 no-op。注入走 ctx.extra["frozen_sections"](loop 每步套用到 builder):
 - memory_strategy(priority 80):何时搜/写的策略 prompt(稳定,常开;提示需 daily 时 memory_search)。
 - memory_static(priority 81, opt-in):USER.md + MEMORY.md 各按自己字符预算注入(超限 head+tail 截断,对齐 openclaw)。
 daily 不再自动注入——需 daily 时 memory_search('daily_memory/<日期>')(= tool message = 动态区)。
@@ -26,13 +26,13 @@ recall 到与当前信息矛盾的记忆时,用 edit_memory 修正它。"""
 
 
 class MemoryHook(AgentHook):
-    priority = 80  # functional layer (50-99); below SkillHook(90)
+    priority = 80  # 功能层(50-99)；在 SkillHook(90) 之后
 
     async def before_invoke(self, ctx: HookContext) -> None:
         from twinkle.agentserver.memory import get_memory_manager
         mgr = get_memory_manager()
         if not mgr.list_files():
-            return  # empty store → no-op
+            return  # 空 store → no-op
         frozen = ctx.extra.setdefault("frozen_sections", [])
         frozen.append(PromptSection("memory_strategy", _build_prompt(), priority=80))
         static = _build_static(mgr)

@@ -43,7 +43,7 @@ COMMAND_DENY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 
 def matches(command: str) -> str | None:
-    """Return the deny reason if *command* matches any pattern, else None."""
+    """若 *command* 命中任意 pattern,返回 deny reason;否则返回 None。"""
     command = command or ""
     for pattern, reason in COMMAND_DENY_PATTERNS:
         if pattern.search(command):

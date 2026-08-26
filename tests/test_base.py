@@ -12,7 +12,7 @@ def test_toolcard_is_dataclass_with_three_fields() -> None:
 
 
 def test_tool_protocol_has_card_and_invoke() -> None:
-    # Tool is a structural Protocol: any object with `card` + async `invoke` satisfies it.
+    # Tool 是结构性 Protocol:任何带 `card` + async `invoke` 的对象都满足它。
     attrs = {n for n in dir(Tool) if not n.startswith("_")}
     assert "card" in Tool.__annotations__
     assert hasattr(Tool, "invoke")

@@ -1,7 +1,7 @@
 # tests/test_skill_e2e.py
-"""E2E: chat.send -> list_skill -> read_skill -> complete, through the real
-ws_handler + gateway MessageHandler + AgentClient, on a free port.
-Uses a scripted LLM (no real API calls) + a tmp-backed skill (demo)."""
+"""E2E: chat.send -> list_skill -> read_skill -> complete,走真实的
+ws_handler + gateway MessageHandler + AgentClient,在 free port 上运行。
+用脚本化的 LLM(无真实 API 调用)+ tmp 支撑的 skill(demo)。"""
 import asyncio
 import importlib
 from pathlib import Path
@@ -72,7 +72,7 @@ def test_skill_flow_through_gateway_and_agentserver(free_port, tmp_path, monkeyp
                 ac = AgentClient(f"ws://127.0.0.1:{free_port}")
                 await ac.connect()
                 mh = MessageHandler(ac)
-                # 1. inbound chat.send (R)
+                # 1. 入站 chat.send (R)
                 msg = Message(id="R", type="req", channel_id="web", session_id="s1",
                               method="chat.send", params={"query": "use demo skill"})
                 await mh.handle_message(msg)

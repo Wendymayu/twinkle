@@ -23,7 +23,7 @@ log = logging.getLogger("twinkle.hooks.overflow_recovery")
 def _parse_token_limits(exc: Exception) -> tuple[int | None, int | None]:
     """从 413 错误解析 actual_tokens 和 limit_tokens。
 
-    Returns: (actual_tokens, limit_tokens) — None 表示未解析到。
+    返回：(actual_tokens, limit_tokens) — None 表示未解析到。
     """
     msg = str(exc)
 
@@ -71,9 +71,9 @@ def _is_context_overflow_error(exc: Exception) -> bool:
 
 
 class ContextOverflowRecoveryHook(AgentHook):
-    """Context overflow recovery — reactive 413 handling.
+    """上下文溢出恢复 — 被动处理 413。
 
-    Priority 60: 在 RetryHook(50) 之前，先处理溢出恢复。
+    Priority 60：在 RetryHook(50) 之前，先处理溢出恢复。
     RetryHook 不处理 413（不属于 transient），所以两者不冲突。
     """
 
@@ -91,7 +91,7 @@ class ContextOverflowRecoveryHook(AgentHook):
         self._max_recovery_attempts = max_recovery_attempts
         self._aggressive_keep_recent = aggressive_keep_recent
         self._trigger_ratio = trigger_ratio
-        # Per-session overflow counts — keyed by session_id
+        # per-session 溢出计数 — 以 session_id 为键
         self._overflow_counts: dict[str, int] = {}
 
     async def on_model_exception(self, ctx: HookContext) -> None:
@@ -167,7 +167,7 @@ class ContextOverflowRecoveryHook(AgentHook):
         )
 
 
-# --- Config lazy reads ---
+# --- config 懒读 ---
 
 def _get_max_recovery_attempts() -> int:
     from twinkle.config import settings

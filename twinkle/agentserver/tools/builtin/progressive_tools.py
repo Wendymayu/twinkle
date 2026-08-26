@@ -1,4 +1,4 @@
-"""Progressive tool visibility meta-tools: tools_search + invoke_tool.
+"""渐进可见工具的 meta-tool:tools_search + invoke_tool。
 
 手写 Tool 实现(非 @tool,需持有 ToolManager 引用)。对齐 jiuwenswarm
 deep_agent/rails/jiuwen_progressive_tool_rail.py 的两个 meta-tool,但简化:

@@ -4,7 +4,7 @@ import FileTreePane from './FileTreePane.vue'
 import FilePreviewPane from './FilePreviewPane.vue'
 import { useSessions } from '../composables/useSessions'
 const { sessions, loadSessions } = useSessions()
-// ensure the list is fresh when entering the page
+// 进入页面时确保列表是最新的
 loadSessions()
 </script>
 

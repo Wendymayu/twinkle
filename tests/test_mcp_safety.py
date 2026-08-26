@@ -9,7 +9,7 @@ from twinkle.agentserver.mcp.safety import check_dangerous_args
 
 
 def test_safe_args_pass() -> None:
-    check_dangerous_args(["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])  # no raise
+    check_dangerous_args(["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])  # 不抛
 
 
 @pytest.mark.parametrize("bad", ["-e", "--eval", "-c", "--command", "-i", "-m", "--interactive"])

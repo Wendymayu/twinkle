@@ -1,7 +1,7 @@
-"""Integration test: echo-pipeline demo workflow with mock LLM.
+"""集成测试：用 mock LLM 跑 echo-pipeline 示例 workflow。
 
-Verifies the full engine pipeline (validate → load → bind callbacks → execute)
-using the actual root.py from the workflows directory, with a mock LLM.
+用 workflows 目录下真实的 root.py 配合 mock LLM，验证完整 engine 管道
+（validate → load → bind callbacks → execute）。
 """
 import asyncio
 import json
@@ -12,25 +12,25 @@ from twinkle.agentserver.workflow.node import PlanNode
 from twinkle.config.schema import WorkflowConfig
 
 
-# --- Mock LLM that returns structured JSON ---
+# --- 返回结构化 JSON 的 mock LLM ---
 
 _CALL_COUNT = 0
 
 
 async def _mock_call_llm(prompt: str, system_prompt: str = "") -> str:
-    """Mock LLM: returns JSON outline for gather, plain text for enrich."""
+    """Mock LLM：gather 阶段返回 JSON 提纲，enrich 阶段返回纯文本。"""
     if "提纲" in prompt:
         return json.dumps({"items": ["要点A", "要点B", "要点C"]}, ensure_ascii=False)
-    # enrich node — return a one-liner
+    # enrich 节点 —— 返回一行文本
     return "这是补充说明"
 
 
 def _make_executor():
-    """Build an executor with mock LLM and no real tools/subagent."""
+    """构造一个带 mock LLM、无真实 tools/subagent 的 executor。"""
     from twinkle.agentserver.workflow.executor import WorkflowExecutor
 
     class FakeLLM:
-        """Duck-type LLMClient — just enough for _call_llm_wrapper."""
+        """鸭子类型的 LLMClient —— 仅满足 _call_llm_wrapper 的需要。"""
         async def stream(self, messages, tools=None):
             from twinkle.agentserver.llm_client import TextDelta
             prompt = messages[-1]["content"]
@@ -46,7 +46,7 @@ def _make_executor():
 
 
 def test_echo_pipeline_with_mock_llm():
-    """Load the echo-pipeline root.py and run it end-to-end with mock LLM."""
+    """加载 echo-pipeline 的 root.py，用 mock LLM 端到端跑一遍。"""
     from pathlib import Path
 
     root_path = Path.home() / ".twinkle" / "workflows" / "echo-pipeline" / "root.py"
@@ -67,7 +67,7 @@ def test_echo_pipeline_with_mock_llm():
 
 
 def test_echo_pipeline_plan_code_validates():
-    """The echo-pipeline root.py should pass AST validation."""
+    """echo-pipeline 的 root.py 应通过 AST 校验。"""
     from pathlib import Path
     from twinkle.agentserver.workflow.validator import PlanCodeValidator
 
@@ -82,7 +82,7 @@ def test_echo_pipeline_plan_code_validates():
 
 
 def test_echo_pipeline_sandbox_loads():
-    """The echo-pipeline root.py should load in the sandbox namespace."""
+    """echo-pipeline 的 root.py 应能在 sandbox namespace 中加载。"""
     from pathlib import Path
     from twinkle.agentserver.workflow.sandbox import build_namespace
 

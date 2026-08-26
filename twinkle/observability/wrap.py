@@ -1,8 +1,7 @@
-"""patch_method — idempotent, fail-soft monkey-patch helper.
+"""patch_method —— 幂等、fail-soft 的 monkey-patch helper。
 
-Borrowed from jiuwenswarm-instrumentor wrap.py. Marks wrappers with
-_twinkle_wrapped so repeated patches are no-ops; any failure is logged
-and skipped, never raised into the host.
+取自 jiuwenswarm-instrumentor wrap.py。用 _twinkle_wrapped 标记 wrapper，
+使重复 patch 成为 no-op；任何失败均记日志并跳过，绝不向 host 抛出。
 """
 from __future__ import annotations
 
@@ -15,11 +14,10 @@ _WRAPPED_MARKER = "_twinkle_wrapped"
 
 
 def patch_method(cls: type, name: str, factory: Callable[[Any], Any]) -> bool:
-    """Patch ``cls.<name>`` with ``factory(original)``.
+    """用 ``factory(original)`` patch ``cls.<name>``。
 
-    Idempotent (already-wrapped -> no-op) and fail-soft (any error -> log +
-    skip, never raise into the host). Returns True if patched, False if
-    skipped.
+    幂等（已包装 -> no-op）且 fail-soft（任何错误 -> 记日志 + 跳过，
+    绝不向 host 抛出）。patched 返回 True，skipped 返回 False。
     """
     try:
         original = getattr(cls, name)

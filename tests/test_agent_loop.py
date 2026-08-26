@@ -7,7 +7,7 @@ from twinkle.agentserver.tools.decorator import tool
 
 
 class _ScriptedLLM:
-    """Returns one canned event-list per call, in order."""
+    """每次调用按顺序返回一组预设事件列表。"""
     def __init__(self, scripts):
         self._scripts = scripts
         self.calls = 0
@@ -65,11 +65,11 @@ def test_tool_call_round_trip_then_answer(session_store) -> None:
     store = session_store
     reg = _reg_with_echo_tool()
     llm = _ScriptedLLM([
-        # turn 1: model calls echo
+        # turn 1：model 调用 echo
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "c1", "type": "function",
                               "function": {"name": "echo", "arguments": '{"text": "hi"}'}}]})],
-        # turn 2: model produces final answer
+        # turn 2：model 给出最终回答
         [TextDelta("result was "), TextDelta("good"),
          Finish("stop", {"role": "assistant", "content": "result was good", "tool_calls": None})],
     ])
@@ -84,8 +84,8 @@ def test_tool_call_round_trip_then_answer(session_store) -> None:
     assert final.response_kind == "e2a.complete"
     assert "good" in final.body["result"]["content"]
 
-    # session store now holds: user, assistant(tool_calls), tool, assistant(answer)
-    # (system prompt is injected per-step into LLM messages, not persisted)
+    # session store 现含：user、assistant(tool_calls)、tool、assistant(answer)
+    # (system prompt 每步注入 LLM messages，不持久化)
     msgs = store.get_messages("s1")
     assert msgs[0]["role"] == "user"
     assert msgs[1]["role"] == "assistant" and msgs[1]["tool_calls"]
@@ -124,7 +124,7 @@ def test_cross_turn_remembers_context(session_store) -> None:
             pass
 
     asyncio.run(run())
-    # turn 2's messages include turn 1's user + assistant, plus the system msg from turn 1
+    # turn 2 的 messages 含 turn 1 的 user + assistant，加上 turn 1 的 system msg
     assert len(seen_messages[0]) == 2   # [system, user]
     assert len(seen_messages[1]) == 4   # [system, user, assistant, user]
     assert seen_messages[0][0]["role"] == "system"
@@ -134,9 +134,9 @@ def test_cross_turn_remembers_context(session_store) -> None:
 
 
 def test_unbounded_loop_stops_via_critical_not_step_cap(session_store) -> None:
-    """Unbounded main agent (no max_steps) + a CRITICAL repeating-tool loop
-    stops via loop-detection force_finish — NOT via a step cap. Proves the new
-    brake (CRITICAL hard-stop) replaces the removed 1000-step cap."""
+    """无界主 agent（无 max_steps）+ CRITICAL 重复工具循环
+    经循环检测 force_finish 终止——而非经 step cap。证明新刹车
+    （CRITICAL 硬停）替代了已移除的 1000 步上限。"""
     from twinkle.agentserver.hooks.builtin.repeat_tool_call_detector_hook import (
         RepeatToolCallDetectorHook)
     store = session_store
@@ -154,29 +154,28 @@ def test_unbounded_loop_stops_via_critical_not_step_cap(session_store) -> None:
 
     frames = asyncio.run(run())
     final = frames[-1]
-    # Stopped by loop detection (force_finish -> e2a.complete with loop msg),
-    # not by a step cap (no "exceeded max_steps" anywhere).
+    # 由循环检测终止（force_finish -> e2a.complete 含 loop msg），
+    # 而非由 step cap（任何地方都没有 "exceeded max_steps"）。
     assert final.response_kind == "e2a.complete"
     assert "loop" in final.body["result"]["content"].lower()
     assert not any("exceeded max_steps" in str(f.body) for f in frames)
 
 
 def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store) -> None:
-    """Model calls todo_create then answers — verifies the ContextVar is set
-    to the envelope's session_id (via the store assertions below; without
-    PLAN_TODO_SESSION_ID.set the tool would fall back to "default" and the
-    "s-todo" store key would stay empty). System prompt is injected per-step
-    into LLM messages, not persisted in the store."""
+    """model 调 todo_create 后作答——验证 ContextVar 被设为
+    envelope 的 session_id（见下方 store 断言；若不 PLAN_TODO_SESSION_ID.set，
+    工具会回退到 "default"，"s-todo" store key 将留空）。system prompt 每步注入
+    LLM messages，不持久化进 store。"""
     from twinkle.agentserver.tools import tool_manager
 
     store = session_store
     llm = _ScriptedLLM([
-        # turn 1: model calls todo_create
+        # turn 1：model 调用 todo_create
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [{"id": "tc1", "type": "function",
                               "function": {"name": "todo_create",
                                            "arguments": '{"subjects": ["step one", "step two"]}'}}]})],
-        # turn 2: model answers
+        # turn 2：model 作答
         [TextDelta("planned "), TextDelta("it"),
          Finish("stop", {"role": "assistant", "content": "planned it", "tool_calls": None})],
     ])
@@ -187,7 +186,7 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
 
     frames = asyncio.run(run())
     assert frames[-1].response_kind == "e2a.complete"
-    # tool result was re-injected into the store
+    # 工具结果被重新注入 store
     msgs = store.get_messages("s-todo")
     assert msgs[0]["role"] == "user"
     assert msgs[1]["role"] == "assistant" and msgs[1]["tool_calls"]
@@ -196,19 +195,19 @@ def test_todo_create_round_trip_through_loop(session_store, isolated_todo_store)
     assert "step one" in msgs[2]["content"]
     assert msgs[3]["role"] == "assistant" and msgs[3]["content"] == "planned it"
 
-    # ContextVar was actually set to the envelope's session_id, not the
-    # "default" fallback — otherwise both store keys below would be empty
-    # except "default". This makes run_stream's PLAN_TODO_SESSION_ID.set(...)
-    # load-bearing rather than silently skippable.
-    # ContextVar was set to the envelope's session_id; the loop's todo_create
-    # wrote to the shared singleton (= isolated_todo_store).
+    # ContextVar 实际被设为 envelope 的 session_id，而非
+    # "default" 回退——否则下面两个 store key 都会为空，
+    # 只有 "default" 除外。这使 run_stream 的 PLAN_TODO_SESSION_ID.set(...)
+    # 成为核心载荷而非可静默跳过。
+    # ContextVar 被设为 envelope 的 session_id；loop 的 todo_create
+    # 写入共享单例（= isolated_todo_store）。
     assert len(asyncio.run(isolated_todo_store.list("s-todo"))) == 2
     assert asyncio.run(isolated_todo_store.list("default")) == []
 
 
 def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store) -> None:
-    """run_stream yields an e2a.todo_update frame after todo_create executes,
-    carrying the structured snapshot (not just the markdown tool string)."""
+    """run_stream 在 todo_create 执行后产出一个 e2a.todo_update frame，
+    携带结构化快照（不只是 markdown 工具字符串）。"""
     from twinkle.agentserver.tools import tool_manager
 
     store = session_store
@@ -232,26 +231,26 @@ def test_todo_update_frame_emitted_on_create(session_store, isolated_todo_store)
     assert body["remaining"] == 2
     assert body["total"] == 2
     assert body["tasks"][0]["subject"] == "one"
-    # the todo_update frame is not final and precedes the final complete
+    # todo_update frame 非 final，且在 final complete 之前
     assert not todo_frames[0].is_final
     assert frames[-1].response_kind == "e2a.complete"
 
 
 def test_react_agent_has_no_step_cap_parameter() -> None:
-    """ReActAgent has no max_steps parameter — the step cap is removed for
-    ALL agents (main + subagent + team member). Unbounded loops stop via
-    CRITICAL loop-detection force_finish (main/team member) or the
-    subagent's hard_timeout, never a step count."""
+    """ReActAgent 无 max_steps 参数——step cap 对
+    所有 agent（主 + subagent + team member）都已移除。无界循环经
+    CRITICAL 循环检测 force_finish（主/team member）或
+    subagent 的 hard_timeout 终止，绝非 step 计数。"""
     import inspect
     params = inspect.signature(AgentLoop.__init__).parameters
     assert "max_steps" not in params
 
 
-# --- Parallel tool call tests --- #
+# --- 并行工具调用测试 --- #
 
 
 def _reg_with_echo_and_slow():
-    """Register echo + slow_echo tools for parallel testing."""
+    """注册 echo + slow_echo 工具供并行测试。"""
     from twinkle.agentserver.tools.manager import ToolManager
 
     @tool
@@ -261,7 +260,7 @@ def _reg_with_echo_and_slow():
 
     @tool
     async def slow_echo(text: str) -> str:
-        """slow_echo — simulates a tool with latency"""
+        """slow_echo — 模拟带延迟的工具"""
         await asyncio.sleep(0.05)
         return f"slow-saw:{text}"
 
@@ -272,11 +271,11 @@ def _reg_with_echo_and_slow():
 
 
 def test_parallel_tool_calls_two_echoes(session_store) -> None:
-    """Two echo tool calls in one batch run concurrently and both results appear."""
+    """同一批两次 echo 工具调用并发执行，两个结果都出现。"""
     store = session_store
     reg = _reg_with_echo_and_slow()
     llm = _ScriptedLLM([
-        # turn 1: model calls echo twice
+        # turn 1：model 调用 echo 两次
         [Finish("tool_calls", {"role": "assistant", "content": None,
               "tool_calls": [
                   {"id": "c1", "type": "function",
@@ -284,7 +283,7 @@ def test_parallel_tool_calls_two_echoes(session_store) -> None:
                   {"id": "c2", "type": "function",
                    "function": {"name": "echo", "arguments": '{"text": "beta"}'}},
               ]})],
-        # turn 2: model summarizes
+        # turn 2：model 总结
         [TextDelta("both "), TextDelta("done"),
          Finish("stop", {"role": "assistant", "content": "both done", "tool_calls": None})],
     ])
@@ -298,7 +297,7 @@ def test_parallel_tool_calls_two_echoes(session_store) -> None:
     assert final.response_kind == "e2a.complete"
     assert "both done" in final.body["result"]["content"]
 
-    # Both tool results appended to session in order
+    # 两个工具结果按序追加进 session
     msgs = store.get_messages("s-par")
     tool_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_msgs) == 2
@@ -309,7 +308,7 @@ def test_parallel_tool_calls_two_echoes(session_store) -> None:
 
 
 def test_parallel_tool_calls_one_error_one_ok(session_store) -> None:
-    """In a parallel batch, one tool error does not affect the other."""
+    """并行批中，一个工具出错不影响另一个。"""
     from twinkle.agentserver.tools.manager import ToolManager
 
     store = session_store
@@ -349,16 +348,16 @@ def test_parallel_tool_calls_one_error_one_ok(session_store) -> None:
     msgs = store.get_messages("s-mix")
     tool_msgs = [m for m in msgs if m["role"] == "tool"]
     assert len(tool_msgs) == 2
-    # good_tool succeeded
+    # good_tool 成功
     assert tool_msgs[0]["tool_call_id"] == "c1"
     assert tool_msgs[0]["content"] == "good-result"
-    # bad_tool error captured as string
+    # bad_tool 错误被捕获为字符串
     assert tool_msgs[1]["tool_call_id"] == "c2"
     assert "ValueError" in tool_msgs[1]["content"]
 
 
 def test_parallel_tool_calls_disabled(session_store) -> None:
-    """Single tool call in a batch goes through sequential path (no gather overhead)."""
+    """批中单次工具调用走顺序路径（无 gather 开销）。"""
     store = session_store
     reg = _reg_with_echo_and_slow()
     llm = _ScriptedLLM([
@@ -383,11 +382,11 @@ def test_parallel_tool_calls_disabled(session_store) -> None:
     assert tool_msgs[0]["content"] == "tool-saw:solo"
 
 
-# --- Phase 12: Interrupt recovery tests --- #
+# --- Phase 12：中断恢复测试 --- #
 
 
 class _FailingLLM:
-    """Raises RuntimeError on the first stream() call."""
+    """首次 stream() 调用即抛 RuntimeError。"""
     def __init__(self):
         self.calls = 0
 
@@ -398,9 +397,8 @@ class _FailingLLM:
 
 
 def test_interrupt_snapshot_on_model_exception(session_store) -> None:
-    """When the model raises an exception, run_stream's finally block writes
-    an interrupt snapshot assistant message to the session so the LLM can
-    understand what happened on the next request."""
+    """model 抛异常时，run_stream 的 finally 块向 session 写一条
+    中断快照 assistant message，使 LLM 在下次请求时能理解发生了什么。"""
     store = session_store
     llm = _FailingLLM()
     loop = AgentLoop(llm, store, _reg_with_echo_tool())
@@ -413,7 +411,7 @@ def test_interrupt_snapshot_on_model_exception(session_store) -> None:
 
     asyncio.run(run())
     msgs = store.get_messages("s-int")
-    # Should have: system, user, then interrupt snapshot
+    # 应含：system、user，然后中断快照
     assistant_msgs = [m for m in msgs if m.get("role") == "assistant"]
     assert len(assistant_msgs) == 1
     assert "[SYSTEM] 任务中断" in assistant_msgs[0]["content"]
@@ -421,7 +419,7 @@ def test_interrupt_snapshot_on_model_exception(session_store) -> None:
 
 
 def test_no_interrupt_snapshot_on_normal_completion(session_store) -> None:
-    """When the request completes normally, no interrupt snapshot is written."""
+    """请求正常完成时，不写中断快照。"""
     store = session_store
     llm = _ScriptedLLM([
         [TextDelta("ok"), Finish("stop", {"role": "assistant", "content": "ok", "tool_calls": None})],
@@ -433,15 +431,15 @@ def test_no_interrupt_snapshot_on_normal_completion(session_store) -> None:
 
     asyncio.run(run())
     msgs = store.get_messages("s-ok")
-    # No [SYSTEM] 任务中断 messages should exist
+    # 不应存在 [SYSTEM] 任务中断 messages
     interrupt_msgs = [m for m in msgs if m.get("role") == "assistant"
                       and "[SYSTEM] 任务中断" in m.get("content", "")]
     assert len(interrupt_msgs) == 0
 
 
 def test_sanitize_orphan_tool_calls_includes_tool_name_and_args(session_store) -> None:
-    """_sanitize_orphan_tool_calls injects enriched context: tool name + args."""
-    # Seed an orphan: assistant with tool_calls but no tool result
+    """_sanitize_orphan_tool_calls 注入富化上下文：工具名 + 参数。"""
+    # 播种孤儿：assistant 带 tool_calls 但无 tool result
     asyncio.run(session_store.append("s-orphan", {"role": "system", "content": "sys"}))
     asyncio.run(session_store.append("s-orphan", {"role": "user", "content": "do x"}))
     asyncio.run(session_store.append("s-orphan", {
@@ -468,13 +466,13 @@ def test_sanitize_orphan_tool_calls_includes_tool_name_and_args(session_store) -
     asyncio.run(run())
     msgs = session_store.get_messages("s-orphan")
     tool_msgs = [m for m in msgs if m.get("role") == "tool"]
-    # The orphan tool_call should have a synthetic tool_result
+    # 孤儿 tool_call 应有一个合成的 tool_result
     assert len(tool_msgs) == 1
     content = tool_msgs[0]["content"]
-    # Phase 12: enriched context includes tool name and args
+    # Phase 12：富化上下文含工具名和参数
     assert "echo" in content
     assert "interrupted" in content
-    assert "text" in content  # args should be present
+    assert "text" in content  # 参数应在场
 
 
 def test_refresh_mcp_tools_applies_diff(monkeypatch) -> None:

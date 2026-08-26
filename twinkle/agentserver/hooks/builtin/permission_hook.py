@@ -17,23 +17,23 @@ from twinkle.agentserver.permissions.engine import PermissionEngine
 
 
 class PermissionHook(AgentHook):
-    """before_tool_call hook enforcing PermissionEngine decisions.
+    """执行 PermissionEngine 决策的 before_tool_call hook。
 
-    Dispatches by decision level:
-      - ALLOW → no-op (tool executes normally)
-      - DENY  → request_force_finish(deny_message); the @hook decorator
-        short-circuits and the deny message becomes the tool_result
-      - ASK   → raise HookInterrupt(ask_payload); _inner_run_stream's
-        except HookInterrupt suspends the run awaiting human approval
+    按 decision level 分派：
+      - ALLOW → no-op（tool 正常执行）
+      - DENY  → request_force_finish(deny_message)；@hook 装饰器
+        短路，deny message 成为 tool_result
+      - ASK   → raise HookInterrupt(ask_payload)；_inner_run_stream 的
+        except HookInterrupt 挂起 run 等待人工审批
 
-    An approved tool_call_id bypass avoids re-asking on resume — once a
-    tool call has been approved (ASK→resume), its id is recorded in
-    ctx.extra["_approved_tool_call_ids"] and skipped on re-entry.
+    已批 tool_call_id bypass 避免恢复后重问 — 一旦某 tool call
+    被批准（ASK→resume），其 id 记入 ctx.extra["_approved_tool_call_ids"]，
+    重入时跳过。
 
-    The bypass branch also persists allow_always overrides if the approval
-    decision was "allow_always" — the decision is passed via
-    ctx.extra["_approval_decision"] by _inner_run_stream, so PermissionHook
-    handles its own persistence without AgentLoop needing an engine reference.
+    bypass 分支还负责持久化 allow_always 覆盖（当审批决策为
+    "allow_always" 时） — 决策由 _inner_run_stream 通过
+    ctx.extra["_approval_decision"] 传入，故 PermissionHook 自行
+    处理持久化，AgentLoop 无需持有 engine 引用。
     """
 
     priority = 100  # 先于 LoggingHook 等 before_tool_call hook
@@ -45,8 +45,8 @@ class PermissionHook(AgentHook):
         inputs: ToolCallInputs = ctx.inputs  # type: ignore[assignment]
         approved_ids = ctx.extra.get("_approved_tool_call_ids", set())
         if inputs.tool_call_id in approved_ids:
-            # Bypass: this tool_call was approved in the same run.
-            # Persist allow_always if the decision was "allow_always".
+            # Bypass：本 tool_call 在同一 run 内已被批准。
+            # 若决策为 "allow_always" 则持久化 allow_always。
             if ctx.extra.get("_approval_decision") == "allow_always":
                 await self._engine.persist_allow_always({
                     "tool": inputs.name, "args": inputs.args,

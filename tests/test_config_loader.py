@@ -18,7 +18,7 @@ def test_default_when_unset(monkeypatch):
 
 
 def test_empty_env_falls_to_default(monkeypatch):
-    # mirrors current `os.getenv(X) or default` (empty string is falsy)
+    # 镜像当前 `os.getenv(X) or default` 行为（空字符串为 falsy）
     monkeypatch.setenv("MY_VAR", "")
     assert _resolve_env_vars("v: ${MY_VAR:-fallback}") == "v: fallback"
 
@@ -43,7 +43,7 @@ def test_multiple_occurrences(monkeypatch):
 
 
 def test_loads_packaged_defaults(monkeypatch):
-    # hermetic: clear surviving env so packaged defaults apply
+    # 隔离测试：清掉残留 env 让打包默认值生效
     for k in ("TWINKLE_AGENTSERVER_PORT", "TWINKLE_LLM_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     c = load_config()  # reads packaged resources/config.yaml
@@ -76,7 +76,7 @@ def test_custom_path_overrides_packaged(tmp_path):
     assert c.agentserver.port == 9999
     assert c.permissions.enabled is True
     assert c.permissions.tools["echo"] == "deny"
-    # schema defaults fill the gaps
+    # schema 默认值填补空缺
     assert c.skills.mode == "all"
 
 
@@ -89,8 +89,8 @@ def test_bad_tier_in_yaml_raises(tmp_path):
 
 
 def test_unquoted_empty_default_not_null(tmp_path, monkeypatch):
-    # parse-first: an UNQUOTED empty-default ${VAR:-} resolves to "" (str), not None.
-    # (Under text-first this raised ValidationError because `api_key: ` parsed as null.)
+    # parse-first：未加引号的空默认值 ${VAR:-} 解析为 ""(str)，而非 None。
+    # （在 text-first 下这里会抛 ValidationError，因为 `api_key: ` 被解析为 null。）
     monkeypatch.delenv("MY_UNSET_VAR", raising=False)
     custom = tmp_path / "config.yaml"
     custom.write_text("llm:\n  api_key: ${MY_UNSET_VAR:-}\n", encoding="utf-8")

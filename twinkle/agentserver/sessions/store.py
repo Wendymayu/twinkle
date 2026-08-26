@@ -1,20 +1,20 @@
-"""Disk-backed short-term session memory.
+"""磁盘持久化的短期 session memory。
 
-Per-session layout under ``sessions_dir``::
+``sessions_dir`` 下每个 session 的布局::
 
     <sessions_dir>/<session_id>/
         metadata.json   # {session_id, title, created_at, last_message_at, ...}
-        history.json    # JSONL, one record per appended message
+        history.json    # JSONL,每条追加的消息一个 record
 
-Two layers: an in-memory cache (``dict[session_id -> list[OpenAI msg]]``) for the
-AgentLoop's hot reads, plus on-disk JSON for persistence across restarts.
-``get_messages`` cold-hydrates from ``history.json`` on a cache miss so a ReAct
-turn can resume with full prior context (system prompt, tool_calls, tool results).
+两层:内存 cache(``dict[session_id -> list[OpenAI msg]]``)供
+AgentLoop 热读,加磁盘 JSON 供跨重启持久化。
+``get_messages`` 在 cache miss 时从 ``history.json`` 冷加载,使一个 ReAct
+turn 能带着完整上文(system prompt、tool_calls、tool results)继续。
 
-Mirrors jiuwenclaw's ``session_metadata.py`` + ``session_history.py`` (file-per-
-session, JSONL history, auto-title from first user message), minus jiuwenclaw's
-async write-queue — Twinkle is single-user single-process, so a single
-``asyncio.Lock`` serializing metadata read-modify-write is enough.
+对齐 jiuwenclaw 的 ``session_metadata.py`` + ``session_history.py``(file-per-
+session、JSONL history、首条用户消息自动生成 title),去掉 jiuwenclaw 的
+async write-queue —— Twinkle 是单用户单进程,一把 ``asyncio.Lock``
+串行化 metadata 的 read-modify-write 就够了。
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class SessionStore:
         self._cache: dict[str, list[dict]] = {}
         self._lock = asyncio.Lock()
 
-    # --- paths ---
+    # --- 路径 ---
 
     def _session_dir(self, session_id: str) -> Path:
         return self._root / session_id
@@ -56,19 +56,19 @@ class SessionStore:
     def _history_path(self, session_id: str) -> Path:
         return self._session_dir(session_id) / "history.json"
 
-    # --- session lifecycle ---
+    # --- session 生命周期 ---
 
     async def create_session(self, session_id: str, channel_id: str = "web") -> dict:
-        """Idempotently create a session dir + metadata. Existing metadata is
-        left untouched (a re-create never wipes a populated session)."""
+        """幂等地创建 session 目录 + metadata。已有 metadata
+        原样保留(重建不会清空已有 session)。"""
         async with self._lock:
             return await self._create_session_locked(session_id, channel_id)
 
     async def _create_session_locked(
         self, session_id: str, channel_id: str = "web"
     ) -> dict:
-        """Assumes ``self._lock`` is already held (re-entrant-safe helper so
-        ``append`` can implicitly create without re-acquiring the lock)."""
+        """假定 ``self._lock`` 已持有(re-entrant-safe 辅助函数,让
+        ``append`` 能隐式创建而无需重新获取锁)。"""
         sdir = self._session_dir(session_id)
         sdir.mkdir(parents=True, exist_ok=True)
         mpath = self._metadata_path(session_id)
@@ -76,7 +76,7 @@ class SessionStore:
             try:
                 return json.loads(mpath.read_text(encoding="utf-8"))
             except Exception:
-                pass  # corrupt — fall through and rewrite defaults
+                pass  # 损坏 —— 落到下面重写默认值
         now = time.time()
         meta = {
             "session_id": session_id,
@@ -90,7 +90,7 @@ class SessionStore:
         return meta
 
     async def delete_session(self, session_id: str) -> bool:
-        """Remove a session dir + evict the cache entry. Returns False if absent."""
+        """删除 session 目录 + 逐出 cache 项。不存在则返回 False。"""
         import shutil
         async with self._lock:
             sdir = self._session_dir(session_id)
@@ -102,17 +102,17 @@ class SessionStore:
             return True
 
     def list_sessions(self, limit: int = 100, include_subagents: bool | None = None) -> list[dict]:
-        """List sessions sorted by last_message_at desc. Corrupt/missing
-        metadata falls back to dir mtime (mirrors jiuwenclaw legacy fallback).
+        """按 last_message_at 降序列出 session。损坏/缺失的
+        metadata 回退到目录 mtime(对齐 jiuwenclaw legacy 回退)。
 
-        By default hides child sub-agent sessions whose id contains ``__sub_``
-        (spawned by SubagentExecutor) so the browser's session list stays clean.
-        Pass ``include_subagents=True`` to include them (used by the executor's
-        tests / future admin views); ``include_subagents=False`` explicitly hides
-        them. When ``include_subagents is None`` (the default), falls back to the
-        ``SUBAGENT_LIST_SESSIONS_FILTER`` config flag (default True = hide). The
-        config import is lazy (inside the method, try/except ImportError) so
-        store.py doesn't import config at module load (avoids circular import)."""
+        默认隐藏 id 含 ``__sub_`` 的子 agent session
+        (由 SubagentExecutor spawn)以保持浏览器 session 列表干净。
+        传 ``include_subagents=True`` 可包含它们(executor 的
+        测试/未来管理视图用);``include_subagents=False`` 显式隐藏。
+        当 ``include_subagents is None``(默认)时,回退到
+        ``SUBAGENT_LIST_SESSIONS_FILTER`` 配置项(默认 True = 隐藏)。
+        config import 是惰性的(方法内,try/except ImportError),使
+        store.py 不在模块加载时 import config(避免循环 import)。"""
         if include_subagents is None:
             try:
                 from twinkle.config import SUBAGENT_LIST_SESSIONS_FILTER
@@ -142,10 +142,9 @@ class SessionStore:
                     "channel_id": "web",
                 }
             meta.setdefault("session_id", session_id)
-            # Derive the visible count from history.json (non-system records)
-            # so legacy sessions whose stored count was inflated by the system
-            # prompt display correctly; falls back to the stored value when
-            # history is missing/unreadable. See issue #5.
+            # 从 history.json 推导可见计数(非 system record),
+            # 这样 stored count 被 system prompt 虚高的 legacy session
+            # 也能正确显示;history 缺失/不可读时回退到 stored 值。见 issue #5。
             history = self.get_history(session_id)
             if history:
                 meta["message_count"] = sum(
@@ -156,8 +155,8 @@ class SessionStore:
         return out[:limit]
 
     def get_history(self, session_id: str) -> list[dict]:
-        """Return raw history records for frontend display (newest last).
-        Bad JSONL lines are skipped, never raised."""
+        """返回原始 history record 供前端展示(最新在后)。
+        坏 JSONL 行跳过,绝不抛异常。"""
         hpath = self._history_path(session_id)
         if not hpath.is_file():
             return []
@@ -173,8 +172,8 @@ class SessionStore:
         return out
 
     def list_files(self, session_id: str) -> list[dict]:
-        """List top-level files in a session dir. Flat (no recursion) — Twinkle
-        session dirs are flat. Unknown session -> []."""
+        """列出 session 目录下的顶层文件。扁平(不递归)—— Twinkle
+        session 目录是扁平的。未知 session 返回 []。"""
         sdir = self._session_dir(session_id)
         if not sdir.is_dir():
             return []
@@ -189,9 +188,9 @@ class SessionStore:
         return out
 
     def read_file(self, session_id: str, name: str) -> str:
-        """Read a file's text content from a session dir. ``name`` MUST be a
-        bare filename — path traversal is rejected (name comes from the browser
-        and content is echoed back to the preview pane)."""
+        """从 session 目录读文件的文本内容。``name`` 必须是
+        纯文件名 —— 路径穿越会被拒绝(name 来自浏览器,
+        内容会回显到预览面板)。"""
         if not name or "/" in name or "\\" in name or name in (".", ".."):
             raise ValueError(f"unsafe file name: {name!r}")
         base = self._session_dir(session_id).resolve()
@@ -203,11 +202,11 @@ class SessionStore:
             raise FileNotFoundError(f"no such file: {name}")
         return p.read_text(encoding="utf-8")
 
-    # --- message store (AgentLoop-facing) ---
+    # --- 消息存储(面向 AgentLoop) ---
 
     def get_messages(self, session_id: str) -> list[dict]:
-        """Return OpenAI-native messages for the ReAct loop. Cache hit returns
-        immediately; cache miss cold-hydrates from history.json."""
+        """返回 OpenAI 原生 messages 供 ReAct 循环用。Cache 命中
+        立即返回;cache miss 从 history.json 冷加载。"""
         cached = self._cache.get(session_id)
         if cached is not None:
             return list(cached)
@@ -222,20 +221,19 @@ class SessionStore:
         request_id: str | None = None,
         event_type: str | None = None,
     ) -> None:
-        """Append a message: update the in-memory cache, append a history.json
-        record, and update metadata (count, last_message_at, auto-title on the
-        first user message)."""
+        """追加一条 message:更新内存 cache,追加一条 history.json
+        record,并更新 metadata(count、last_message_at、首条用户消息时自动 title)。"""
         async with self._lock:
-            # ensure the session exists on disk (implicit create)
+            # 确保 session 在磁盘上存在(隐式创建)
             sdir = self._session_dir(session_id)
             if not sdir.is_dir():
                 await self._create_session_locked(session_id)
-            # cache the OpenAI-native message so a hot ReAct turn feeds the
-            # model exactly what a cold restart would reconstruct — reasoning
-            # and any other non-OpenAI fields are dropped here (thinking is
-            # regenerated each turn, never replayed back into the prompt).
+            # 缓存 OpenAI 原生 message,使热的 ReAct turn 喂给
+            # 模型的与冷重启重建的完全一致 —— reasoning 等
+            # 非 OpenAI 字段在此丢弃(thinking 每轮重新生成,
+            # 绝不回放进 prompt)。
             self._cache.setdefault(session_id, []).append(self._record_to_openai(message))
-            # history record (preserve full OpenAI fields for cold reconstruction)
+            # history record(保留完整 OpenAI 字段供冷重建)
             role = message.get("role")
             record = {
                 "id": f"{request_id or 'none'}:{role}",
@@ -252,7 +250,7 @@ class SessionStore:
             }
             with self._history_path(session_id).open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-            # metadata update
+            # 更新 metadata
             self._update_metadata(session_id, role, message.get("content"))
 
     def _update_metadata(self, session_id: str, role: str | None, content: Any) -> None:
@@ -266,10 +264,10 @@ class SessionStore:
                 "created_at": now, "last_message_at": now,
                 "message_count": 0, "channel_id": "web",
             }
-        # system-role messages are the injected base prompt — not a
-        # user-visible conversation turn — so they don't count toward
-        # message_count (the frontend filters `system` out in fromHistory;
-        # counting it inflated the displayed count by one per session, #5).
+        # system-role 消息是注入的 base prompt —— 不是
+        # 用户可见的对话 turn —— 所以不计入
+        # message_count(前端在 fromHistory 中过滤掉 `system`;
+        # 计入会使每个 session 显示的计数虚高一,#5)。
         if role != "system":
             meta["message_count"] = int(meta.get("message_count", 0)) + 1
         meta["last_message_at"] = time.time()
@@ -279,8 +277,8 @@ class SessionStore:
 
     @staticmethod
     def _record_to_openai(record: dict) -> dict:
-        """Reconstruct an OpenAI-native message from a history record, dropping
-        None-valued optional fields."""
+        """从 history record 重建 OpenAI 原生 message,丢弃
+        值为 None 的可选字段。"""
         msg: dict[str, Any] = {}
         for k in _OPENAI_FIELDS:
             v = record.get(k)

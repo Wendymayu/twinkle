@@ -14,7 +14,7 @@ from twinkle.agentserver.llm_client import Finish, TextDelta
 
 
 class FakeLLM:
-    """Minimal stub: yields the configured summary text as TextDelta, then a Finish."""
+    """最小 stub：产出配置的摘要文本作为 TextDelta，再产出 Finish。"""
 
     def __init__(self, summary_text: str = "summary"):
         self.summary_text = summary_text
@@ -176,7 +176,7 @@ def test_e2e_100_turns_token_down_facts_preserved():
 
 
 class _RaisingLLM:
-    """Stub whose stream() raises — simulates a transient summary LLM outage."""
+    """stream() 抛异常的 stub —— 模拟摘要 LLM 短暂不可用。"""
 
     async def stream(self, messages, tools):
         raise RuntimeError("summary outage")
@@ -189,7 +189,7 @@ def test_compress_degrades_when_summary_fails():
     out = asyncio.run(compress_messages(
         msgs, _RaisingLLM(), token_threshold=10, keep_recent_pairs=3,
         summary_system_prompt="p"))
-    # degraded: head + tail, no summary message, did not raise
+    # 降级：head + tail，无 summary 消息，未抛异常
     assert out[0]["role"] == "system"
     assert not any("[prior context summary]" in m.get("content", "") for m in out)
     assert estimate_tokens(out) < estimate_tokens(msgs)  # still shrunk (middle dropped)
@@ -202,7 +202,7 @@ def test_should_compress_false_under_threshold():
 
 
 def test_should_compress_false_when_tail_eats_all_middle():
-    # tail_count (12) >= len(rest) (1) -> no middle even though over threshold
+    # tail_count (12) >= len(rest) (1) -> 虽超阈值但无 middle
     msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     assert should_compress(msgs, token_threshold=1, keep_recent_pairs=6) is False
 

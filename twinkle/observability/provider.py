@@ -1,9 +1,9 @@
-"""init_providers — build TracerProvider + MeterProvider; OTLP gRPC/console/none.
+"""init_providers —— 构建 TracerProvider + MeterProvider；OTLP gRPC/console/none。
 
-Returns (tracer, meter); also sets global providers so that:
-1. BatchSpanProcessor gets flushed on shutdown
-2. Third-party OTel instrumentation (e.g. grpc/aiohttp) picks up the same provider
-Fail-soft: any error -> log + that signal disabled.
+返回 (tracer, meter)；同时设置全局 provider，使得：
+1. BatchSpanProcessor 在 shutdown 时被 flush
+2. 第三方 OTel instrumentation（如 grpc/aiohttp）拾取同一 provider
+Fail-soft：任何错误 -> 记日志 + 禁用该信号。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ log = logging.getLogger("twinkle.observability.provider")
 
 
 def _is_insecure(endpoint: str) -> bool:
-    # http:// -> plaintext gRPC (insecure=True); https:// -> TLS.
+    # http:// -> 明文 gRPC（insecure=True）；https:// -> TLS。
     return endpoint.lower().startswith("http://")
 
 
@@ -50,11 +50,11 @@ def _init_tracer(cfg, resource):
                 )
             )
 
-        # Set global provider so BatchSpanProcessor flushes on shutdown
+        # 设置全局 provider，使 BatchSpanProcessor 在 shutdown 时 flush
         from opentelemetry import trace
         trace.set_tracer_provider(tp)
 
-        # Register atexit to flush pending spans
+        # 注册 atexit 以 flush 待发 span
         def _shutdown_tracer():
             try:
                 tp.shutdown()
@@ -97,11 +97,11 @@ def _init_meter(cfg, resource):
             )
         mp = MeterProvider(metric_readers=readers, resource=resource)
 
-        # Set global provider so PeriodicExportingMetricReader flushes on shutdown
+        # 设置全局 provider，使 PeriodicExportingMetricReader 在 shutdown 时 flush
         from opentelemetry import metrics
         metrics.set_meter_provider(mp)
 
-        # Register atexit to flush pending metrics
+        # 注册 atexit 以 flush 待发 metric
         def _shutdown_meter():
             try:
                 mp.shutdown()

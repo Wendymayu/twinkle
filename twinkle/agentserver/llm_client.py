@@ -1,12 +1,12 @@
-"""LLMClient — thin wrapper over the openai SDK streaming chat completions.
+"""LLMClient — openai SDK 流式 chat completions 的薄封装。
 
-Emits two event types:
-  - TextDelta(content) for each streamed text fragment
-  - Finish(finish_reason, assistant_message) once, at stream end
+产出两种事件：
+  - TextDelta(content)：每个流式文本片段
+  - Finish(finish_reason, assistant_message)：流结束时发一次
 
-Tool-call fragments arrive split across chunks (indexed); we accumulate
-them into a single assistant_message so the agent loop can append it to
-the session store and feed tool results back in the next turn.
+Tool-call 片段跨 chunk 分片到达(按 index)；我们将其累积成单个
+assistant_message，使 agent loop 能把它追加到 session store 并在下一轮
+回喂 tool 结果。
 """
 from __future__ import annotations
 
@@ -30,14 +30,14 @@ class Finish:
 
 
 def _delta_reasoning(delta: Any) -> str | None:
-    """Pull a provider thinking fragment off a streaming ``ChoiceDelta``.
+    """从流式 ``ChoiceDelta`` 上取下 provider 的思考片段。
 
-    The field is provider-specific and lives outside the OpenAI spec, so we
-    probe several known names plus the pydantic ``model_extra`` bag (where the
-    SDK stashes unknown fields when ``extra='allow'``):
+    该字段是 provider 特有的、位于 OpenAI spec 之外，因此我们探测多个已知
+    名称外加 pydantic ``model_extra`` 包(SDK 在 ``extra='allow'`` 时藏匿未知
+    字段的地方)：
       - DeepSeek / Qwen / GLM thinking models → ``reasoning_content``
       - OpenAI o-series → ``reasoning``
-    Returns the first non-empty fragment found, else None.
+    返回找到的第一个非空片段，否则返回 None。
     """
     for attr in ("reasoning_content", "reasoning"):
         val = getattr(delta, attr, None)
@@ -61,10 +61,10 @@ class LLMClient:
         timeout: float | None = None,
     ) -> None:
         self._model = model
-        # timeout -> AsyncOpenAI httpx read timeout: per-chunk idle — a model
-        # that stops sending chunks for N seconds raises APITimeoutError
-        # (transient -> retried by RetryHook); steady streams (chunks < N apart)
-        # never time out, so long answers are safe. None = SDK default.
+        # timeout -> AsyncOpenAI httpx read timeout：每 chunk 之间的空闲——某模型
+        # 若 N 秒不发 chunk 则抛 APITimeoutError
+        # (transient -> RetryHook 重试)；稳定流(chunk 间隔 < N)不会超时，
+        # 故长回答安全。None = SDK 默认。
         self._client = AsyncOpenAI(
             base_url=base_url, api_key=api_key, timeout=timeout
         )
@@ -85,22 +85,22 @@ class LLMClient:
         stream = await self._client.chat.completions.create(**kwargs)
 
         text_parts: list[str] = []
-        reasoning_parts: list[str] = []  # provider thinking (reasoning_content/reasoning)
+        reasoning_parts: list[str] = []  # provider 思考(reasoning_content/reasoning)
         tool_call_accumulator: dict[int, dict] = {}  # index -> {id, name, arguments}
         finish_reason = "stop"
 
         usage: dict | None = None
         async for chunk in stream:
-            # Capture token usage if the provider emits it (OpenAI with
-            # stream_options.include_usage, or dashscope) — some providers
-            # attach usage to the last content chunk, others to a trailing
-            # usage-only chunk with empty choices. Last non-null wins.
+            # 捕获 token usage——当 provider 下发时(OpenAI 带
+            # stream_options.include_usage,或 dashscope)：有些 provider 把 usage
+            # 挂在最后一个 content chunk 上,另一些挂在一个 choices 为空的
+            # 尾部 usage-only chunk 上。最后一个非空值胜出。
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage:
                 usage = chunk_usage
-            # OpenAI-compatible streams (dashscope, openai with
-            # stream_options.include_usage) end with a usage-only chunk whose
-            # ``choices`` list is empty. Skip it — there is no delta to consume.
+            # OpenAI 兼容流(dashscope、带 stream_options.include_usage 的 openai)
+            # 以一个 ``choices`` 列表为空的 usage-only chunk 结尾。跳过它——
+            # 此 chunk 无 delta 可消费。
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -108,10 +108,9 @@ class LLMClient:
             if getattr(delta, "content", None):
                 text_parts.append(delta.content)
                 yield TextDelta(delta.content)
-            # Provider thinking fragments — accumulated separately from the
-            # answer so chain-of-thought never pollutes the ReAct message
-            # stream. Surfaced on Finish for persistence (display/evolution)
-            # but NOT fed back to the model next turn (see SessionStore).
+            # Provider 思考片段——与回答分开累积,使 chain-of-thought 不污染
+            # ReAct message stream。在 Finish 上暴露以便持久化(display/evolution),
+            # 但不在下一轮回喂给 model(见 SessionStore)。
             reasoning_chunk = _delta_reasoning(delta)
             if reasoning_chunk:
                 reasoning_parts.append(reasoning_chunk)

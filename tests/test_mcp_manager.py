@@ -64,7 +64,7 @@ def test_startup_skips_failed_server_does_not_block() -> None:
     ok = _FakeClient("ok", tools=[("ping", "d", {})])
     bad = _FakeClient("bad", connect_exc=ConnectionError("down"))
     mgr = McpManager(_cfg([srv_ok, srv_bad]), client_factory=_factory([ok, bad]))
-    asyncio.run(mgr.startup())  # no raise
+    asyncio.run(mgr.startup())  # 不抛
     assert ok.connected
     assert not bad.connected
     assert "ok.ping" in [t.card.name for t in mgr._tools.values()]
@@ -86,7 +86,7 @@ def test_register_into_injects_tools() -> None:
 def test_register_into_noop_when_not_started() -> None:
     mgr = McpManager(_cfg([]), client_factory=_factory([]))
     tm = ToolManager()
-    mgr.register_into(tm)  # no raise, no tools
+    mgr.register_into(tm)  # 不抛,无工具
     assert tm.list() == []
 
 

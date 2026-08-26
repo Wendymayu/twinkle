@@ -1,7 +1,7 @@
-"""Tests for team task/message tools (Phase 19 Task 5).
+"""team task/message 工具的测试(Phase 19 Task 5)。
 
-Each tool is a thin wrapper: reads CURRENT_TEAM → calls team method → formats.
-These tests exercise the happy path against a real Team + isolated todo store.
+每个工具都是薄封装:读取 CURRENT_TEAM → 调用 team 方法 → 格式化输出。
+这些测试用真实 Team + 隔离的 todo store 走 happy path。
 """
 
 import asyncio

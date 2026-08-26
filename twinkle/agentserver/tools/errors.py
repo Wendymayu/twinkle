@@ -1,17 +1,15 @@
-"""Tool failure primitives — the single chokepoint for tool-error content.
+"""Tool 失败原语 —— tool-error content 的唯一收口。
 
-Aligned with openclaw's contract: "Throw on failure instead of encoding
-errors in `content`." Tools raise ToolError on failure, return str on success.
-The agent loop's catch points call format_tool_error to render one unified
-``[tool error]`` prefix (reusing TOOL_ERROR_PREFIX so producer and the
-observability consumer cannot drift).
+对齐 openclaw 的契约:"失败时抛异常,而非把错误编码进 `content`。"
+tool 失败时抛 ToolError,成功时返回 str。agent loop 的 catch 点调用
+format_tool_error 渲染统一的 ``[tool error]`` 前缀(复用 TOOL_ERROR_PREFIX,
+使生产方与可观测消费方不会漂移)。
 
-Why no numeric StatusCode (jiuwenswarm ~250-entry enum) and no
-ToolResult{content,details} (openclaw) or ToolOutput{success,data,error}
-(jiuwenswarm): Twinkle is a slim learning reimplementation on OpenAI
-function-calling wire (content is a plain string, no isError field) with no
-partial-output soft-error case. A prefix + kind field is the minimum that
-solves the problem.
+为何不用数值 StatusCode(jiuwenswarm ~250 项 enum)也不用
+ToolResult{content,details}(openclaw)或 ToolOutput{success,data,error}
+(jiuwenswarm):Twinkle 是基于 OpenAI function-calling wire 的精简学习
+重实现(content 是纯字符串,无 isError 字段),也没有 partial-output
+软错误场景。一个前缀 + kind 字段是解决问题的最小方案。
 """
 from __future__ import annotations
 
@@ -19,13 +17,12 @@ from twinkle.observability.attributes import TOOL_ERROR_PREFIX
 
 
 class ToolError(Exception):
-    """Raise inside a tool on failure. Never encode errors into return content.
+    """在 tool 内部失败时抛出。绝不把错误编码进返回 content。
 
-    ``kind`` stays on the exception object for future consumers (RetryHook
-    retry-by-kind; a session-store is_error metadata B-plan) and is NOT
-    rendered into content by format_tool_error. No current consumer — the
-    existing instrumentor keys off TOOL_ERROR_PREFIX on content, not kind.
-    Kept as the zero-cost hand-off point (YAGNI border).
+    ``kind`` 留在异常对象上供未来消费方使用(RetryHook 按 kind 重试;
+    session-store 的 is_error 元数据 B 计划),format_tool_error 不会把它
+    渲染进 content。当前无消费方 —— 现有 instrumentor 依据 content 上的
+    TOOL_ERROR_PREFIX 而非 kind。保留它作为零成本的交接点(YAGNI 边界)。
     """
 
     def __init__(self, message: str, *, kind: str = "failed") -> None:
@@ -34,14 +31,14 @@ class ToolError(Exception):
 
 
 def format_tool_error(source: str | BaseException) -> str:
-    """Render any tool failure into the unified ``[tool error] ...`` content.
+    """把任意 tool 失败渲染成统一的 ``[tool error] ...`` content。
 
-    - ToolError        -> ``[tool error] {message}``        (kind not rendered)
-    - other Exception  -> ``[tool error] {ExcType}: {msg}`` (keep type name for debugging)
-    - str              -> ``[tool error] {str}``            (denied etc. built directly in the loop)
+    - ToolError        -> ``[tool error] {message}``        (不渲染 kind)
+    - 其他 Exception  -> ``[tool error] {ExcType}: {msg}`` (保留类型名便于调试)
+    - str              -> ``[tool error] {str}``            (denied 等直接在 loop 里构造)
 
-    The prefix reuses TOOL_ERROR_PREFIX so the producer cannot drift from the
-    observability consumer (instrumentors/tool.py startswith check).
+    前缀复用 TOOL_ERROR_PREFIX,使生产方不会与可观测消费方
+    (instrumentors/tool.py 的 startswith 检查)漂移。
     """
     if isinstance(source, ToolError):
         return f"{TOOL_ERROR_PREFIX} {source}"

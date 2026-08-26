@@ -14,7 +14,7 @@ def _fake_completed(stdout: str = "", stderr: str = "", code: int = 0):
     )
 
 
-# --- safety + workdir guards ---
+# --- 安全与 workdir 守卫 ---
 
 def test_rejects_empty_command() -> None:
     with pytest.raises(ToolError, match="command cannot be empty"):
@@ -31,7 +31,7 @@ def test_rejects_workdir_escape() -> None:
         asyncio.run(command_exec.command_exec.invoke({"command": "echo hi", "workdir": "../../"}))
 
 
-# --- foreground / background execution (mocked subprocess seam) ---
+# --- 前台/后台执行(用 mock 打掉 subprocess 接缝) ---
 
 def test_runs_command_and_returns_json(monkeypatch) -> None:
     captured = {}
@@ -89,7 +89,7 @@ def test_background_failure_returns_error(monkeypatch) -> None:
         asyncio.run(command_exec.command_exec.invoke({"command": "badcmd", "background": True}))
 
 
-# --- cross-platform shell selection (no real execution needed) ---
+# --- 跨平台 shell 选择(不需要真实执行) ---
 
 def test_windows_uses_powershell(monkeypatch) -> None:
     monkeypatch.setattr(command_exec.os, "name", "nt")
@@ -112,7 +112,7 @@ def test_unix_prefers_bash(monkeypatch) -> None:
 
 def test_unix_falls_back_to_sh(monkeypatch) -> None:
     monkeypatch.setattr(command_exec.os, "name", "posix")
-    # No bash, no sh on PATH -> falls back to /bin/sh.
+    # PATH 上没有 bash 也没有 sh → 回退到 /bin/sh.
     monkeypatch.setattr(command_exec.shutil, "which", lambda name: None)
     plan, shell = command_exec._resolve_execution_plan("uname -a")
     assert shell == "sh"

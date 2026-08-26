@@ -9,7 +9,7 @@ from twinkle.agentserver.tools.errors import ToolError
 
 
 class _FakeResp:
-    """Minimal httpx-shaped response for tests."""
+    """用于测试的最小 httpx 形态 response。"""
 
     def __init__(self, *, text: str = "", status_code: int = 200, json_data=None):
         self.text = text
@@ -51,14 +51,14 @@ _TAVILY_JSON = {
 
 
 def _install_fake_http(monkeypatch, responder):
-    """Route every _http_request call through `responder(method, url, **kw)`."""
+    """将每个 _http_request 调用都经 `responder(method, url, **kw)` 路由。"""
     async def fake_request(method, url, *, headers=None, params=None,
                            data=None, json=None, timeout=30.0):
         return responder(method, url, headers=headers, params=params,
                          data=data, json=json, timeout=timeout)
 
     monkeypatch.setattr(web_search, "_http_request", fake_request)
-    # no real sleeps in tests
+    # 测试中不做真实 sleep
     monkeypatch.setattr(web_search, "_RETRY_DELAY", 0.0)
 
 
@@ -72,7 +72,7 @@ def test_ddg_returns_results_with_url_and_snippet(monkeypatch) -> None:
     assert "First Result" in out
     assert "https://example.com/1" in out
     assert "https://example.com/2" in out
-    assert "First snippet text" in out  # snippet now surfaced
+    assert "First snippet text" in out  # snippet 现已露出
 
 
 def test_ddg_respects_max_results(monkeypatch) -> None:
@@ -88,8 +88,8 @@ def test_ddg_respects_max_results(monkeypatch) -> None:
 
 
 def test_no_key_ddg_challenge_returns_honest_error_not_no_results(monkeypatch) -> None:
-    """Real-evidence scenario from issue #9 trace: DDG serves a 202 anti-bot
-    challenge page; tool must NOT silently return '(no results)'."""
+    """issue #9 trace 的真实证据场景：DDG 下发 202 反爬 challenge 页；
+    工具不得静默返回 '(no results)'。"""
     _install_fake_http(
         monkeypatch,
         lambda *a, **k: _FakeResp(text=_DDG_CHALLENGE_HTML, status_code=202),
@@ -120,7 +120,7 @@ def test_tavily_primary_when_key_set(monkeypatch) -> None:
     )
     assert "Tavily One" in out
     assert "tav.example.com/1" in out
-    # DDG must not be queried when Tavily succeeds
+    # Tavily 成功时不得查询 DDG
     assert not any("duckduckgo" in (c[1] or "") for c in calls)
 
 

@@ -102,7 +102,7 @@ class EvolutionStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         log_data = {"entries": [_dataclass_to_dict(r) for r in entries]}
         json_text = json.dumps(log_data, ensure_ascii=False, indent=2)
-        # 原子写：temp file + rename
+        # 原子写：临时文件 + rename
         import tempfile
         temp_file = tempfile.NamedTemporaryFile(
             mode="w", dir=str(path.parent), delete=False,

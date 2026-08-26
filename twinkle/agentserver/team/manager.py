@@ -1,9 +1,9 @@
-"""TeamManager + Team — session-scoped team lifecycle + member delegation.
+"""TeamManager + Team — session 级 team 生命周期 + member 委派。
 
-Phase 18 alignment with jiuwenswarm:
-- TeamManager: global registry, session_id → Team (cf. TeamManager._team_agents)
-- Team: per-session, manages member ReActAgents (cf. TeamAgent + build_agent_customizer)
-- MEMBER_TOOL_WHITELIST: hardcoded frozenset, all members share (cf. TOOL_WHITELIST)
+Phase 18 对齐 jiuwenswarm：
+- TeamManager：全局注册表，session_id → Team（对照 TeamManager._team_agents）
+- Team：每 session 一个，管理 member ReActAgent（对照 TeamAgent + build_agent_customizer）
+- MEMBER_TOOL_WHITELIST：硬编码 frozenset，所有 member 共享（对照 TOOL_WHITELIST）
 """
 
 from __future__ import annotations
@@ -34,12 +34,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("twinkle.team")
 
-# ── Tool whitelist ────────────────────────────────────────────
-# Aligns with jiuwenswarm TOOL_WHITELIST (team_runtime_inheritance.py).
-# All members share the same set; differences come from persona, not tools.
-# Excludes: write_memory, edit_memory (read-only memory), spawn_subagent
-# (no recursive sub-spawning), delegate_to_member (no recursive delegation),
-# execute_workflow.
+# ── Tool 白名单 ────────────────────────────────────────────
+# 对齐 jiuwenswarm TOOL_WHITELIST（team_runtime_inheritance.py）。
+# 所有 member 共享同一集合；差异来自 persona 而非 tool。
+# 排除：write_memory、edit_memory（只读 memory）、spawn_subagent
+# （不允许递归子派生）、delegate_to_member（不允许递归委派）、
+# execute_workflow。
 
 MEMBER_TOOL_WHITELIST: frozenset[str] = frozenset({
     "web_search", "web_fetch",
@@ -55,11 +55,10 @@ MEMBER_TOOL_WHITELIST: frozenset[str] = frozenset({
 
 
 class Team:
-    """Per-session team instance — manages member ReActAgents and delegation.
+    """每 session 的 team 实例 — 管理 member ReActAgent 和委派。
 
-    Aligns with jiuwenswarm TeamAgent: holds members, handles delegation,
-    maintains shared workspace. Phase 18 omits: task queue, event bus,
-    member state machine, Monitor events, SQLite shared state.
+    对齐 jiuwenswarm TeamAgent：持有 member、处理委派、维护共享 workspace。
+    Phase 18 省略：task queue、event bus、member 状态机、Monitor 事件、SQLite 共享状态。
     """
 
     def __init__(
@@ -91,7 +90,7 @@ class Team:
     def _member_session_id(self, member_name: str) -> str:
         return f"{self._session_id}__team_{member_name}"
 
-    # ── member lifecycle ────────────────────────────────────
+    # ── member 生命周期 ────────────────────────────────────
 
     async def _ensure_member(self, member_name: str, persona: str) -> "ReActAgent":
         if member_name in self._members:
@@ -106,28 +105,28 @@ class Team:
         return member
 
     async def _build_member(self, member_name: str, persona: str) -> "ReActAgent":
-        """Build a ReActAgent customized for the given persona.
+        """为给定 persona 构建定制化的 ReActAgent。
 
-        Equivalent to jiuwenswarm build_agent_customizer():
-        filtered tools, structured team prompt (role → persona → workspace),
-        shared workspace.
+        等价于 jiuwenswarm build_agent_customizer()：
+        过滤后的 tool、结构化 team prompt（role → persona → workspace）、
+        共享 workspace。
         """
         from twinkle.agentserver.agent import ReActAgent, member_base_sections
 
-        # 1. ToolManager filtered by MEMBER_TOOL_WHITELIST
+        # 1. 按 MEMBER_TOOL_WHITELIST 过滤的 ToolManager
         tm = ToolManager()
         for t in self._parent_tools.list():
             if t.card.name in MEMBER_TOOL_WHITELIST:
                 tm.register(t)
 
-        # 2. Member identity (persona → workspace → base prompt) baked into base_sections,
-        #    injected at construction; loop rebuilds it each step. Session no longer stores a system msg.
+        # 2. Member 身份（persona → workspace → base prompt）焙进 base_sections，
+        #    构造时注入；loop 每步重建它。session 不再存储 system msg。
         member_sid = self._member_session_id(member_name)
         await self._store.create_session(member_sid)
 
-        # 3. Build ReActAgent — inbox wired via constructor so send_member
-        #    (writes to self._inboxes[member_name]) and the run-loop drain
-        #    (reads agent._inbox) see the same MessageBox.
+        # 3. 构建 ReActAgent — inbox 经构造器接入，使 send_member
+        #    （写入 self._inboxes[member_name]）和 run 循环 drain
+        #    （读 agent._inbox）看到同一个 MessageBox。
         if member_name not in self._inboxes:
             self._inboxes[member_name] = MessageBox()
         inbox = self._inboxes[member_name]
@@ -142,11 +141,11 @@ class Team:
                 persona=persona, workspace=str(self.workspace), member_name=member_name),
         )
 
-    # ── delegation ──────────────────────────────────────────
+    # ── 委派 ──────────────────────────────────────────
 
     async def delegate(self, member_name: str, persona: str,
                        objective: str, prompt: str = "") -> str:
-        """Delegate to a member by name; builds+starts if first time. Run to convergence."""
+        """按名字委派给 member；首次则构建+启动。运行到收敛。"""
         member = await self._ensure_member(member_name, persona)
         member_sid = self._member_session_id(member_name)
         query = f"{objective}\n\n{prompt}" if prompt else objective
@@ -172,10 +171,10 @@ class Team:
     async def _drive_member(self, member: "ReActAgent",
                             request: "AgentRequest",
                             member_name: str = "") -> str:
-        """Run member agent to convergence; return final content.
+        """运行 member agent 到收敛；返回最终内容。
 
-        Same pattern as SubagentExecutor._drive_child: child task for
-        ContextVar isolation, queue drain, soft/hard timeouts, truncation.
+        同 SubagentExecutor._drive_child 的模式：用 child task 做
+        ContextVar 隔离、queue drain、soft/hard 超时、截断。
         """
         queue: asyncio.Queue = asyncio.Queue()
 
@@ -237,10 +236,10 @@ class Team:
 
 
 class TeamManager:
-    """Global singleton registry: session_id → Team.
+    """全局单例注册表：session_id → Team。
 
-    Aligns with jiuwenswarm TeamManager._team_agents: dict[session_id, TeamAgent].
-    Phase 18 omits: monitors, stream tasks, evolution rails, distributed runtime.
+    对齐 jiuwenswarm TeamManager._team_agents：dict[session_id, TeamAgent]。
+    Phase 18 省略：monitor、stream task、evolution rail、分布式 runtime。
     """
 
     def __init__(
@@ -257,7 +256,7 @@ class TeamManager:
         self._teams: dict[str, Team] = {}
 
     def ensure_team(self, session_id: str) -> Team:
-        """Get or create the Team instance for a session."""
+        """获取或创建某 session 的 Team 实例。"""
         if session_id not in self._teams:
             self._teams[session_id] = Team(
                 llm=self._llm,
@@ -270,7 +269,7 @@ class TeamManager:
         return self._teams[session_id]
 
     def destroy_team(self, session_id: str) -> None:
-        """Destroy a session's Team instance and release resources."""
+        """销毁某 session 的 Team 实例并释放资源。"""
         team = self._teams.pop(session_id, None)
         if team is not None:
             team.cleanup()

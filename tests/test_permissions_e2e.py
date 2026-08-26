@@ -1,7 +1,6 @@
 # tests/test_permissions_e2e.py
-"""End-to-end: chat.send -> ASK -> approval.respond -> complete, through the
-real ws_handler + gateway MessageHandler + AgentClient, on a free port.
-Uses a scripted LLM (no real API calls) + a registered echo tool (require-approval)."""
+"""端到端：chat.send -> ASK -> approval.respond -> complete，经真实 ws_handler + gateway MessageHandler + AgentClient，在 free port 上跑。
+使用脚本化 LLM（无真实 API 调用）+ 注册的 echo tool（require-approval）。"""
 import asyncio
 
 from websockets.asyncio.server import serve
@@ -29,9 +28,9 @@ def test_full_approval_flow_through_gateway_and_agentserver(free_port, tmp_path,
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", str(tmp_path))
     import importlib, twinkle.config as cfg
     importlib.reload(cfg)
-    # Enable permissions + register the echo tool tier via the config constants
-    # that permission_engine() reads fresh at call time (mirrors test_file_tools
-    # monkeypatching WORKSPACE_DIR). TWINKLE_PERMISSIONS env was removed in v1.
+    # 通过 config 常量启用权限并注册 echo tool 的档位——permission_engine() 在
+    # 调用时实时读取这些常量（对齐 test_file_tools 里 monkeypatch WORKSPACE_DIR 的
+    # 做法）。TWINKLE_PERMISSIONS 环境变量在 v1 已移除。
     monkeypatch.setattr(cfg, "PERMISSIONS_ENABLED", True)
     monkeypatch.setattr(cfg, "PERMISSIONS_TOOLS",
                         {**cfg.PERMISSIONS_TOOLS, "echo": "require-approval"})
@@ -54,7 +53,7 @@ def test_full_approval_flow_through_gateway_and_agentserver(free_port, tmp_path,
     from twinkle.agentserver.hooks.builtin import PermissionHook
     engine = permission_engine()
     loop = create_agent(store, hooks=[PermissionHook(engine)], llm=scripted)
-    loop._tool_manager.register(echo)  # echo isn't in the default tool_manager(); register it so execute("echo") works
+    loop._tool_manager.register(echo)  # echo 不在默认 tool_manager() 中；在此注册以便 execute("echo") 可用
 
     async def scenario():
         handler = ws_handler(loop)
@@ -63,28 +62,28 @@ def test_full_approval_flow_through_gateway_and_agentserver(free_port, tmp_path,
             ac = AgentClient(f"ws://127.0.0.1:{free_port}")
             await ac.connect()
             mh = MessageHandler(ac)
-            # 1. inbound chat.send (R)
+            # 1. 入站 chat.send (R)
             msg = Message(id="R", type="req", channel_id="web", session_id="s1",
                           method="chat.send", params={"query": "call echo"})
             await mh.handle_message(msg)
-            # 2. drain the approval.ask event (run_stream suspends right after yielding it, so only 1 event is queued)
+            # 2. 取出 approval.ask event（run_stream 在 yield 它之后立即挂起，所以只入队 1 个 event）
             ask = await asyncio.wait_for(mh.dequeue_outbound(), timeout=10)
             assert ask.event_type is not None and ask.event_type.value == "approval.ask"
             aid = ask.payload["approval_id"]
-            # 3. respond (R2)
+            # 3. 响应 (R2)
             respond = Message(id="R2", type="req", channel_id="web", session_id="s1",
                               method="approval.respond",
                               params={"approval_id": aid, "decision": "allow",
                                       "original_request_id": "R"})
             await mh.handle_message(respond)
-            # 4. drain the ack (result, R2) + the resumed chat.final (R)
+            # 4. 取出 ack（result，R2）+ 恢复后的 chat.final (R)
             remaining = []
             for _ in range(2):
                 remaining.append(await asyncio.wait_for(mh.dequeue_outbound(), timeout=10))
             kinds = [ask.event_type.value] + [e.event_type.value for e in remaining]
             assert "approval.ask" in kinds
-            assert "result" in kinds        # ack for approval.respond
-            assert "chat.final" in kinds   # resumed completion
+            assert "result" in kinds        # approval.respond 的 ack
+            assert "chat.final" in kinds   # 恢复后的完成
             await ac.close()
         finally:
             srv.close()

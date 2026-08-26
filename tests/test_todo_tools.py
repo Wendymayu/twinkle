@@ -50,9 +50,9 @@ def test_create_sequential() -> None:
 def test_update_marks_completed() -> None:
     _set_session_id("tools-2")
     tasks = asyncio.run(todo_create.invoke({"subjects": ["x", "y"]}))
-    # Extract a task id from the store
+    # 调用 todo_list 列出任务(markdown 输出,此变量后续未使用)
     store = asyncio.run(todo_list.invoke({}))
-    # Get the actual task id via the store
+    # store 是 markdown 文本(无 id),改从 todo store 取真实 task id
     from twinkle.agentserver.todo import get_todo_store
     all_tasks = asyncio.run(get_todo_store().list("tools-2"))
     task_id = all_tasks[0].id

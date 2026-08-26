@@ -1,4 +1,4 @@
-"""Metrics — fail-soft wrappers over OTel counters/histograms."""
+"""Metrics —— OTel counters/histograms 的 fail-soft 包装。"""
 from __future__ import annotations
 
 import logging
@@ -13,8 +13,8 @@ class Metrics:
     def __init__(self, meter) -> None:
         self._meter = meter
         if meter is None:
-            # No meter (metrics disabled) -> all instruments no-op silently;
-            # avoids noisy tracebacks when traces are on but metrics are off.
+            # 无 meter（metrics 关）-> 所有 instrument 静默 no-op；
+            # 避免 traces 开而 metrics 关时刷屏 traceback。
             self._token_usage = self._tool_count = None
             self._llm_duration = self._tool_duration = self._agent_duration = None
             return
@@ -43,8 +43,8 @@ class Metrics:
             return
         try:
             attrs = {A.GEN_AI_REQUEST_MODEL: model or "unknown"}
-            # usage may be a dict (fakes/tests) or a pydantic object (real
-            # openai SDK CompletionUsage); read_usage_token handles both.
+            # usage 可能是 dict（fakes/tests）或 pydantic 对象（真实
+            # openai SDK CompletionUsage）；read_usage_token 兼顾两者。
             inp = read_usage_token(usage, "prompt_tokens", "input_tokens")
             out = read_usage_token(usage, "completion_tokens", "output_tokens")
             tot = read_usage_token(usage, "total_tokens")

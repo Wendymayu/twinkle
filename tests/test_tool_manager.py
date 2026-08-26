@@ -50,10 +50,10 @@ def test_execute_passes_kwargs() -> None:
 
 
 def test_execute_propagates_tool_exception() -> None:
-    """ToolManager.execute lets tool exceptions propagate — the caller
-    (AgentLoop._hooked_tool_call) turns them into a tool_result string and
-    RetryHook can retry transient ones. Swallowing was moved out of execute so
-    ON_TOOL_EXCEPTION can actually fire (it was dead code when execute caught)."""
+    """ToolManager.execute 放行工具异常 —— 由调用方
+    （AgentLoop._hooked_tool_call）将其转为 tool_result 字符串，
+    RetryHook 可重试瞬时异常。吞异常逻辑已从 execute 移出，这样
+    ON_TOOL_EXCEPTION 才能真正触发（以前 execute 捕获时它是死代码）。"""
     async def _boom(x: str) -> str:
         raise ValueError("boom")
     m = ToolManager()
@@ -80,7 +80,7 @@ def test_list_returns_all_registered() -> None:
 
 def test_dynamic_register_visible_in_schemas_immediately() -> None:
     async def _later(n: int) -> str:
-        """later"""
+        """稍后"""
         return str(n)
     m = _make_manager()
     m.register(tool(_later))

@@ -157,15 +157,15 @@ def test_download_skill_missing_skill_md_raises(tmp_path):
 
 
 def test_download_skill_follows_redirect(tmp_path):
-    # SkillNet skill_url may point at a renamed/moved GitHub repo; the Contents
-    # API then 301-redirects to the new owner/repo. Without follow_redirects,
-    # _get raises "HTTP 301", download_skill fails, and the skill never lands
-    # in ~/.twinkle/skills (issue #15). Client MUST follow the redirect.
+    # SkillNet skill_url 可能指向已改名/迁移的 GitHub repo;Contents
+    # API 随即 301 重定向到新的 owner/repo。若不 follow_redirects,
+    # _get 抛 "HTTP 301",download_skill 失败,skill 永远落不进
+    # ~/.twinkle/skills(issue #15)。Client 必须跟随重定向。
     contents = {"skills/foo/SKILL.md": "---\nname: foo\ndescription: foo\n---\nbody"}
 
     def handler(request):
         u = str(request.url)
-        # renamed repo: old owner/repo -> 301 to new owner/repo
+        # 改名 repo:旧 owner/repo -> 301 到新 owner/repo
         if "/repos/old/oldrepo/contents/skills/foo?ref=main" in u:
             loc = "https://api.github.com/repos/new/newrepo/contents/skills/foo?ref=main"
             return httpx.Response(301, headers={"Location": loc})
@@ -190,7 +190,7 @@ def test_download_skill_follows_redirect(tmp_path):
 
 
 def test_search_remote_skills_follows_redirect():
-    # SkillNet API itself may 301 (host/path move); search must follow, not raise.
+    # SkillNet API 自身可能 301(host/path 迁移);search 必须跟随,不得抛错。
     calls = {"n": 0}
 
     def handler(request):

@@ -27,7 +27,7 @@ def test_resolve_twice_returns_false():
         reg = ApprovalRegistry()
         reg.register("a1")
         assert reg.resolve("a1", "allow") is True
-        assert reg.resolve("a1", "deny") is False  # already resolved
+        assert reg.resolve("a1", "deny") is False  # 已 resolve 过
     asyncio.run(go())
 
 
@@ -69,14 +69,14 @@ def test_handle_respond_missing_decision_sends_failed_ack_and_leaves_future_pend
     async def go():
         reg = ApprovalRegistry()
         fut = reg.register("a1")
-        # malformed: approval_id present but no decision
+        # 畸形:有 approval_id 但没有 decision
         env = E2AEnvelope(request_id="r2", method="approval.respond",
-                          params={"approval_id": "a1"})  # no "decision"
+                          params={"approval_id": "a1"})  # 无 "decision"
         sent = []
         await reg.handle_respond(env, lambda r: sent.append(r) or asyncio.sleep(0))
-        # must NOT have resolved the future (no set_result(None))
+        # future 必须尚未 resolve(没调 set_result(None))
         assert not fut.done()
-        # ack must be failed, not a lying "succeeded"
+        # ack 必须是 failed,不能撒谎成 "succeeded"
         assert sent[0].status == "failed" and sent[0].body["accepted"] is False
     asyncio.run(go())
 
@@ -84,9 +84,9 @@ def test_handle_respond_missing_decision_sends_failed_ack_and_leaves_future_pend
 def test_handle_respond_missing_approval_id_sends_failed_ack():
     async def go():
         reg = ApprovalRegistry()
-        # malformed: no approval_id at all
+        # 畸形:根本没有 approval_id
         env = E2AEnvelope(request_id="r2", method="approval.respond",
-                          params={"decision": "allow"})  # no "approval_id"
+                          params={"decision": "allow"})  # 无 "approval_id"
         sent = []
         await reg.handle_respond(env, lambda r: sent.append(r) or asyncio.sleep(0))
         assert sent[0].status == "failed" and sent[0].body["accepted"] is False

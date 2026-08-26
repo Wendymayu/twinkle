@@ -1,8 +1,8 @@
-"""Tests for RetryHook — transient-exception retry for model + tool calls.
+"""RetryHook 的测试 — 针对瞬时异常的 model + tool 调用重试。
 
-RetryHook implements both on_model_exception and on_tool_exception: it asks the
-loop to retry (once) only when the exception is transient AND this is the first
-attempt. Non-transient errors and second-attempt failures are left to propagate.
+RetryHook 同时实现 on_model_exception 和 on_tool_exception：仅当异常为瞬时
+且为第一次尝试时，才请求 loop 重试（一次）。非瞬时错误与第二次尝试的失败
+原样传播。
 """
 from __future__ import annotations
 
@@ -48,8 +48,8 @@ def test_is_transient_false_for_business_errors():
 
 
 def test_transient_set_includes_openai_transient_types():
-    # openai exception constructors need request/response objects — assert by
-    # type membership rather than constructing instances.
+    # openai 的异常构造器需要 request/response 对象——这里按类型
+    # 归属断言，而非构造实例。
     assert openai.APIConnectionError in TRANSIENT_EXCEPTIONS
     assert openai.APITimeoutError in TRANSIENT_EXCEPTIONS
     assert openai.RateLimitError in TRANSIENT_EXCEPTIONS

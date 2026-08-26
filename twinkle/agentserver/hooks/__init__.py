@@ -1,6 +1,6 @@
-"""Twinkle Hook mechanism — public API.
+"""Twinkle Hook 机制 — 公共 API。
 
-Mirrors jiuwen's Rail system with Hook naming.
+镜像 jiuwen 的 Rail 系统，采用 Hook 命名。
 """
 from twinkle.agentserver.hooks.base import (
     AgentHook,

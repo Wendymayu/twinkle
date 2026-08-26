@@ -13,8 +13,8 @@ def test_builder_uses_config(monkeypatch, tmp_path):
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", str(tmp_path))
     import importlib, twinkle.config as cfg
     importlib.reload(cfg)
-    # Enable via the config constant permission_engine() reads fresh at call
-    # time (TWINKLE_PERMISSIONS env was removed in v1; permissions are YAML-driven).
+    # 通过 config 常量启用——permission_engine() 在调用时实时读取（v1 已移除
+    # TWINKLE_PERMISSIONS 环境变量；权限由 YAML 驱动）。
     monkeypatch.setattr(cfg, "PERMISSIONS_ENABLED", True)
     from twinkle.agentserver.permissions import permission_engine
     e = permission_engine()

@@ -30,8 +30,8 @@ def test_e2a_ask_mapped_to_approval_ask_event():
                            method="chat.send", params={"query": "hi"})
 
     async def go():
-        # drive _process_stream directly — handle_message is fire-and-forget create_task,
-        # which asyncio.run cancels before it processes frames
+        # 直接驱动 _process_stream —— handle_message 是 fire-and-forget 的 create_task，
+        # asyncio.run 会在它处理 frame 前就把它取消
         await mh._process_stream(envelope, msg)
         out = []
         for _ in range(2):

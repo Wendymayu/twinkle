@@ -1,9 +1,9 @@
-"""Instrument ReActAgent.run -> twinkle.agent.invoke (root span).
+"""Instrument ReActAgent.run -> twinkle.agent.invoke（root span）。
 
-Opens the root span as current so child gen_ai.chat / gen_ai.tool spans
-(parent = current) attach under it. Stamps request_id/session_id onto the
-ContextVar so child spans can pick them up via _stamp_ctx. Counts LLM calls
-via _llm_call_counter to set twinkle.agent.iterations at span end.
+以 current 打开 root span，使 child gen_ai.chat / gen_ai.tool span
+（parent = current）挂在其下。把 request_id/session_id 盖到 ContextVar，
+使 child span 能经 _stamp_ctx 取到。经 _llm_call_counter 计 LLM 调用，
+以便在 span 结束时设 twinkle.agent.iterations。
 """
 from __future__ import annotations
 

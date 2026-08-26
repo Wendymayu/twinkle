@@ -44,7 +44,7 @@ class TodoStore:
         self._root.mkdir(parents=True, exist_ok=True)
         self._locks: dict[str, asyncio.Lock] = {}
 
-    # --- paths & locks ---
+    # --- 路径与锁 ---
 
     def _todo_path(self, session_id: str) -> Path:
         return self._root / f"{session_id}.json"
@@ -111,7 +111,7 @@ class TodoStore:
                 return t
         return None
 
-    # --- public API ---
+    # --- 公开 API ---
 
     async def create(
         self,
@@ -119,8 +119,8 @@ class TodoStore:
         subjects: list[str],
         sequential: bool = False,
     ) -> list[TodoTask]:
-        """Create tasks for the session. Raises TodoError if subjects is empty,
-        or if tasks already exist for this session (guard against clobbering)."""
+        """为 session 创建 task。subjects 为空、或该 session
+        已有 task 时抛 TodoError(防覆盖)。"""
         if not subjects:
             raise TodoError("subjects must be a non-empty list.")
         async with self._lock(session_id):
@@ -156,9 +156,8 @@ class TodoStore:
         owner: str | None = None,
         metadata: dict | None = None,
     ) -> tuple[TodoTask, str | None]:
-        """Update a task. Returns (task, warning) where warning is None on
-        success or a string when blocked_by dependencies are unresolved.
-        Raises TodoError if task_id not found."""
+        """更新一个 task。返回 (task, warning),成功时 warning 为 None,
+        blocked_by 依赖未解决时为字符串。task_id 未找到时抛 TodoError。"""
         async with self._lock(session_id):
             tasks = self._load(session_id)
             task = self._find_by_id(tasks, task_id)
@@ -171,7 +170,7 @@ class TodoStore:
                     raise TodoError(
                         f"Invalid status '{status}'. Must be one of {sorted(_VALID_STATUSES)}."
                     )
-                # Guard: check blocked_by when transitioning to in_progress
+                # 守卫:转入 in_progress 时检查 blocked_by
                 if status == "in_progress" and task.blocked_by:
                     unresolved = [
                         bid
@@ -190,7 +189,7 @@ class TodoStore:
             if owner is not None:
                 task.owner = owner
             if metadata is not None:
-                # merge-style: update keys, delete keys with None value
+                # merge 风格:更新 key,值为 None 的 key 删除
                 for k, v in metadata.items():
                     if v is None:
                         task.metadata.pop(k, None)
@@ -220,7 +219,7 @@ class TodoStore:
             return self._find_by_id(self._load(session_id), task_id)
 
     async def delete(self, session_id: str) -> bool:
-        """Remove the session's todo file. Returns False if absent."""
+        """删除 session 的 todo 文件。不存在则返回 False。"""
         async with self._lock(session_id):
             p = self._todo_path(session_id)
             if not p.is_file():

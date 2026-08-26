@@ -8,7 +8,7 @@ from twinkle.agentserver.llm_client import TextDelta
 
 
 class _SummaryLLM:
-    """Fake LLM for the summary call inside compress_messages. Yields fixed text."""
+    """compress_messages 内部摘要调用用的假 LLM。产出固定文本。"""
     def __init__(self, summary="摘要内容"):
         self._summary = summary
 
@@ -17,14 +17,14 @@ class _SummaryLLM:
 
 
 class _RaisingLLM:
-    """stream() raises — exercises compress_messages' degrade-to-head+tail path."""
+    """stream() 抛异常 —— 走 compress_messages 的降级 head+tail 路径。"""
     async def stream(self, messages, tools):
         raise RuntimeError("boom")
-        yield  # makes stream an async generator (unreachable; changes semantics so async-for gets an async gen that raises on first __anext__, not a bare coroutine)
+        yield  # 使 stream 成为 async generator（不可达；改变语义，让 async-for 拿到的是首次 __anext__ 即抛异常的 async gen，而非裸 coroutine）
 
 
 class _Ctx:
-    """Minimal ctx stub: hook only touches ctx.inputs.messages."""
+    """最小 ctx stub：hook 只碰 ctx.inputs.messages。"""
     def __init__(self, messages):
         self.inputs = ModelCallInputs(messages=messages, tools=[])
 

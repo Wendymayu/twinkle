@@ -1,4 +1,4 @@
-"""Instrument ToolManager.execute -> gen_ai.tool span."""
+"""Instrument ToolManager.execute -> gen_ai.tool span。"""
 from __future__ import annotations
 
 import json
@@ -18,10 +18,10 @@ def instrument_tool(tracer, metrics, cfg, *, tool_cls=None) -> bool:
         async def traced(self, name, args):
             start = time.perf_counter()
             error = False
-            # start_as_current_span (not start_span) makes the tool span the
-            # current span during `original`, so spans created inside the tool —
-            # e.g. a subagent's twinkle.agent.invoke from spawn_subagent —
-            # parent to this tool span instead of to the enclosing agent invoke.
+            # start_as_current_span（而非 start_span）使 tool span 在
+            # `original` 期间成为 current span，故 tool 内部创建的 span——
+            # 如 spawn_subagent 里 subagent 的 twinkle.agent.invoke——
+            # 挂在本 tool span 下，而非外层 agent invoke 下。
             with tracer.start_as_current_span(A.SPAN_GEN_AI_TOOL) as span:
                 _stamp_ctx(span)
                 span.set_attribute(A.GEN_AI_TOOL_NAME, name or "")
@@ -46,7 +46,7 @@ def instrument_tool(tracer, metrics, cfg, *, tool_cls=None) -> bool:
                     raise
                 finally:
                     metrics.record_tool_call(name, error, time.perf_counter() - start)
-                    # span.end() is handled by the `with start_as_current_span` context manager.
+                    # span.end() 由 `with start_as_current_span` context manager 处理。
 
         return traced
 

@@ -1,8 +1,7 @@
-"""Task 17: command_exec._check_command_safety delegates to builtin_rules.
+"""Task 17:command_exec._check_command_safety 委托给 builtin_rules.
 
-Verifies that command_exec's defense-in-depth blocklist now uses the shared
-17-pattern COMMAND_DENY_PATTERNS table (single source of truth), including the
-9 jiuwenswarm system-level deny patterns the old 8-pattern list lacked.
+验证 command_exec 的纵深防御 blocklist 现已使用共享的 17 条 COMMAND_DENY_PATTERNS 表(单一事实源),
+包含旧的 8 条清单缺失的 9 条 jiuwenswarm 系统级 deny 规则。
 """
 import asyncio
 

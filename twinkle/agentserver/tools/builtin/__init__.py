@@ -1,18 +1,15 @@
-"""Concrete tool implementations, grouped separately from the framework layer.
+"""具体 tool 实现,与框架层分开存放。
 
-Holds the leaf tools (web / shell / todo). The framework — ``Tool`` /
-``ToolCard`` / ``LocalFunction`` / ``@tool`` / ``ToolManager`` — stays at
-the parent :mod:`twinkle.agentserver.tools` level. Add a new tool as a
-``*_tools.py`` module in here, then register it in
-:func:`twinkle.agentserver.tools.tool_manager`.
+存放叶子工具(web / shell / todo)。框架层 —— ``Tool`` /
+``ToolCard`` / ``LocalFunction`` / ``@tool`` / ``ToolManager`` —— 留在
+父级 :mod:`twinkle.agentserver.tools` 层。在此处新增一个 tool 时,写成一个
+``*_tools.py`` 模块,然后在 :func:`twinkle.agentserver.tools.tool_manager` 中注册。
 
-Mirrors openjiuwen's split of ``core/foundation/tool/`` (the engine) from
-the app's per-domain tool files, but deliberately does NOT adopt
-jiuwenswarm's ``@harness_element`` catalog + provider indirection —
-registration stays a single ``ToolManager.register()`` hop.
+对照 openjiuwen 把 ``core/foundation/tool/``(引擎)与应用各领域 tool 文件
+分开的做法,但故意不采用 jiuwenswarm 的 ``@harness_element`` catalog + provider
+间接层 —— 注册仍是单跳 ``ToolManager.register()``。
 
-This package re-exports nothing on purpose: tool singletons stay
-module-attribute access (``web_fetch.web_fetch``) so tests can monkeypatch
-internal helpers — same convention as before the move; only the import
-path changed.
+本包有意不 re-export 任何符号:tool 单例保持模块属性访问
+(``web_fetch.web_fetch``),以便测试能 monkeypatch 内部 helper —— 与搬迁前
+相同的约定;只改了 import 路径。
 """

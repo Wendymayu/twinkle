@@ -31,7 +31,7 @@ def _ctx(tc_id="c1"):
 def test_allow_is_noop():
     e = _FakeEngine("allow")
     asyncio.run(PermissionHook(e).before_tool_call(_ctx()))
-    assert e.checked[0] == ("echo", "default")  # ContextVar default
+    assert e.checked[0] == ("echo", "default")  # ContextVar 默认值
 
 
 def test_deny_sets_force_finish():
@@ -53,16 +53,16 @@ def test_ask_raises_hookinterrupt_with_payload():
             raised = True
             assert hi.data["tool"] == "echo"
             assert hi.data["tool_call_id"] == "c9"
-            assert hi.data["approval_id"]  # uuid present
+            assert hi.data["approval_id"]  # uuid 存在
             assert hi.data["reason"] == "require-approval"
         assert raised
     finally:
-        APPROVAL_CHANNEL.reset(tok)  # Python 3.14: ContextVar.reset(token), not token.reset()
+        APPROVAL_CHANNEL.reset(tok)  # Python 3.14：用 ContextVar.reset(token)，而非 token.reset()
 
 
 def test_approved_bypass_skips_check():
-    e = _FakeEngine("ask")  # would ask, but bypass should skip
+    e = _FakeEngine("ask")  # 本会 ask，但 bypass 应跳过
     ctx = _ctx("c1")
     ctx.extra["_approved_tool_call_ids"] = {"c1"}
     asyncio.run(PermissionHook(e).before_tool_call(ctx))
-    assert e.checked == []  # engine never called
+    assert e.checked == []  # engine 从未被调用

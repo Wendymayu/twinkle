@@ -1,9 +1,8 @@
-"""CronJobStore — single-file cron_jobs.json persistence with atomic write.
+"""CronJobStore —— 单文件 cron_jobs.json 持久化，带原子写。
 
-Shared by the gateway scheduler (reads + mtime-polls) and the agent cron
-tools (write). asyncio.Lock guards concurrency; write is .tmp + os.replace
-so a crash never leaves a half-written file. A single malformed job row is
-skipped (not fatal)."""
+被 gateway scheduler（读 + mtime 轮询）和 agent cron 工具（写）共享。
+asyncio.Lock 守护并发；写操作是 .tmp + os.replace，崩溃也不会留下半写文件。
+单条坏 job 行被跳过（非致命）。"""
 from __future__ import annotations
 
 import asyncio
@@ -19,12 +18,12 @@ _VERSION = 1
 
 
 def default_cron_jobs_path() -> Path:
-    """<WORKSPACE_DIR>/cron_jobs.json — shared by gateway + agent tools."""
+    """<WORKSPACE_DIR>/cron_jobs.json —— gateway 与 agent 工具共享。"""
     return Path(WORKSPACE_DIR) / "cron_jobs.json"
 
 
 def default_sidecar_path() -> Path:
-    """<WORKSPACE_DIR>/cron_trigger_now.json — run_now sidecar (agent→gateway)."""
+    """<WORKSPACE_DIR>/cron_trigger_now.json —— run_now sidecar（agent→gateway）。"""
     return default_cron_jobs_path().parent / "cron_trigger_now.json"
 
 
@@ -33,7 +32,7 @@ class CronJobStore:
         self._path = Path(path)
         self._lock = asyncio.Lock()
 
-    # --- internal IO ---
+    # --- 内部 IO ---
     def _read_unlocked(self) -> dict:
         if not self._path.exists():
             return {"version": _VERSION, "jobs": []}

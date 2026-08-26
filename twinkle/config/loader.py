@@ -1,21 +1,21 @@
-"""Config loader: read YAML -> parse -> resolve ${ENV:-default} on values -> validate.
+"""Config loader：读 YAML -> 解析 -> 对值解析 ${ENV:-default} -> 校验。
 
-Parse-first (not text-first): yaml.safe_load the raw text, then walk the parsed
-data resolving ${ENV:-default} in string values. This mirrors jiuwenswarm's
-common/config.py and avoids a text-first footgun where an unquoted empty-default
-`dir: ${VAR:-}` resolving to `dir: ` is parsed by YAML as null (failing pydantic
-str fields). Under parse-first, an unquoted `dir: ${VAR:-}` parses as the plain
-scalar string "${VAR:-}" and resolves to "" — no null, no quoting required.
+解析优先（非文本优先）：先 yaml.safe_load 原始文本，再遍历已解析的数据，
+对字符串值解析 ${ENV:-default}。这镜像 jiuwenswarm 的 common/config.py，
+并避开文本优先的坑：未加引号的空默认值 `dir: ${VAR:-}` 解析成 `dir: `
+会被 YAML 当成 null（导致 pydantic str 字段失败）。解析优先下，未加引号的
+`dir: ${VAR:-}` 被解析为纯标量字符串 "${VAR:-}"，再解析为 ""——不会
+出 null，也无需加引号。
 
-${VAR:-default} semantics: a non-empty real env var wins; an empty/unset env var
-falls back to the default; ${VAR} with no default and no env yields "".
+${VAR:-default} 语义：非空真实环境变量优先；空/未设环境变量回退到默认值；
+无默认值且无环境变量的 ${VAR} 得到 ""。
 
-_load_env_file() populates os.environ from a .env at the repo root FIRST (real env
-still wins via setdefault), so ${TWINKLE_LLM_API_KEY} resolves from .env.
+_load_env_file() 先从仓库根目录的 .env 填充 os.environ（真实环境变量仍
+通过 setdefault 优先），故 ${TWINKLE_LLM_API_KEY} 可从 .env 解析。
 
-Path notes: this module lives at twinkle/config/loader.py, so
-  Path(__file__).parent.parent       -> twinkle/   (where resources/config.yaml lives)
-  Path(__file__).parent.parent.parent -> repo root  (where .env lives)
+路径说明：本模块位于 twinkle/config/loader.py，故
+  Path(__file__).parent.parent       -> twinkle/   （resources/config.yaml 所在）
+  Path(__file__).parent.parent.parent -> 仓库根目录（.env 所在）
 """
 from __future__ import annotations
 
@@ -27,18 +27,17 @@ import yaml
 
 from .schema import TwinkleConfig
 
-# Config YAML ships as a package data file under twinkle/resources/ (one level
-# above this package).
+# Config YAML 作为包数据文件随 twinkle/resources/ 发布（在本包上一级）。
 CONFIG_YAML_PATH = Path(__file__).resolve().parent.parent / "resources" / "config.yaml"
 
 _ENV_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}")
 
 
 def _load_env_file() -> None:
-    """Populate os.environ from a .env at the repo root.
+    """从仓库根目录的 .env 填充 os.environ。
 
-    Real env wins (setdefault), so .env is a convenience default, not an override.
-    Mirrors the original twinkle/config.py parser verbatim.
+    真实环境变量优先（setdefault），故 .env 是便利默认值而非覆盖。
+    逐字镜像原始 twinkle/config.py 解析器。
     """
     env_path = Path(__file__).resolve().parent.parent.parent / ".env"
     if not env_path.is_file():
@@ -57,12 +56,12 @@ def _load_env_file() -> None:
 
 
 def _resolve_env_vars(text: str) -> str:
-    """Replace ${VAR:-default} / ${VAR} using os.environ (empty env -> default)."""
+    """用 os.environ 替换 ${VAR:-default} / ${VAR}（空环境变量 -> 默认值）。"""
 
     def _replace(match: re.Match[str]) -> str:
         name, default = match.group(1), match.group(2)
         val = os.environ.get(name)
-        if val:  # non-empty real env wins; empty falls through
+        if val:  # 非空真实环境变量优先；空值穿透
             return val
         return default if default is not None else ""
 
@@ -70,9 +69,8 @@ def _resolve_env_vars(text: str) -> str:
 
 
 def _resolve_env_vars_in_data(obj):
-    """Recursively resolve ${ENV:-default} in every string value of a parsed YAML
-    structure (dict/list/scalar). Non-string leaves are returned unchanged. Dict
-    keys are not resolved (env vars in keys is not a use case here)."""
+    """递归解析已解析 YAML 结构（dict/list/scalar）中每个字符串值里的 ${ENV:-default}。
+    非字符串叶子原样返回。dict 的键不解析（键里放环境变量不是此处的用例）。"""
     if isinstance(obj, str):
         return _resolve_env_vars(obj)
     if isinstance(obj, dict):
@@ -83,11 +81,10 @@ def _resolve_env_vars_in_data(obj):
 
 
 def load_config(config_path: str | Path | None = None) -> TwinkleConfig:
-    """Read the YAML at config_path (default: packaged resources/config.yaml),
-    parse it, resolve ${ENV:-default} in string values, and validate into
-    TwinkleConfig. Raises on missing file or invalid config (bad tier/mode ->
-    pydantic ValidationError)."""
-    _load_env_file()  # so ${TWINKLE_LLM_API_KEY} etc. resolve from .env
+    """读取 config_path 处的 YAML（默认：随包发布的 resources/config.yaml），
+    解析它，解析字符串值里的 ${ENV:-default}，并校验为 TwinkleConfig。
+    缺失文件或非法 config（错误的 tier/mode -> pydantic ValidationError）时抛错。"""
+    _load_env_file()  # 以便 ${TWINKLE_LLM_API_KEY} 等从 .env 解析
     path = Path(config_path) if config_path else CONFIG_YAML_PATH
     raw = path.read_text(encoding="utf-8")
     data = yaml.safe_load(raw) or {}

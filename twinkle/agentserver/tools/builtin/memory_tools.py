@@ -1,7 +1,7 @@
-"""Memory tools — model-driven read/write/search/edit over long-term memory.
+"""Memory 工具 —— 模型驱动的长期记忆读/写/搜索/编辑。
 
-Thin wrappers around get_memory_manager(), mirroring skill_tools. All return
-strings; errors are returned (never raised) so a bad call doesn't crash ReAct.
+get_memory_manager() 的薄封装,对照 skill_tools。全部返回字符串;
+错误以返回值给出(绝不抛出),这样一次坏调用不会炸掉 ReAct。
 """
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from twinkle.agentserver.tools.decorator import tool
 
 @tool
 async def memory_search(query: str, max_results: int | None = None) -> str:
-    """Search long-term memory for relevant facts. Call when the answer depends on
-    cross-session user preferences, history, or past decisions."""
+    """搜索长期记忆中相关的事实。当答案依赖跨 session 的用户偏好、
+    历史或过往决策时调用。"""
     hits = get_memory_manager().search(query, max_results=max_results)
     if not hits:
         return "No relevant memories found."
@@ -24,21 +24,21 @@ async def memory_search(query: str, max_results: int | None = None) -> str:
 
 @tool
 async def write_memory(path: str, content: str, append: bool = False) -> str:
-    """Write a fact to long-term memory. path: USER.md (user profile), MEMORY.md
-    (decisions/preferences/persistent facts), or daily_memory/YYYY-MM-DD.md (daily
-    notes / when the user says 'remember this')."""
+    """向长期记忆写入一条事实。path: USER.md(用户画像)、MEMORY.md
+    (决策/偏好/持久事实)或 daily_memory/YYYY-MM-DD.md(每日笔记 /
+    用户说"记住这个"时)。"""
     return get_memory_manager().write(path, content, append=append)
 
 
 @tool
 async def read_memory(path: str, offset: int | None = None,
                       limit: int | None = None) -> str:
-    """Read a memory file's contents (line-based offset/limit paging)."""
+    """读取 memory 文件内容(按行的 offset/limit 分页)。"""
     return get_memory_manager().read(path, offset=offset, limit=limit)
 
 
 @tool
 async def edit_memory(path: str, old_text: str, new_text: str) -> str:
-    """Edit a memory file by replacing the first occurrence of old_text with
-    new_text. Use to correct stale or contradicted memories."""
+    """编辑 memory 文件:把 old_text 的第一处出现替换为 new_text。
+    用于修正过时或被推翻的记忆。"""
     return get_memory_manager().edit(path, old_text, new_text)

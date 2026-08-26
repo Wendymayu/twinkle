@@ -1,9 +1,8 @@
-"""One-command launcher for the two-process stack.
+"""双进程一键启动器。
 
-Starts AgentServer first, waits for its port to be listening, then starts
-the Gateway (which connects to it on startup). Concurrent launch races:
-the Gateway would hit ConnectionRefused if AgentServer hadn't bound yet.
-The Vite dev server (web/) is started separately: `cd web && npm run dev`.
+先启动 AgentServer，等待其端口监听就绪后再启动 Gateway（后者在启动时连接
+AgentServer）。避免并发启动竞态：若 AgentServer 尚未绑定端口，Gateway 会
+遇到 ConnectionRefused。Vite dev server（web/）需单独启动：`cd web && npm run dev`。
 """
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ import subprocess
 import sys
 import time
 
-# (module, port-to-wait-for) — port None means no wait (start immediately).
+# (module, port-to-wait-for) — port 为 None 表示不等待（立即启动下一个）。
 ORDERED = [
     ("twinkle.agentserver", 18000),
     ("twinkle.gateway", None),

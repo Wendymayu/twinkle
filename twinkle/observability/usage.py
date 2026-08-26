@@ -1,8 +1,8 @@
-"""Read token counts from an LLM usage object.
+"""从 LLM usage 对象读取 token 计数。
 
-The real openai SDK exposes ``Finish.usage`` as a ``CompletionUsage`` pydantic
-object (attributes, no ``.get``); fakes/tests use plain dicts. Helpers here
-treat both uniformly so instrumentors never assume dict shape.
+真实 openai SDK 把 ``Finish.usage`` 暴露为 ``CompletionUsage`` pydantic
+对象（属性访问，无 ``.get``）；fakes/tests 用纯 dict。这里的 helper
+统一处理两者，使 instrumentor 不假设 dict 形状。
 """
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from typing import Any
 
 
 def read_usage_token(usage: Any, *keys: str) -> Any:
-    """First non-None value among ``keys`` on ``usage``.
+    """取 ``usage`` 上 ``keys`` 中首个非 None 的值。
 
-    Works on dicts (``.get``) and on attribute objects (``getattr``); missing
-    keys resolve to ``None``. Returns ``None`` when ``usage`` is falsy.
+    兼容 dict（``.get``）与属性对象（``getattr``）；缺失的 key 解析为
+    ``None``。``usage`` 为 falsy 时返回 ``None``。
     """
     if not usage:
         return None

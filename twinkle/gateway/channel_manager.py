@@ -1,14 +1,14 @@
-"""ChannelManager — registers channels and runs the outbound dispatch loop.
+"""ChannelManager —— 注册 channel 并跑 outbound 分发循环。
 
-Consumes outbound robot messages from MessageHandler's _robot_messages Queue
-and delivers each to the channel owning its channel_id.
-Inbound: each registered Channel's on_message callback routes to MessageHandler.
+从 MessageHandler 的 _robot_messages Queue 消费 outbound robot message，并把每条
+投递给拥有其 channel_id 的 channel。inbound：每个已注册 Channel 的 on_message
+回调路由到 MessageHandler。
 
-Dependency direction (aligned with jiuwenclaw): ChannelManager holds
-MessageHandler (unidirectional). MessageHandler does NOT hold ChannelManager —
-it publishes to its own Queue, and ChannelManager consumes from it.
+依赖方向（对齐 jiuwenclaw）：ChannelManager 持有 MessageHandler（单向）。
+MessageHandler 不持有 ChannelManager —— 它发布到自己的 Queue，ChannelManager
+从该 Queue 消费。
 
-Minimal mirror of jiuwenclaw/gateway/channel_manager.py:57-69 / :182-239.
+是 jiuwenclaw/gateway/channel_manager.py:57-69 / :182-239 的精简镜像。
 """
 from __future__ import annotations
 

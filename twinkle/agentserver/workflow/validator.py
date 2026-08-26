@@ -1,11 +1,11 @@
-"""PlanCodeValidator — AST-level safety checks for plan_code before exec()."""
+"""PlanCodeValidator — 在 exec() 前对 plan_code 做 AST 级安全检查。"""
 
 from __future__ import annotations
 
 import ast
 
 
-# Forbidden function call names
+# 禁止的函数调用名
 _DENIED_CALL_NAMES: frozenset[str] = frozenset(
     {
         "exec",
@@ -25,8 +25,8 @@ _DENIED_CALL_NAMES: frozenset[str] = frozenset(
     }
 )
 
-# Forbidden dunder attribute names
-# Note: __init__ is NOT forbidden — super().__init__() is legitimate
+# 禁止的 dunder 属性名
+# 注意：__init__ 未被禁止 — super().__init__() 是合法的
 _DENIED_DUNDER_ATTRS: frozenset[str] = frozenset(
     {
         "__import__",
@@ -43,7 +43,7 @@ _DENIED_DUNDER_ATTRS: frozenset[str] = frozenset(
     }
 )
 
-# Forbidden attribute names on objects (e.g., tb_frame, f_back, f_builtins)
+# 对象上禁止的属性名（如 tb_frame、f_back、f_builtins）
 _DENIED_ATTR_NAMES: frozenset[str] = frozenset(
     {
         "tb_frame",
@@ -54,7 +54,7 @@ _DENIED_ATTR_NAMES: frozenset[str] = frozenset(
     }
 )
 
-# Forbidden modules for bare import
+# 禁止裸 import 的模块
 _DENIED_MODULES: frozenset[str] = frozenset(
     {
         "os",
@@ -70,25 +70,25 @@ _DENIED_MODULES: frozenset[str] = frozenset(
     }
 )
 
-# Allowed import prefix for from-imports
+# from-import 允许的导入前缀
 _ALLOWED_IMPORT_PREFIX = "twinkle.agentserver.workflow"
 
 
 class PlanCodeValidator:
-    """AST-level validator for plan_code.
+    """plan_code 的 AST 级校验器。
 
-    Checks that the code is safe to exec() by inspecting the AST for:
-    - Only ``from ... import`` allowed (no bare ``import x``)
-    - from-imports must start with the allowed prefix
-    - Forbidden function calls (exec, eval, open, etc.)
-    - Forbidden dunder attribute access
-    - Forbidden modules for bare import
-    - Relative imports forbidden
-    - Syntax errors reported gracefully
+    通过检查 AST 确认代码可安全 exec()：
+    - 只允许 ``from ... import``（不允许裸 ``import x``）
+    - from-import 必须以允许的前缀开头
+    - 禁止的函数调用（exec、eval、open 等）
+    - 禁止的 dunder 属性访问
+    - 禁止裸 import 的模块
+    - 禁止相对导入
+    - 语法错误优雅上报
     """
 
     def validate(self, plan_code: str) -> list[str]:
-        """Validate plan_code, returning a list of errors. Empty list means pass."""
+        """校验 plan_code，返回错误列表。空列表表示通过。"""
         if not plan_code.strip():
             return []
 
@@ -103,7 +103,7 @@ class PlanCodeValidator:
         return errors
 
     # ------------------------------------------------------------------
-    # Internal node visitors
+    # 内部节点 visitor
     # ------------------------------------------------------------------
 
     def _check_node(self, node: ast.AST, errors: list[str]) -> None:
@@ -129,7 +129,7 @@ class PlanCodeValidator:
                 )
 
     def _check_import_from(self, node: ast.ImportFrom, errors: list[str]) -> None:
-        # Relative imports forbidden
+        # 禁止相对导入
         if node.level and node.level > 0:
             errors.append(
                 f"Relative imports are forbidden (line {node.lineno})"
@@ -137,7 +137,7 @@ class PlanCodeValidator:
             return
 
         module = node.module or ""
-        # Check if module starts with allowed prefix
+        # 检查 module 是否以允许的前缀开头
         if not module.startswith(_ALLOWED_IMPORT_PREFIX):
             errors.append(
                 f"Forbidden import: {module} — only imports from {_ALLOWED_IMPORT_PREFIX} are allowed (line {node.lineno})"

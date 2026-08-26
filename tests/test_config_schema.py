@@ -73,7 +73,7 @@ def test_explicit_dirs_not_overwritten():
                       logging={"dir": "/tmp/logs"})
     assert c.sessions.dir == "/tmp/sess"
     assert c.logging.dir == "/tmp/logs"
-    # permissions.audit_file derives from logging.dir
+    # permissions.audit_file 派生自 logging.dir
     assert c.permissions.audit_file.replace("\\", "/") == "/tmp/logs/audit/permission_audit.jsonl"
 
 
@@ -86,17 +86,17 @@ def test_workspace_tilde_expanded():
 def test_explicit_path_tilde_expanded():
     c = TwinkleConfig(logging={"dir": "~/mylogs"})
     assert "~" not in c.logging.dir
-    # audit_file derives from the resolved logging.dir — no literal ~
+    # audit_file 派生自解析后的 logging.dir —— 无字面 ~
     assert "~" not in c.permissions.audit_file
     assert c.permissions.audit_file.replace("\\", "/").endswith(
         "mylogs/audit/permission_audit.jsonl")
 
 
 def test_extra_keys_forbidden():
-    # top-level section-name typo -> caught (not silently ignored)
+    # 顶层 section 名拼错 -> 被捕获（不会静默忽略）
     with pytest.raises(ValidationError):
         TwinkleConfig(**{"permission": {"enabled": True}})
-    # within-section field typo -> caught
+    # section 内字段拼错 -> 被捕获
     with pytest.raises(ValidationError):
         PermissionsConfig(enabled=True, enabled_channels=["web"],
                              global_default="allow", tools={"x": "allow"}, bogus_field=1)

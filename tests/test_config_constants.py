@@ -2,11 +2,10 @@ import importlib
 
 
 def test_constants_match_packaged_defaults(monkeypatch):
-    # Hermetic against a developer's .env: the YAML reads AGENTSERVER_PORT /
-    # GATEWAY_PORT / LLM_MODEL via ${ENV:-default}. _load_env_file re-sets them
-    # from .env via setdefault, so delenv alone won't stick. Force the packaged
-    # defaults via real env (which wins over .env's setdefault) so the exported
-    # constants match the shipped defaults regardless of local .env.
+    # 隔离开发者本地 .env：YAML 通过 ${ENV:-default} 读取 AGENTSERVER_PORT /
+    # GATEWAY_PORT / LLM_MODEL。_load_env_file 经 setdefault 从 .env 重新设置它们，
+    # 故仅 delenv 不生效。用真实 env（优先级高于 .env 的 setdefault）强制打包默认值，
+    # 使导出的常量与随仓库发布的默认值一致，不受本地 .env 影响。
     monkeypatch.setenv("TWINKLE_AGENTSERVER_PORT", "18000")
     monkeypatch.setenv("TWINKLE_GATEWAY_PORT", "19000")
     monkeypatch.setenv("TWINKLE_LLM_MODEL", "gpt-4o-mini")

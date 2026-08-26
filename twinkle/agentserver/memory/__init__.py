@@ -1,4 +1,4 @@
-"""memory package — re-exports + process-level singleton (mirrors skills/__init__)."""
+"""memory 包 —— 重新导出 + 进程级单例(对齐 skills/__init__)。"""
 from twinkle.agentserver.memory.store import MemoryManager
 from twinkle.agentserver.memory.embeddings import (
     EmbeddingProvider,
@@ -10,8 +10,8 @@ _MEMORY_MANAGER: MemoryManager | None = None
 
 
 def get_memory_manager() -> MemoryManager:
-    """Process singleton (lazy). @tool funcs + MemoryHook call this; tests swap
-    via _set_memory_manager. lazy import config avoids import-time side effects."""
+    """进程单例(懒加载)。@tool 函数 + MemoryHook 调用此函数;测试通过
+    _set_memory_manager 替换。懒 import config 避免导入时副作用。"""
     global _MEMORY_MANAGER
     if _MEMORY_MANAGER is None:
         from twinkle.config import (
@@ -25,7 +25,7 @@ def get_memory_manager() -> MemoryManager:
             MEMORY_QUERY_MAX_RESULTS,
         )
         provider = None
-        dims = 1536  # matches text-embedding-3-small; change model + dims -> delete memory.db
+        dims = 1536  # 对齐 text-embedding-3-small;改 model + dims 后需删 memory.db
         if LLM_API_KEY:
             provider = OpenAICompatibleEmbeddingProvider(
                 LLM_BASE_URL, LLM_API_KEY, MEMORY_EMBED_MODEL, dims)
@@ -43,7 +43,7 @@ def get_memory_manager() -> MemoryManager:
 
 
 def _set_memory_manager(mgr: MemoryManager | None) -> None:
-    """Test hook: replace/reset the singleton. Production code never calls this."""
+    """测试钩子:替换/重置单例。生产代码从不调用此函数。"""
     global _MEMORY_MANAGER
     _MEMORY_MANAGER = mgr
 

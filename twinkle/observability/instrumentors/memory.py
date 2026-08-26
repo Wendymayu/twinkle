@@ -1,11 +1,10 @@
-"""Instrument MemoryFlushHook._flush -> spans.
+"""Instrument MemoryFlushHook._flush -> span。
 
-instrument_memory_flush: patches ``_flush`` (the 兜底 work method, only called
-past the config gate + ``should_compress`` True + non-empty ``middle`` — so the
-span always reflects a real fire, no false positives, no prediction logic —
-mirroring how the compression instrumentor patches ``do_compress`` not
-``compress_messages``). The internal ``llm.stream`` call's ``gen_ai.chat`` span
-nests under this span. The hook itself stays free of any OTel code.
+instrument_memory_flush：patch ``_flush``（兜底工作方法，仅在过 config 门 +
+``should_compress`` 为 True + ``middle`` 非空时调用——故 span 总反映真实
+触发，无假阳性、无预测逻辑——镜像 compression instrumentor patch
+``do_compress`` 而非 ``compress_messages`` 的做法）。内部 ``llm.stream`` 调用
+的 ``gen_ai.chat`` span 嵌套在本 span 下。hook 本身不含任何 OTel 代码。
 """
 from __future__ import annotations
 
@@ -16,11 +15,11 @@ from twinkle.observability.instrumentors.llm import _stamp_ctx
 
 
 def instrument_memory_flush(tracer, metrics, cfg, *, hook_cls=None) -> bool:
-    """Patch ``MemoryFlushHook._flush`` to emit a ``twinkle.memory.flush`` span
-    carrying ``flush.new_writes`` / ``flush.errors``.
+    """Patch ``MemoryFlushHook._flush`` 以发出 ``twinkle.memory.flush`` span，
+    携带 ``flush.new_writes`` / ``flush.errors``。
 
-    ``metrics`` accepted for signature parity with sibling instrumentors but
-    unused (flush is low-frequency; spans suffice).
+    ``metrics`` 为与兄弟 instrumentor 签名对齐而保留，但未使用
+    （flush 低频；span 足矣）。
     """
     if hook_cls is None:
         from twinkle.agentserver.hooks.builtin.memory_flush_hook import (

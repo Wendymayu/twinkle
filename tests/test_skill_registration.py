@@ -1,9 +1,9 @@
-"""Skill registration + workspace seeding tests."""
+"""Skill 注册 + workspace 播种测试。"""
 import importlib
 
 
 def test_skill_hook_registers_in_create_agent(tmp_path, monkeypatch):
-    """create_agent forwards SkillHook; verify it lands as a before_model_call callback."""
+    """create_agent 转发 SkillHook;验证它落到 before_model_call 回调上。"""
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", str(tmp_path))
     import twinkle.config as cfg
     importlib.reload(cfg)
@@ -16,7 +16,7 @@ def test_skill_hook_registers_in_create_agent(tmp_path, monkeypatch):
 
 
 def test_ensure_workspace_dir_seeds_example_skill(tmp_path, monkeypatch):
-    """ensure_workspace_dir mkdirs WORKSPACE + skills + copies the bundled doc-audit example."""
+    """ensure_workspace_dir 创建 WORKSPACE + skills 目录,并拷贝内置的 doc-audit 示例。"""
     monkeypatch.setenv("TWINKLE_WORKSPACE_DIR", str(tmp_path))
     import twinkle.config as cfg
     importlib.reload(cfg)

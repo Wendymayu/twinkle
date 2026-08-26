@@ -1,14 +1,13 @@
-"""Instrument compression.do_compress -> twinkle.compression span.
+"""插桩 compression.do_compress -> twinkle.compression span。
 
-Patches ``do_compress`` (not ``compress_messages``) on the ``compression``
-module. ``do_compress`` is only called when ``should_compress`` is True, so the
-wrapper always opens a span with no false positives and no prediction logic.
-Because ``do_compress`` is a same-module callee of ``compress_messages``
-(resolved via module globals at call time, not import-bound), patching it
-reaches both production call sites (ContextCompressionHook +
-ContextOverflowRecoveryHook) with zero hook changes. The summary ``llm.stream``
-inside ``_summarize`` emits a ``gen_ai.chat`` span that nests under this span
-(span is current via ``start_as_current_span``).
+patch ``compression`` 模块上的 ``do_compress``（而非 ``compress_messages``）。
+``do_compress`` 仅在 ``should_compress`` 为 True 时调用，故 wrapper 总是
+开 span，无假阳性、无预测逻辑。因 ``do_compress`` 是 ``compress_messages``
+的同模块被调者（调用时经 module globals 解析，非 import 绑定），patch 它
+可零 hook 改动地触达两处生产调用点（ContextCompressionHook +
+ContextOverflowRecoveryHook）。``_summarize`` 内的 ``llm.stream`` 发出的
+``gen_ai.chat`` span 嵌套在本 span 下（经 ``start_as_current_span`` 成为
+current）。
 """
 from __future__ import annotations
 
@@ -19,10 +18,10 @@ from twinkle.observability.instrumentors.llm import _stamp_ctx
 
 
 def _has_summary(msgs: list[dict]) -> bool:
-    """True if the returned messages contain a ``[prior context summary]`` system msg.
+    """返回的 messages 含 ``[prior context summary]`` system msg 时为 True。
 
-    Distinguishes the normal summary path from the ``_summarize``-failed degrade
-    path (head + tail, middle dropped, no summary message).
+    区分正常 summary 路径与 ``_summarize`` 失败的降级路径
+    （head + tail、middle 丢弃、无 summary message）。
     """
     for m in msgs:
         if (m.get("role") == "system"
@@ -33,10 +32,10 @@ def _has_summary(msgs: list[dict]) -> bool:
 
 
 def instrument_compression(tracer, metrics, cfg, *, compression_mod=None) -> bool:
-    """Patch ``compression.do_compress`` to emit a ``twinkle.compression`` span.
+    """Patch ``compression.do_compress`` 以发出 ``twinkle.compression`` span。
 
-    ``metrics`` is accepted for signature parity with sibling instrumentors but
-    unused (compression is low-frequency; spans suffice).
+    ``metrics`` 为与兄弟 instrumentor 签名对齐而保留，但未使用
+    （compression 低频；span 足矣）。
     """
     if compression_mod is None:
         from twinkle.agentserver import compression as compression_mod

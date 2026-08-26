@@ -6,7 +6,7 @@ from twinkle.schema.message import EventType, Message
 
 
 class _FakeAgentClient:
-    """Yields a scripted list of E2AResponse frames for one request."""
+    """为单个请求按预设列表 yield E2AResponse 帧。"""
 
     def __init__(self, frames):
         self._frames = frames
@@ -89,8 +89,8 @@ def test_result_frame_becomes_result_event() -> None:
 
 
 def test_error_frame_becomes_chat_final_with_error_text() -> None:
-    """e2a.error frames must reach the browser carrying their error text (not an
-    empty chat.final, which is what the generic else-branch produced)."""
+    """e2a.error 帧必须带着错误文本到达浏览器（而非通用 else 分支产生的
+    空 chat.final）。"""
     frames = [
         E2AResponse(
             request_id="r1", sequence=0, is_final=True,

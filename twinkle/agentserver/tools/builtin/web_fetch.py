@@ -1,17 +1,14 @@
-"""web_fetch — resilient read-only fetch: direct GET first, Tavily extract
-fallback on anti-bot blocks.
+"""web_fetch —— 稳健的只读抓取:先直接 GET,遇反爬封锁时回退 Tavily extract。
 
-Direct GET (browser UA + HTML-to-text) is free and works for most pages, so it
-runs first to conserve the Tavily quota. When a site returns 401/403/429
-(anti-bot — e.g. Wikipedia 403s httpx), web_fetch falls back to the Tavily
-Extract API, which fetches server-side and returns clean readable text,
-bypassing the block. Without a Tavily key, a block surfaces a clear, actionable
-error (hinting at TAVILY_API_KEY) instead of the old "(empty page)".
+直接 GET(浏览器 UA + HTML 转文本)免费且对多数页面有效,故先跑它以
+省 Tavily 配额。当站点返回 401/403/429(反爬 —— 例如 Wikipedia 对
+httpx 返回 403),web_fetch 回退到 Tavily Extract API,它在服务端抓取
+并返回干净可读文本,绕过封锁。无 Tavily key 时,封锁会暴露一条清晰
+可操作的报错(提示 TAVILY_API_KEY),而非旧版的"(空页面)"。
 
-Design follows jiuwenswarm's direct-GET-then-proxy skeleton, but replaces the
-now-Cloudflare-blocked r.jina.ai free reader with Tavily extract (a key Twinkle
-already configures for web_search). httpx-native async, single ``@tool``, no
-extra deps.
+设计沿用 jiuwenswarm 的"直接 GET 再走代理"骨架,但把现已被 Cloudflare
+封锁的 r.jina.ai 免费阅读器替换为 Tavily extract(Twinkle 已为
+web_search 配置了该 key)。httpx 原生 async,单个 ``@tool``,无额外依赖。
 """
 from __future__ import annotations
 
@@ -36,13 +33,13 @@ _HEADERS = {
     "Accept": "text/html, */*;q=0.1",
     "Accept-Language": "en-US,en;q=0.9",
 }
-# Anti-bot block statuses that trigger the Tavily extract fallback.
+# 触发 Tavily extract 回退的反爬封锁状态码。
 _BLOCKED_STATUSES = {401, 403, 429}
 _SKIP_TAGS = {"script", "style", "noscript", "head"}
 
 
 class _FetchError(Exception):
-    """Raised when a fetch path fails, to fall through to the next."""
+    """某条抓取路径失败时抛出,以便穿透到下一条。"""
 
 
 class _TextExtractor(HTMLParser):
@@ -68,7 +65,7 @@ class _TextExtractor(HTMLParser):
 
 
 def _normalize_url(url: str) -> str:
-    """Strip; prepend https:// when the scheme is missing."""
+    """strip;缺 scheme 时补 https://。"""
     raw = (url or "").strip()
     if not raw:
         return ""
@@ -82,7 +79,7 @@ def _tavily_key() -> str:
 
 
 def _clip(text: str, max_chars: int) -> str:
-    """max_chars <= 0 disables clipping."""
+    """max_chars <= 0 时不截断。"""
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     return text[:max_chars] + "...[truncated]"
@@ -104,7 +101,7 @@ async def _http_request(
     json: dict[str, Any] | None = None,
     timeout: float = 20.0,
 ) -> httpx.Response:
-    """Thin httpx hook — tests monkeypatch this to inject canned responses."""
+    """薄 httpx 钩子 —— 测试 monkeypatch 它以注入预设响应。"""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         if method.upper() == "GET":
             return await client.get(url, headers=headers, params=params)
@@ -112,7 +109,7 @@ async def _http_request(
 
 
 async def _tavily_extract(url: str) -> str:
-    """POST Tavily /extract; return results[0].raw_content (already clean text)."""
+    """POST Tavily /extract;返回 results[0].raw_content(已是干净文本)。"""
     resp = await _http_request(
         "POST",
         _TAVILY_EXTRACT_URL,
@@ -133,16 +130,15 @@ async def _tavily_extract(url: str) -> str:
 
 @tool
 async def web_fetch(url: str, max_chars: int = 50000) -> str:
-    """Fetch a URL and return its visible text, clipped to max_chars.
+    """抓取一个 URL 并返回其可见文本,截断到 max_chars。
 
-    Tries a direct GET first (free, works for most sites). When the server
-    returns 401/403/429 (anti-bot block — e.g. Wikipedia), falls back to the
-    Tavily Extract API, which fetches server-side and bypasses the block.
-    Without ``TAVILY_API_KEY``, a block surfaces a clear error hinting at the
-    key rather than silently returning an empty page. Set max_chars=0 to
-    disable clipping. Default 50000 covers a typical article infobox + lead
-    (Tavily extract includes nav boilerplate up front, so a smaller clip can
-    miss the payload — e.g. Wikipedia's perigee sits ~34KB in).
+    先尝试直接 GET(免费,对多数站点有效)。当服务器返回
+    401/403/429(反爬封锁 —— 例如 Wikipedia)时,回退到 Tavily Extract API,
+    它在服务端抓取并绕过封锁。无 ``TAVILY_API_KEY`` 时,封锁会暴露一条
+    清晰报错(提示该 key)而非静默返回空页面。设 max_chars=0 以禁用截断。
+    默认 50000 覆盖一篇典型文章的信息框 + 导语(Tavily extract 开头会带
+    导航等样板,故截小了可能漏掉正文 —— 例如 Wikipedia 的近日点内容
+    大约在 34KB 处)。
     """
     url = _normalize_url(url)
     if not url:
@@ -154,7 +150,7 @@ async def web_fetch(url: str, max_chars: int = 50000) -> str:
 
     errors: list[str] = []
 
-    # 1) Direct GET — free path, no quota cost.
+    # 1) 直接 GET —— 免费路径,不耗配额。
     try:
         resp = await _http_request("GET", url, headers=_HEADERS, timeout=20.0)
         if resp.status_code in _BLOCKED_STATUSES:
@@ -168,7 +164,7 @@ async def web_fetch(url: str, max_chars: int = 50000) -> str:
     except Exception as exc:
         errors.append(f"direct: {exc}")
 
-    # 2) Tavily extract fallback — bypasses anti-bot server-side.
+    # 2) Tavily extract 回退 —— 在服务端绕过反爬。
     if _tavily_key():
         try:
             return _clip(await _tavily_extract(url), max_chars)

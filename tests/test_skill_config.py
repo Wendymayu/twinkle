@@ -23,9 +23,9 @@ def test_skill_config_defaults():
 
 
 def test_skill_config_yaml_override(tmp_path):
-    """v1: skill mode + enabled are config.yaml literals (env vars removed).
-    Override by pointing load_config at a custom YAML; SKILLS_DIR stays
-    ${ENV:-default}-overridable (covered by test_config_constants)."""
+    """v1: skill mode 与 enabled 是 config.yaml 字面量(已移除 env 变量)。
+    让 load_config 指向自定义 YAML 即可覆盖;SKILLS_DIR 仍可由
+    ${ENV:-default} 覆盖(由 test_config_constants 覆盖)。"""
     from twinkle.config.loader import load_config
     custom = tmp_path / "config.yaml"
     custom.write_text(

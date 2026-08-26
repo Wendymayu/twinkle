@@ -1,11 +1,11 @@
-"""Browser-facing WebSocket channel (Gateway side).
+"""面向浏览器的 WebSocket channel（Gateway 侧）。
 
-A `websockets` server (default :19000). Inbound frames: {type:req,id,method,params}.
-Outbound: an immediate {type:res,id,ok,payload} ACK, then streamed
-{type:event,event:chat.delta|chat.final,payload,request_id} broadcasts.
+一个 `websockets` server（默认 :19000）。inbound 帧：{type:req,id,method,params}。
+outbound：立即回一个 {type:res,id,ok,payload} ACK，然后流式广播
+{type:event,event:chat.delta|chat.final,payload,request_id}。
 
-In Phase 0 dev mode the Vite dev server (:5173) proxies /ws here, so the
-browser stays same-origin. Minimal mirror of jiuwenclaw/channel/web_channel.py.
+Phase 0 dev 模式下 Vite dev server（:5173）把 /ws 代理到这里，浏览器保持同源。
+是 jiuwenclaw/channel/web_channel.py 的精简镜像。
 """
 from __future__ import annotations
 
@@ -65,13 +65,13 @@ class WebChannel:
             method=method,
             params=params,
         )
-        # immediate acceptance, like jiuwenclaw app_web_handlers _chat_send ACK
+        # 立即受理，类似 jiuwenclaw app_web_handlers 的 _chat_send ACK
         await self._send_response(ws, request_id, {"accepted": True, "session_id": session_id})
         if self._on_message is not None:
             await self._on_message(msg)
 
     async def send(self, msg: Message) -> None:
-        """Broadcast an outbound event to all connected browsers, tagged with request_id."""
+        """向所有已连接浏览器广播一个 outbound event，带 request_id 标记。"""
         event = msg.event_type.value if msg.event_type else EventType.CHAT_FINAL.value
         payload = dict(msg.payload)
         if msg.content:

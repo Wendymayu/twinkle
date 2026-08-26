@@ -85,7 +85,7 @@ def test_merge_system_messages_deleted():
 
 
 class _MarkerHook(AgentHook):
-    """before_invoke: stash a marker section to frozen_sections (simulates SkillHook/MemoryHook)."""
+    """before_invoke：往 frozen_sections stash 一个 marker section（模拟 SkillHook/MemoryHook）。"""
     async def before_invoke(self, ctx: HookContext) -> None:
         ctx.extra.setdefault("frozen_sections", []).append(
             PromptSection("marker", "MARKER-TOKEN-XYZ", priority=50))
@@ -102,7 +102,7 @@ def _reg_with_echo_tool():
 
 
 class _ScriptedLLM:
-    """Returns one canned event-list per stream() call, in order; captures system msg each call."""
+    """每次 stream() 调用按顺序返回一组预设事件列表；每次捕获 system msg。"""
     def __init__(self, scripts):
         self._scripts = scripts
         self.calls = 0
@@ -117,7 +117,7 @@ class _ScriptedLLM:
 
 
 class _CountingTM:
-    """Wraps a ToolManager; counts schemas() calls to verify per-invoke freeze."""
+    """包装一个 ToolManager；计数 schemas() 调用以验证 per-invoke 冻结。"""
     def __init__(self, inner):
         self._inner = inner
         self.schemas_calls = 0
@@ -168,7 +168,7 @@ def test_frozen_sections_byte_stable_across_steps(tmp_path):
     assert llm.calls == 2
     assert "MARKER-TOKEN-XYZ" in llm.seen_systems[0]
     assert "MARKER-TOKEN-XYZ" in llm.seen_systems[1]
-    assert llm.seen_systems[0] == llm.seen_systems[1]  # byte-stable across steps
+    assert llm.seen_systems[0] == llm.seen_systems[1]  # 跨步字节稳定
 
 
 def test_tool_schemas_frozen_once_per_invoke(tmp_path):

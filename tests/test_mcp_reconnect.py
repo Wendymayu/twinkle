@@ -29,14 +29,14 @@ class _FakeClient:
 
 def test_retryable_error_triggers_reconnect_then_succeeds() -> None:
     c = _FakeClient([ConnectionError("connection closed"), None])
-    c.connects = 1  # already connected
+    c.connects = 1  # 已连接
 
     @with_reconnect
     async def call(client):
         return await client._do()
 
     assert asyncio.run(call(c, attempts=3)) == "ok"
-    assert c.disconnects == 1  # reconnected once
+    assert c.disconnects == 1  # 重连一次
     assert c.connects == 2
 
 
@@ -77,7 +77,7 @@ def test_is_retryable_matches_whitelist() -> None:
 def test_attempts_zero_makes_single_attempt_and_succeeds() -> None:
     """attempts=0 仍至少试一次——修正前 range(0) 导致 fn 不被调用、AssertionError。"""
     c = _FakeClient([None])  # 首次即成功(无异常)
-    c.connects = 1  # already connected
+    c.connects = 1  # 已连接
 
     @with_reconnect
     async def call(client):

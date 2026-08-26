@@ -31,7 +31,7 @@ def test_write_read_search_round_trip(isolated_memory):
     body = asyncio.run(read_memory.func("MEMORY.md"))
     assert "用户偏好中文。" in body
     hits = asyncio.run(memory_search.func("偏好"))
-    assert any("偏好" in h for h in [hits])  # search returns a formatted string
+    assert any("偏好" in h for h in [hits])  # search 返回格式化字符串
     assert "偏好" in hits
 
 
@@ -45,7 +45,7 @@ def test_edit_tool(isolated_memory):
 def test_tool_returns_error_string_on_bad_path(isolated_memory):
     from twinkle.agentserver.tools.builtin.memory_tools import write_memory
     out = asyncio.run(write_memory.func("../escape.md", "x", True))
-    assert "invalid" in out.lower()  # no raise, no ReAct crash
+    assert "invalid" in out.lower()  # 不抛异常，ReAct 不崩
 
 
 def test_schemas_expose_params():
@@ -58,9 +58,9 @@ def test_schemas_expose_params():
 
 
 def test_memory_search_empty_query_returns_no_memories(isolated_memory):
-    """Empty/whitespace query must not raise (FTS5 MATCH '""' is a syntax error);
-    the tool returns the memory-shaped 'No relevant memories found.' string
-    instead of leaking a framework [tool error] to the model."""
+    """空/空白 query 不能抛异常（FTS5 MATCH '""' 是语法错误）；
+    tool 返回 memory 形状的 'No relevant memories found.' 字符串，
+    而不是把框架的 [tool error] 泄露给模型。"""
     from twinkle.agentserver.tools.builtin.memory_tools import memory_search
     assert asyncio.run(memory_search.func("")) == "No relevant memories found."
     assert asyncio.run(memory_search.func("   ")) == "No relevant memories found."

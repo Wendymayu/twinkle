@@ -1,9 +1,9 @@
-"""AgentServer — the heavy execution core process.
+"""AgentServer —— 重执行核心进程。
 
-Phase 1: a `websockets` server that dispatches inbound E2A envelopes to an
-AgentLoop (ReAct: think -> tool -> result -> re-decide). Stream-only; no
-unary mode. ws_handler(loop, store) lets tests inject a fake loop;
-create_agent(store) wires the real config-driven loop for production.
+Phase 1：一个 `websockets` server,把入站 E2A envelopes 分发给
+AgentLoop(ReAct：think -> tool -> result -> re-decide)。仅流式;无 unary
+mode。ws_handler(agent) 让测试注入 fake loop;create_agent(store) 接
+生产用的 config-driven loop。
 """
 from __future__ import annotations
 
@@ -47,27 +47,23 @@ ACK_FRAME = {
 
 
 def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm: LLMClient | None = None) -> ReActAgent:
-    """Production wiring — config-driven ReActAgent backed by *store*.
+    """生产装配 —— config-driven ReActAgent,以 *store* 为后端。
 
-    *store* is injected so the caller controls which SessionStore instance
-    the agent (chat/ReAct path) and ``ws_handler`` (RPC path) share.
-    *hooks* is the list of AgentHook instances to register (callers that need
-    permission enforcement pass PermissionHook; minimal test setups pass an
-    empty list). *llm* is an optional override (tests inject a scripted client;
-    default = config-driven LLMClient).
+    *store* 经注入,使调用方控制 agent(chat/ReAct 路径)与 ``ws_handler``
+    (RPC 路径)共享哪个 SessionStore 实例。*hooks* 是待注册的 AgentHook 实例
+    列表(需权限执行的调用方传 PermissionHook;最小测试装配传空列表)。*llm*
+    是可选 override(测试注入 scripted client;默认 = config-driven LLMClient)。
 
-    Subagent is always on: build the SubagentExecutor and auto-wire
-    SubagentContextHook(executor) (alongside the caller's hooks). The
-    spawn_subagent tool is registered in tool_manager() like the other builtins
-    (it needs no executor at registration — it reads one from the ContextVar at
-    invoke). SubagentContextHook is auto-wired (not caller-passed) because its
-    dependency (the executor) is built here from the agent's llm/store/tools —
-    mirroring jiuwenswarm's adapter, which binds the executor onto its stream
-    rail. The caller's hooks (PermissionHook etc.) have external/no deps and
-    are caller-passed.
+    Subagent 恒开:构建 SubagentExecutor 并自动 wire
+    SubagentContextHook(executor)(与调用方的 hooks 并列)。spawn_subagent
+    工具像其他 builtins 一样注册进 tool_manager()(注册时无需 executor——
+    它在 invoke 时从 ContextVar 读一个)。SubagentContextHook 是自动 wire 的
+    (非调用方传入),因其依赖(executor)在此由 agent 的 llm/store/tools
+    构建——对齐 jiuwenswarm 的 adapter,后者把 executor 绑到自己的 stream
+    rail 上。调用方的 hooks(PermissionHook 等)有外部/无依赖,由调用方传入。
 
-    ContextCompressionHook is likewise auto-wired (not caller-passed): its sole
-    dependency (llm) is available here.
+    ContextCompressionHook 同样自动 wire(非调用方传入):其唯一依赖(llm)
+    在此可得。
     """
     if llm is None:
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
@@ -103,12 +99,12 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
         from twinkle.agentserver.evolution import get_orchestrator
         from twinkle.agentserver.hooks.builtin import SkillEvolutionHook
         all_hooks.append(SkillEvolutionHook(orchestrator=get_orchestrator()))
-    # Team infrastructure — always wired; activates only when request.mode == "team"
+    # Team infrastructure —— 恒 wire;仅当 request.mode == "team" 时激活
     from twinkle.agentserver.team.manager import TeamManager
     from twinkle.agentserver.hooks.builtin import TeamContextHook
     team_mgr = TeamManager(llm=llm, store=store, parent_tools=tools, config=settings.team)
     all_hooks.append(TeamContextHook(team_mgr))
-    # Progressive tool visibility (opt-in; default off = no-op)
+    # Progressive tool visibility(opt-in;默认关 = no-op)
     from twinkle.agentserver.tools.progressive import apply_progressive_tools
     progressive_hook = apply_progressive_tools(tools, settings.progressive_tool, settings.permissions)
     if progressive_hook is not None:
@@ -117,13 +113,13 @@ def create_agent(store: SessionStore, hooks: list[AgentHook] | None = None, llm:
 
 
 def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None]]:
-    """Return a ws handler bound to *agent*.
+    """返回一个绑定到 *agent* 的 ws handler。
 
-    Phase 4: concurrent per-request task model so a suspended run
-    (awaiting approval) does not block reading the next inbound message
-    (approval.respond). Routes ``approval.respond`` to the ApprovalRegistry
-    inline; session RPCs inline; everything else spawns a run task,
-    one active per session.
+    Phase 4：并发 per-request task 模型,使挂起的 run(等待 approval)不阻塞
+    读下一条入站消息(approval.respond)。``approval.respond`` /
+    ``approval.check_pending`` inline 路由;session RPC inline;skill RPC 中
+    list_local inline、search/install 起后台任务;其余起 run task,每 session
+    一个 active。
     """
     from twinkle.agentserver.permissions.approval_registry import APPROVAL_REGISTRY
 

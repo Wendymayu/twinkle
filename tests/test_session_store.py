@@ -42,7 +42,7 @@ def test_create_session_writes_metadata(session_store, sessions_dir):
 
 def test_create_session_is_idempotent(session_store, sessions_dir):
     _run(session_store.create_session("s1"))
-    # second call must not error or reset an existing populated metadata
+    # 第二次调用不得报错或重置已填充的 metadata
     _run(session_store.create_session("s1"))
     on_disk = json.loads((Path(sessions_dir) / "s1" / "metadata.json").read_text())
     assert on_disk["message_count"] == 0
@@ -101,7 +101,7 @@ def test_cold_start_hydrates_full_history(session_store, sessions_dir):
     _run(session_store.append("s1", {"role": "tool", "tool_call_id": "c1",
                                     "content": "res"}, request_id="r1"))
 
-    # Brand-new store instance pointing at the SAME dir — cache is cold.
+    # 全新的 store 实例指向同一目录 —— cache 是冷的。
     cold = SessionStore(str(sessions_dir))
     msgs = cold.get_messages("s1")
     assert [m["role"] for m in msgs] == ["system", "user", "assistant", "tool"]
@@ -114,7 +114,7 @@ def test_list_sessions_sorted_desc(session_store, sessions_dir):
     _run(session_store.create_session("old"))
     _run(session_store.append("old", {"role": "user", "content": "a"},
                               request_id="r1"))
-    # tiny sleep-free ordering: old was created first -> lower last_message_at
+    # 无需 sleep 的微小排序:old 先创建 -> last_message_at 更小
     _run(session_store.create_session("new"))
     _run(session_store.append("new", {"role": "user", "content": "b"},
                               request_id="r2"))
@@ -137,9 +137,9 @@ def test_delete_session_removes_dir_and_evicts_cache(session_store, sessions_dir
     _run(session_store.append("s1", {"role": "user", "content": "hi"}))
     assert _run(session_store.delete_session("s1")) is True
     assert not (Path(sessions_dir) / "s1").exists()
-    # cache evicted -> cold read returns empty
+    # cache 已驱逐 -> 冷读返回空
     assert session_store.get_messages("s1") == []
-    # deleting again -> False (absent)
+    # 再次删除 -> False(不存在)
     assert _run(session_store.delete_session("s1")) is False
 
 
@@ -211,13 +211,12 @@ def test_read_file_missing_raises_filenotfound(session_store):
 
 
 def test_message_count_excludes_system_role(session_store, sessions_dir):
-    """Reproduces issue #5: the base system prompt inflates message_count.
+    """复现 issue #5:base system prompt 虚高了 message_count。
 
-    A plain user->assistant turn (no tools) writes 3 history records
-    (system + user + assistant), but only the user/assistant pair is a
-    user-visible conversation message — the frontend filters `system` out
-    in fromHistory. message_count must match that visible count, so the
-    system-role prompt must NOT be counted.
+    一个普通的 user->assistant 轮次(无工具)写入 3 条 history 记录
+    (system + user + assistant),但只有 user/assistant 这一对是
+    用户可见的会话消息 —— 前端在 fromHistory 中过滤掉 `system`。
+    message_count 必须与该可见计数一致,故 system-role prompt 不得计入。
     """
     _run(session_store.append("s1", {"role": "system", "content": "sys"}))
     _run(session_store.append("s1", {"role": "user", "content": "你好"},
@@ -229,14 +228,13 @@ def test_message_count_excludes_system_role(session_store, sessions_dir):
 
 
 def test_list_sessions_recomputes_count_excluding_system(session_store, sessions_dir):
-    """Legacy sessions on disk carry an inflated message_count (the system
-    prompt used to be counted). list_sessions must derive the visible count
-    from history.json so existing sessions display correctly instead of the
-    stale stored value."""
+    """磁盘上的 legacy session 带有虚高的 message_count(system prompt
+    过去被计入)。list_sessions 必须从 history.json 推导可见计数,
+    使既有 session 正确显示,而非用过期的存储值。"""
     _run(session_store.append("s1", {"role": "system", "content": "sys"}))
     _run(session_store.append("s1", {"role": "user", "content": "q"}, request_id="r1"))
     _run(session_store.append("s1", {"role": "assistant", "content": "a"}, request_id="r1"))
-    # corrupt the stored count to a clearly-wrong legacy value
+    # 把存储的 count 篡改为明显错误的 legacy 值
     mpath = Path(sessions_dir) / "s1" / "metadata.json"
     meta = json.loads(mpath.read_text(encoding="utf-8"))
     meta["message_count"] = 99
@@ -247,9 +245,8 @@ def test_list_sessions_recomputes_count_excluding_system(session_store, sessions
 
 
 def test_list_sessions_count_falls_back_when_history_missing(session_store, sessions_dir):
-    """A session with metadata but no history.json (e.g. just created, no
-    messages yet) must not error — list_sessions falls back to the stored
-    count."""
+    """一个有 metadata 但无 history.json 的 session(例如刚创建、尚无
+    消息)不得报错 —— list_sessions 回退到存储的 count。"""
     _run(session_store.create_session("s1"))
     rows = session_store.list_sessions()
     row = next(r for r in rows if r["session_id"] == "s1")
@@ -257,7 +254,7 @@ def test_list_sessions_count_falls_back_when_history_missing(session_store, sess
 
 
 def test_list_sessions_hides_subagent_sessions(session_store):
-    """Child sessions (<parent>__sub_<id>) are hidden by default; visible with include_subagents."""
+    """子 session(<parent>__sub_<id>) 默认隐藏;带 include_subagents 时可见。"""
     _run(session_store.create_session("real1"))
     _run(session_store.append("real1", {"role": "user", "content": "a"}, request_id="r1"))
     _run(session_store.create_session("p1__sub_abc12345"))
@@ -273,20 +270,19 @@ def test_list_sessions_hides_subagent_sessions(session_store):
 
 
 def test_append_preserves_reasoning_but_does_not_feed_back(session_store, sessions_dir):
-    """reasoning is persisted on the assistant history record (for display /
-    evolution / debugging) but ``_record_to_openai`` drops it so it is never
-    fed back to the model — thinking is regenerated each turn, never replayed
-    (OpenAI reasoning convention)."""
+    """reasoning 持久化在 assistant history 记录上(用于展示 /
+    演进 / 调试),但 ``_record_to_openai`` 会丢弃它,故绝不回喂
+    模型 —— thinking 每轮重新生成,绝不回放(OpenAI reasoning 约定)。"""
     _run(session_store.create_session("s1"))
     _run(session_store.append("s1", {"role": "user", "content": "q"}, request_id="r1"))
     _run(session_store.append("s1", {"role": "assistant", "content": "a",
                                     "reasoning": "我的思考"}, request_id="r1"))
-    # persisted on the history record
+    # 持久化在 history 记录上
     hpath = Path(sessions_dir) / "s1" / "history.json"
     recs = [json.loads(l) for l in hpath.read_text(encoding="utf-8").splitlines() if l.strip()]
     asst = [r for r in recs if r["role"] == "assistant"][0]
     assert asst.get("reasoning") == "我的思考"
-    # NOT fed back to the model — get_messages reconstructs OpenAI messages only
+    # 不回喂模型 —— get_messages 只重建 OpenAI messages
     msgs = session_store.get_messages("s1")
     assert "reasoning" not in msgs[-1]
     assert msgs[-1] == {"role": "assistant", "content": "a"}

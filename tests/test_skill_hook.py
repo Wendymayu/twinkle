@@ -73,8 +73,8 @@ def test_appends_to_existing_frozen_sections(isolated_skills):
     ctx = _ctx()
     ctx.extra["frozen_sections"] = [pre]
     asyncio.run(SkillHook(mode="all").before_invoke(ctx))
-    assert ctx.extra["frozen_sections"][0] is pre       # sibling entry preserved
-    assert len(ctx.extra["frozen_sections"]) == 2       # appended, not replaced
+    assert ctx.extra["frozen_sections"][0] is pre       # sibling 条目保留
+    assert len(ctx.extra["frozen_sections"]) == 2       # 追加,非覆盖
     assert ctx.extra["frozen_sections"][1].name == "skills"
 
 

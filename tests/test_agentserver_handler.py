@@ -1,5 +1,5 @@
-"""Handler-level tests: malformed envelope still errors; a valid envelope
-reaches the injected loop. Replaces tests/test_echo.py (echo removed)."""
+"""Handler 级测试:畸形 envelope 仍报错;有效 envelope
+到达注入的 loop。替代 tests/test_echo.py(echo 已移除)。"""
 import asyncio
 import json
 
@@ -19,7 +19,7 @@ def _free_port() -> int:
 
 
 class _RecordingLoop:
-    """Records the request it received and streams back one canned frame."""
+    """记录收到的 request,并流回一个预置 frame。"""
     def __init__(self, store=None):
         self.seen = None
         self.session_store = store
@@ -37,7 +37,7 @@ class _RecordingLoop:
 
 
 class _FakeSkillNetClient:
-    """Returns a canned catalog; lets ws-level tests exercise the search branch without GitHub."""
+    """返回预置 catalog;让 ws 级测试能跑 search 分支,无需 GitHub。"""
     def __init__(self, catalog=None):
         self._catalog = catalog or []
 
@@ -98,7 +98,7 @@ def test_valid_envelope_dispatches_to_loop(tmp_path) -> None:
 
 
 def test_skill_list_local_routes_inline(tmp_path) -> None:
-    """skills.list_local is routed inline by ws_handler (never reaches the ReAct loop)."""
+    """skills.list_local 由 ws_handler 内联路由(永远到不了 ReAct loop)。"""
     from twinkle.agentserver.skills import _set_skill_manager, SkillManager
     port = _free_port()
     store = SessionStore(str(tmp_path / "sessions"))
@@ -132,7 +132,7 @@ def test_skill_list_local_routes_inline(tmp_path) -> None:
 
 
 def test_skill_search_runs_as_background_task(tmp_path) -> None:
-    """skills.search runs as a non-inline background task and sends a delayed e2a.result."""
+    """skills.search 作为非内联后台 task 运行,延迟发一个 e2a.result。"""
     from twinkle.agentserver.skills import _set_skillnet_client
     from twinkle.agentserver.skills.remote import SkillNetSkill
     _set_skillnet_client(_FakeSkillNetClient(catalog=[

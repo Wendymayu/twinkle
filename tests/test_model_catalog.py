@@ -35,9 +35,9 @@ def test_default_token_value():
 
 
 def test_dict_prefix_match_picks_longest_key(monkeypatch):
-    """longest-key branch actually picks the longest matching key, not any match.
-    Synthetic catalog where gpt-4o (100) and gpt-4o-mini (200) differ — only
-    picking gpt-4o-mini (longest) returns 200."""
+    """longest-key 分支实际选取最长匹配 key，而非任意匹配。
+    合成 catalog 中 gpt-4o (100) 与 gpt-4o-mini (200) 不同 —— 只有选
+    gpt-4o-mini（最长）才返回 200。"""
     import twinkle.config.model_catalog as mc
     monkeypatch.setattr(mc, "MODEL_CONTEXT_WINDOWS",
         {"gpt-4o": 100, "gpt-4o-mini": 200})

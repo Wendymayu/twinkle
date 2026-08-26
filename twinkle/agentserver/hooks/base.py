@@ -1,8 +1,8 @@
-"""Hook mechanism core types — HookEvent, AgentHook base class,
-HookContext, HookInputs, and control flow signals.
+"""Hook 机制核心类型 — HookEvent、AgentHook 基类、
+HookContext、HookInputs 与控制流信号。
 
-Mirrors jiuwen's AgentCallbackEvent + AgentRail, adapted for Twinkle's
-learning-focused reimplementation with Hook naming.
+镜像 jiuwen 的 AgentCallbackEvent + AgentRail，为 Twinkle 的
+学习向重实现适配，采用 Hook 命名。
 """
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from typing import Any, Callable, Union
 
 
 class HookEvent(enum.Enum):
-    """Lifecycle events in the Agent execution loop — hook trigger points.
+    """Agent 执行循环中的生命周期事件 — hook 触发点。
 
-    11 values mirroring jiuwen's AgentCallbackEvent one-to-one.
-    8 are currently triggered; 3 are reserved for future use.
+    11 个值与 jiuwen 的 AgentCallbackEvent 一一对应。
+    8 个当前会触发；3 个预留给未来使用。
     """
     BEFORE_INVOKE = "before_invoke"
     AFTER_INVOKE = "after_invoke"
@@ -25,13 +25,13 @@ class HookEvent(enum.Enum):
     BEFORE_TOOL_CALL = "before_tool_call"
     AFTER_TOOL_CALL = "after_tool_call"
     ON_TOOL_EXCEPTION = "on_tool_exception"
-    # Reserved — not triggered in current AgentLoop, but kept for jiuwen mapping
+    # 预留 — 当前 AgentLoop 不触发，但保留以对应 jiuwen
     AFTER_REACT_ITERATION = "after_react_iteration"
     BEFORE_TASK_ITERATION = "before_task_iteration"
     AFTER_TASK_ITERATION = "after_task_iteration"
 
 
-# Mapping from lifecycle method name → HookEvent
+# 生命周期方法名 → HookEvent 的映射
 _EVENT_METHOD_MAP: dict[str, HookEvent] = {
     "before_invoke": HookEvent.BEFORE_INVOKE,
     "after_invoke": HookEvent.AFTER_INVOKE,
@@ -48,27 +48,26 @@ _EVENT_METHOD_MAP: dict[str, HookEvent] = {
 
 
 class AgentHook:
-    """Base class for all agent lifecycle hooks.
+    """所有 agent 生命周期 hook 的基类。
 
-    A Hook is a "capability bundle" — it groups multiple lifecycle callbacks
-    into one class with a shared priority. Subclass and override only the
-    methods you care about; the rest are no-ops and get_callbacks() will
-    skip them automatically.
+    一个 Hook 是一个"能力束" — 它把多个生命周期 callback 聚合成一个类，
+    共享一个 priority。子类化并只覆盖你关心的方法；其余都是 no-op，
+    get_callbacks() 会自动跳过它们。
 
-    Mirrors jiuwen's AgentRail.
+    镜像 jiuwen 的 AgentRail。
     """
-    priority: int = 50  # Execution order: higher number runs first
+    priority: int = 50  # 执行顺序：数值大者先跑
 
     def init(self, agent: Any) -> None:
-        """Called when this hook is registered on an agent. Use for setup
-        (e.g., storing agent reference, reading config)."""
+        """本 hook 注册到 agent 上时调用。用于初始化
+       （如存 agent 引用、读 config）。"""
         ...
 
     def uninit(self, agent: Any) -> None:
-        """Called when this hook is unregistered. Use for teardown."""
+        """本 hook 注销时调用。用于清理。"""
         ...
 
-    # 11 lifecycle callbacks — all default no-op
+    # 11 个生命周期 callback — 默认全为 no-op
     async def before_invoke(self, ctx: Any) -> None: ...
     async def after_invoke(self, ctx: Any) -> None: ...
     async def before_model_call(self, ctx: Any) -> None: ...
@@ -82,22 +81,21 @@ class AgentHook:
     async def after_task_iteration(self, ctx: Any) -> None: ...
 
     def _is_base_method(self, method: Callable) -> bool:
-        """Return True if *method* is the base-class default (not overridden).
+        """若 *method* 是基类默认实现（未被覆盖）则返回 True。
 
-        Compares the resolved method on this instance against the same
-        method name resolved on AgentHook itself. If they're the same
-        function object, the subclass didn't override it.
+        将本实例上解析到的方法，与 AgentHook 上同名方法对比。
+        若是同一个 function 对象，说明子类未覆盖它。
         """
         name = method.__func__.__name__ if hasattr(method, "__func__") else method.__name__
         base_method = getattr(AgentHook, name, None)
         if base_method is None:
-            return False  # not a known lifecycle method
+            return False  # 不是已知的生命周期方法
         actual = method.__func__ if hasattr(method, "__func__") else method
         return actual is base_method
 
     def get_callbacks(self) -> dict[HookEvent, Callable]:
-        """Return {HookEvent: bound_method} only for lifecycle methods
-        the subclass actually overrides. init/uninit are excluded.
+        """只返回子类实际覆盖的生命周期方法对应的 {HookEvent: bound_method}。
+        init/uninit 不在内。
         """
         callbacks: dict[HookEvent, Callable] = {}
         for name, event in _EVENT_METHOD_MAP.items():
@@ -107,27 +105,27 @@ class AgentHook:
         return callbacks
 
 
-# --- HookInputs (per-stage typed data) --- #
+# --- HookInputs（按阶段的类型化数据）--- #
 
 
 @dataclass
 class InvokeInputs:
-    """Inputs for BEFORE/AFTER_INVOKE events."""
+    """BEFORE/AFTER_INVOKE 事件的输入。"""
     query: str
-    mode: str = ""  # "" = normal, "team" = team collaboration
-    envelope: Any = None  # E2AEnvelope — using Any to avoid circular import; deprecated, prefer AgentRequest
+    mode: str = ""  # "" = 普通，"team" = 团队协作
+    envelope: Any = None  # E2AEnvelope — 用 Any 避免循环 import；已弃用，优先用 AgentRequest
 
 
 @dataclass
 class ModelCallInputs:
-    """Inputs for BEFORE/AFTER/ON_MODEL_CALL events."""
+    """BEFORE/AFTER/ON_MODEL_CALL 事件的输入。"""
     messages: list[dict]
     tools: list[dict]
 
 
 @dataclass
 class ToolCallInputs:
-    """Inputs for BEFORE/AFTER/ON_TOOL_CALL events."""
+    """BEFORE/AFTER/ON_TOOL_CALL 事件的输入。"""
     name: str
     args: dict
     tool_call_id: str
@@ -135,52 +133,50 @@ class ToolCallInputs:
 
 @dataclass
 class TaskIterationInputs:
-    """Inputs for BEFORE/AFTER_TASK_ITERATION events (reserved)."""
+    """BEFORE/AFTER_TASK_ITERATION 事件的输入（预留）。"""
     envelope: Any
 
 
-# Union type for all inputs
+# 所有 inputs 的 Union 类型
 HookInputs = Union[InvokeInputs, ModelCallInputs, ToolCallInputs, TaskIterationInputs]
 
 
-# --- Control flow signals --- #
+# --- 控制流信号 --- #
 
 @dataclass
 class RetryRequest:
-    """Signal: Hook requests retry of the current step (e.g., context
-    overflow recovery compresses context then asks to re-call LLM)."""
+    """信号：hook 请求重试当前步骤（如上下文溢出恢复先压缩上下文再请求重调 LLM）。"""
     delay: float = 0
 
 
 @dataclass
 class ForceFinishRequest:
-    """Signal: Hook requests skipping the current step and returning
-    a result immediately (e.g., security interception)."""
+    """信号：hook 请求跳过当前步骤并立即返回结果（如安全拦截）。"""
     result: Any = None
 
 
 class HookInterrupt(Exception):
-    """Signal: Hook interrupts execution immediately (e.g., HITL approval).
+    """信号：hook 立即中断执行（如 HITL 审批）。
 
-    Corresponds to jiuwen's ToolInterruptException. Current roadmap
-    doesn't implement permissions, but interface shape is reserved.
+    对应 jiuwen 的 ToolInterruptException。当前 roadmap 未实现
+    permissions，但接口形态预留。
     """
     def __init__(self, message: str = "", data: dict | None = None):
         super().__init__(message)
         self.data = data or {}
 
 
-# --- HookContext (unified data packet) --- #
+# --- HookContext（统一数据包）--- #
 
 @dataclass
 class HookContext:
-    """The context object passed to every hook callback.
+    """传给每个 hook callback 的 context 对象。
 
-    Carries: current event, stage-specific inputs, session/request IDs,
-    a shared extra dict for inter-hook communication, exception info,
-    and control flow signal methods.
+    承载：当前事件、按阶段的 inputs、session/request ID、
+    用于 hook 间通信的共享 extra dict、异常信息，
+    以及控制流信号方法。
     """
-    agent: Any  # AgentLoop reference — Any to avoid circular import
+    agent: Any  # AgentLoop 引用 — 用 Any 避免循环 import
     event: HookEvent
     inputs: HookInputs
     session_id: str | None
@@ -190,26 +186,26 @@ class HookContext:
     exception: Exception | None = None
     retry_attempt: int = 0
 
-    # Internal signal fields — not part of the public API surface
+    # 内部信号字段 — 不属于公共 API 面
     _retry_request: RetryRequest | None = field(default=None, repr=False)
     _force_finish_request: ForceFinishRequest | None = field(default=None, repr=False)
 
     def request_retry(self, delay: float = 0) -> None:
-        """Hook requests retry of the current step after this callback finishes."""
+        """hook 在本 callback 结束后请求重试当前步骤。"""
         self._retry_request = RetryRequest(delay=delay)
 
     def request_force_finish(self, result: Any = None) -> None:
-        """Hook requests skipping the method body and returning *result*."""
+        """hook 请求跳过方法体并返回 *result*。"""
         self._force_finish_request = ForceFinishRequest(result=result)
 
     def consume_retry_request(self) -> RetryRequest | None:
-        """Caller consumes the retry signal — returns it and clears it."""
+        """调用方消费 retry 信号 — 返回它并清空。"""
         req = self._retry_request
         self._retry_request = None
         return req
 
     def consume_force_finish_request(self) -> ForceFinishRequest | None:
-        """Caller consumes the force-finish signal — returns it and clears it."""
+        """调用方消费 force-finish 信号 — 返回它并清空。"""
         req = self._force_finish_request
         self._force_finish_request = None
         return req

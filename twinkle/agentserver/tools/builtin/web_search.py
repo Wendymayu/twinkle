@@ -1,13 +1,12 @@
-"""web_search — layered search tool: Tavily API when a key is configured,
-DuckDuckGo HTML as a zero-config fallback.
+"""web_search —— 分层搜索工具:配了 key 时走 Tavily API,
+无 key 时以 DuckDuckGo HTML 作为零配置回退。
 
-Design borrows the resilient skeleton from jiuwenswarm's search tools
-(challenge detection + multi-engine fallback + error aggregation + snippet
-extraction) but adapts it to Twinkle's stack: httpx-native async, a single
-``@tool``, no paid-provider orchestration noise. Tavily is the reliable
-primary path (clean LLM-ready JSON, no anti-bot); DDG HTML is the no-key
-fallback with explicit anti-bot-challenge detection and one backoff retry, so
-a rate-limited challenge page never silently surfaces as "(no results)".
+设计借用 jiuwenswarm 搜索工具的稳健骨架(challenge 检测 + 多引擎回退 +
+错误聚合 + snippet 提取),但适配 Twinkle 的技术栈:httpx 原生 async,
+单个 ``@tool``,无付费 provider 编排噪音。Tavily 是可靠的主路径
+(干净的 LLM-ready JSON,无反爬);DDG HTML 是无 key 回退,带显式反爬
+challenge 检测和一次 backoff 重试,这样限流的 challenge 页面不会静默
+变成"(无结果)"。
 """
 from __future__ import annotations
 
@@ -29,18 +28,18 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
-# Backoff before retrying DDG once after an anti-bot challenge; tests pin to 0.
+# 反爬 challenge 后重试 DDG 前的 backoff;测试 pin 到 0。
 _RETRY_DELAY = 1.5
 _DD_CHALLENGE_STATUSES = {202, 418, 429, 503}
 _DD_CHALLENGE_MARKERS = ("anomaly.js", "challenge-form")
 
 
 class _EngineError(Exception):
-    """Raised by an individual search engine to trigger fallback / reporting."""
+    """单个搜索引擎抛出,以触发回退 / 上报。"""
 
 
 class _ResultParser(HTMLParser):
-    """Collect result__a (title, href) and result__snippet entries in order."""
+    """按序收集 result__a(title, href)与 result__snippet 条目。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -84,7 +83,7 @@ class _ResultParser(HTMLParser):
             self._snippet_parts.append(data)
 
     def paired(self) -> list[list[str]]:
-        """Best-effort index pairing of snippets onto results."""
+        """尽力按下标把 snippet 配到 result 上。"""
         for i, _ in enumerate(self.results):
             if i < len(self._snippets):
                 self.results[i][2] = self._snippets[i]
@@ -100,7 +99,7 @@ def _strip_tags(value: str) -> str:
 
 
 def _resolve_ddg_url(href: str) -> str:
-    """DDG wraps real URLs as //duckduckgo.com/l/?uddg=<encoded>."""
+    """DDG 把真实 URL 包成 //duckduckgo.com/l/?uddg=<encoded>。"""
     if href.startswith("//"):
         href = "https:" + href
     parsed = urlparse(href)
@@ -130,7 +129,7 @@ async def _http_request(
     json: dict[str, Any] | None = None,
     timeout: float = 30.0,
 ) -> httpx.Response:
-    """Thin httpx hook — tests monkeypatch this to inject canned responses."""
+    """薄 httpx 钩子 —— 测试 monkeypatch 它以注入预设响应。"""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         if method.upper() == "GET":
             return await client.get(url, headers=headers, params=params)
@@ -217,12 +216,11 @@ def _format_rows(rows: list[dict[str, str]], engine: str, query: str) -> str:
 
 @tool
 async def web_search(query: str, max_results: int = 5) -> str:
-    """Search the web; return up to max_results ranked title/URL/snippet lines.
+    """搜索网页;返回最多 max_results 条排序后的 title/URL/snippet 行。
 
-    Uses the Tavily API when ``TAVILY_API_KEY`` is set; otherwise falls back to
-    DuckDuckGo HTML scraping. On a DuckDuckGo anti-bot challenge (status 202 /
-    anomaly.js) it retries once, and surfaces a clear error rather than the
-    old silent "(no results)" when every engine is unavailable.
+    设了 ``TAVILY_API_KEY`` 时用 Tavily API;否则回退到 DuckDuckGo HTML
+    抓取。遇 DuckDuckGo 反爬 challenge(status 202 / anomaly.js)时重试
+    一次,并在所有引擎不可用时暴露清晰报错,而非旧版静默的"(无结果)"。
     """
     query = (query or "").strip()
     if not query:
