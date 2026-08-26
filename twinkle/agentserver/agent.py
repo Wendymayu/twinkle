@@ -407,6 +407,17 @@ class ReActAgent:
         """Unregister an AgentHook."""
         self._hook_manager.unregister_hook(hook_instance)
 
+    async def _refresh_mcp_tools(self, ctx: HookContext) -> None:
+        """请求边界刷新 MCP 工具清单:refresh_all → 应用 diff 到 tm。在 before_invoke 之前调,
+        使 progressive 在 before_invoke 能看到刷新后的工具清单。整轮 schemas 冻结保 prefix cache。"""
+        from twinkle.agentserver.mcp.manager import get_mcp_manager
+        diffs = await get_mcp_manager().refresh_all()
+        for diff in diffs:
+            for name in diff.removed:
+                self._tool_manager.unregister(name)
+            for tool in diff.added:
+                self._tool_manager.register(tool)
+
     # -- Public entry point -------------------------------------------------
 
     async def run(self, request: AgentRequest) -> AsyncIterator[E2AResponse]:
@@ -426,6 +437,10 @@ class ReActAgent:
             request_id=request_id,
             extra={},
         )
+
+        # 请求边界刷新 MCP 工具清单(before_invoke 之前 → progressive 能看到刷新后工具清单;
+        # schemas 冻结前 → 整轮复用冻结 schemas 保 prefix cache)。
+        await self._refresh_mcp_tools(ctx)
 
         await self._hook_manager.execute(HookEvent.BEFORE_INVOKE, ctx)
 

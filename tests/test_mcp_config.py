@@ -46,3 +46,13 @@ def test_twinkle_config_loads_mcp_block_from_yaml() -> None:
     cfg = load_config()
     assert cfg.mcp.enabled is False
     assert cfg.mcp.servers == []
+
+
+def test_mcp_tool_refresh_ttl_default_300() -> None:
+    cfg = McpConfig()
+    assert cfg.tool_refresh_ttl == 300.0
+
+
+def test_mcp_tool_refresh_ttl_none_opts_out() -> None:
+    cfg = McpConfig(tool_refresh_ttl=None)
+    assert cfg.tool_refresh_ttl is None

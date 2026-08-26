@@ -51,7 +51,9 @@ class ToolsSearchTool:
 
     def __init__(self, tm: Any, eager_names: Iterable[str]) -> None:
         self._tm = tm
-        self._eager = set(eager_names)
+        # 存引用(builder 传同一 eager set 给 hook + 两 meta-tool):hook.before_invoke 重算
+        # 改共享 set,本 tool 的 deferred 判断随之同步。
+        self._eager = eager_names if isinstance(eager_names, set) else set(eager_names)
         self.card = ToolCard(
             name="tools_search",
             description=(
@@ -101,7 +103,9 @@ class InvokeToolTool:
 
     def __init__(self, tm: Any, eager_names: Iterable[str]) -> None:
         self._tm = tm
-        self._eager = set(eager_names)
+        # 存引用(builder 传同一 eager set 给 hook + 两 meta-tool):hook.before_invoke 重算
+        # 改共享 set,本 tool 的 deferred 判断随之同步。
+        self._eager = eager_names if isinstance(eager_names, set) else set(eager_names)
         self.card = ToolCard(
             name="invoke_tool",
             description=(

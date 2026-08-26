@@ -38,7 +38,7 @@ def apply_progressive_tools(tm: Any, config: Any, permissions: Any):
     _force_protected_eager(tm, eager, permissions)         # #1 权限守卫
     tm.register(ToolsSearchTool(tm, eager))
     tm.register(InvokeToolTool(tm, eager))
-    return ProgressiveToolHook(eager)
+    return ProgressiveToolHook(eager, permissions)
 
 
 def _force_protected_eager(tm: Any, eager: set, permissions: Any) -> None:

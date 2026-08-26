@@ -11,6 +11,8 @@ from twinkle.agentserver.tools.builtin.progressive_tools import (
     ToolsSearchTool, InvokeToolTool, META_NAMES,
 )
 from twinkle.agentserver.tools.decorator import tool
+from twinkle.agentserver.tools.base import ToolCard
+from twinkle.agentserver.tools.local_function import LocalFunction
 from twinkle.agentserver.tools.manager import ToolManager
 
 
@@ -34,7 +36,7 @@ def _setup(eager):
     class _Agent:
         _tool_manager = m
 
-    return m, ProgressiveToolHook(eager), _Agent
+    return m, ProgressiveToolHook(eager, PermissionsConfig()), _Agent
 
 
 _EAGER = ["read_file", "tools_search", "invoke_tool"]
@@ -89,7 +91,7 @@ def test_no_deferred_is_noop():
     class _Agent:
         _tool_manager = m
 
-    hook = ProgressiveToolHook(_EAGER)
+    hook = ProgressiveToolHook(_EAGER, PermissionsConfig())
     ctx = HookContext(
         agent=_Agent(), event=HookEvent.BEFORE_INVOKE,
         inputs=InvokeInputs(query="q", mode=""),
@@ -258,3 +260,68 @@ def test_apply_refuses_to_defer_approval_tier_tools():
                      if t.card.name not in hook.eager_names]
     assert allow_deferred, "至少一个 allow 档内置应被 defer"
     assert "command_exec" not in allow_deferred  # 审批级的不在 deferred 里
+
+
+# --- before_invoke 重算 eager(pull 模型,对齐 jiuwenswarm ProgressiveToolRail) --- #
+
+def _make_tool(name: str) -> LocalFunction:
+    async def _fn(**kwargs):
+        return "ok"
+    return LocalFunction(ToolCard(name=name, description="d", parameters={}), _fn)
+
+
+def test_before_invoke_recomputes_eager_pulls_non_allow() -> None:
+    """before_invoke 自己重算 eager:对新出现的非 allow 档工具拉回 eager(保 #1 守卫:
+    invoke_tool 绕过审批门,非 allow 档不许 defer)。pull 模型,每请求重算而非事件驱动。"""
+    tm = ToolManager()
+    tm.register(_make_tool("builtin_a"))
+    tm.register(_make_tool("mcp.risky"))       # 模拟 refresh 后新增的非 allow 档 MCP 工具
+    permissions = PermissionsConfig(tools={"mcp.risky": "require-approval"}, global_default="allow")
+    hook = ProgressiveToolHook(eager_names=["builtin_a"], permissions=permissions)
+    assert "mcp.risky" not in hook.eager_names   # 初始不在 eager
+    fake_agent = type("A", (), {"_tool_manager": tm})()
+    ctx = HookContext(agent=fake_agent, event=HookEvent.BEFORE_INVOKE,
+                      inputs=InvokeInputs(query="q", mode=""),
+                      session_id="s", request_id="r", extra={})
+    asyncio.run(hook.before_invoke(ctx))
+    assert "mcp.risky" in hook.eager_names      # 非 allow 档被拉回 eager(#1 守卫 intact)
+    assert "builtin_a" in hook.eager_names
+
+
+def test_before_invoke_leaves_allow_deferred() -> None:
+    """allow 档工具保持 deferred(重算只挡非 allow 档,不误伤 allow 档 deferred);
+    同时正面对照:同 tm 的非 allow 兄弟 mcp.risky 被拉回 eager(证明重算确实执行,非"重算没跑")。"""
+    tm = ToolManager()
+    tm.register(_make_tool("mcp.safe"))
+    tm.register(_make_tool("mcp.risky"))       # 正面对照:非 allow 档
+    permissions = PermissionsConfig(tools={"mcp.risky": "require-approval"}, global_default="allow")
+    hook = ProgressiveToolHook(eager_names=[], permissions=permissions)
+    fake_agent = type("A", (), {"_tool_manager": tm})()
+    ctx = HookContext(agent=fake_agent, event=HookEvent.BEFORE_INVOKE,
+                      inputs=InvokeInputs(query="q", mode=""),
+                      session_id="s", request_id="r", extra={})
+    asyncio.run(hook.before_invoke(ctx))
+    assert "mcp.safe" not in hook.eager_names   # allow 档保持 deferred
+    assert "mcp.risky" in hook.eager_names      # 正面对照:非 allow 档被拉回(重算确实跑了)
+
+
+def test_before_invoke_recompute_syncs_invoke_tool_guard() -> None:
+    """#1 守卫 invoke_tool 路径:refresh 新增非 allow 工具后,invoke_tool 必须拒绝它。
+    三方共享 eager set → before_invoke 重算改共享 set → InvokeToolTool 的 deferred 判断也更新。"""
+    tm = ToolManager()
+    tm.register(_make_tool("builtin_a"))
+    tm.register(_make_tool("mcp.risky"))   # 模拟 refresh 新增的非 allow 工具
+    eager = {"builtin_a"}                   # set → 三方共享
+    tm.register(ToolsSearchTool(tm, eager))
+    tm.register(InvokeToolTool(tm, eager))
+    permissions = PermissionsConfig(tools={"mcp.risky": "require-approval"}, global_default="allow")
+    hook = ProgressiveToolHook(eager, permissions)   # eager 同一 set → 共享
+    fake_agent = type("A", (), {"_tool_manager": tm})()
+    ctx = HookContext(agent=fake_agent, event=HookEvent.BEFORE_INVOKE,
+                      inputs=InvokeInputs(query="q", mode=""),
+                      session_id="s", request_id="r", extra={})
+    asyncio.run(hook.before_invoke(ctx))
+    invoke = tm.get("invoke_tool")
+    result = asyncio.run(invoke.invoke({"tool_name": "mcp.risky", "arguments": {}}))
+    assert "不是按需可见工具" in result   # #1 守卫 invoke_tool 路径 intact(共享 set 同步)
+    assert "mcp.risky" in hook.eager_names

@@ -475,3 +475,34 @@ def test_sanitize_orphan_tool_calls_includes_tool_name_and_args(session_store) -
     assert "echo" in content
     assert "interrupted" in content
     assert "text" in content  # args should be present
+
+
+def test_refresh_mcp_tools_applies_diff(monkeypatch) -> None:
+    from twinkle.agentserver.agent import ReActAgent
+    from twinkle.agentserver.tools.manager import ToolManager
+    from twinkle.agentserver.mcp.manager import _ToolDiff
+    from twinkle.agentserver.hooks.base import HookContext, HookEvent, InvokeInputs
+    from twinkle.agentserver.tools.base import ToolCard
+    from twinkle.agentserver.tools.local_function import LocalFunction
+
+    async def _fn(**kwargs): return "ok"
+    old_tool = LocalFunction(ToolCard(name="old.x", description="d", parameters={}), _fn)
+    new_tool = LocalFunction(ToolCard(name="new.x", description="d", parameters={}), _fn)
+    tm = ToolManager()
+    tm.register(old_tool)
+
+    agent = ReActAgent(llm=None, store=None, tools=tm, hooks=())   # 无 progressive hook → 不分发
+
+    class _FakeMgr:
+        async def refresh_all(self):
+            return [_ToolDiff(added=[new_tool], removed=["old.x"])]
+    from twinkle.agentserver.mcp import manager as mcp_mod
+    monkeypatch.setattr(mcp_mod, "get_mcp_manager", lambda *a, **k: _FakeMgr())
+
+    ctx = HookContext(agent=agent, event=HookEvent.BEFORE_INVOKE,
+                      inputs=InvokeInputs(query="", mode=""),
+                      session_id="s", request_id="r", extra={})
+    asyncio.run(agent._refresh_mcp_tools(ctx))
+    names = {t.card.name for t in tm.list()}
+    assert "new.x" in names
+    assert "old.x" not in names

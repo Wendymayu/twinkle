@@ -286,6 +286,7 @@ class McpConfig(_StrictModel):
     connect_timeout: float = 30.0
     call_timeout: float = 60.0
     reconnect_attempts: int = 3
+    tool_refresh_ttl: float | None = 300.0   # 请求边界 TTL 刷新秒;None=opt-out 永不刷;默认 300(MCP 设计哲学=server 动态)
 
 
 class ProgressiveToolConfig(_StrictModel):

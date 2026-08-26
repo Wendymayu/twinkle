@@ -142,6 +142,7 @@ mcp:
   connect_timeout: 30.0                   # 连接超时秒
   call_timeout: 60.0                      # 调用超时秒(call_tool 兜底)
   reconnect_attempts: 3                   # streamable-http 传输层错误重连次数
+  tool_refresh_ttl: 300                   # 请求边界工具清单刷新秒;None=永不刷;默认 300(server 端增删工具 5 分钟内可见)
   servers: []                             # MCP server 列表;示例见下
   # - name: myserver                      # server 名,工具命名前缀 {name}.{tool}
   #   transport: streamable-http

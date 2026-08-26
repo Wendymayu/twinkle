@@ -14,7 +14,7 @@ from typing import Any, Callable, Union
 class HookEvent(enum.Enum):
     """Lifecycle events in the Agent execution loop — hook trigger points.
 
-    11 values matching jiuwen's AgentCallbackEvent one-to-one.
+    11 values mirroring jiuwen's AgentCallbackEvent one-to-one.
     8 are currently triggered; 3 are reserved for future use.
     """
     BEFORE_INVOKE = "before_invoke"

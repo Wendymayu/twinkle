@@ -1,16 +1,20 @@
 # tests/test_mcp_manager.py
 import asyncio
+import time
 import pytest
 from twinkle.agentserver.mcp.manager import McpManager, get_mcp_manager, _set_mcp_manager
 from twinkle.agentserver.tools.manager import ToolManager
 
 
 class _FakeClient:
-    def __init__(self, name, tools=None, connect_exc=None, call_text="out"):
+    def __init__(self, name, tools=None, connect_exc=None, call_text="out",
+                 list_tools_exc=None):
         self.name = name
         self._tools = tools or []
         self._connect_exc = connect_exc
         self._call_text = call_text
+        self.list_tools_exc = list_tools_exc
+        self.list_tools_call_count = 0
         self.connected = False
     async def connect(self):
         if self._connect_exc:
@@ -19,6 +23,9 @@ class _FakeClient:
     async def disconnect(self):
         self.connected = False
     async def list_tools(self):
+        self.list_tools_call_count += 1
+        if self.list_tools_exc:
+            raise self.list_tools_exc
         from twinkle.agentserver.mcp.tool import McpToolCard
         return [McpToolCard(name=f"{self.name}.{t}", server_name=self.name,
                             description=d, parameters=s)
@@ -92,6 +99,7 @@ def test_release_disconnects_all() -> None:
     assert fake.connected
     asyncio.run(mgr.release())
     assert not fake.connected
+    assert mgr._server_resources == {}
 
 
 def test_singleton_and_test_hook() -> None:
@@ -103,3 +111,80 @@ def test_singleton_and_test_hook() -> None:
     _set_mcp_manager(fake)
     assert get_mcp_manager() is fake
     _set_mcp_manager(None)
+
+
+def test_startup_populates_server_resources() -> None:
+    from twinkle.config.schema import McpServerConfig
+    srv = McpServerConfig(name="fs", transport="stdio", command="npx", args=["-y", "p"])
+    fake = _FakeClient("fs", tools=[("read", "d", {"type": "object"}), ("write", "d", {})])
+    mgr = McpManager(_cfg([srv]), client_factory=_factory([fake]))
+    asyncio.run(mgr.startup())
+    res = mgr._server_resources["fs"]
+    assert res.name == "fs"
+    assert res.client is fake
+    assert res.tool_names == {"fs.read", "fs.write"}
+    assert res.expiry == 300.0          # McpConfig 默认
+    assert isinstance(res.last_update, float)
+
+
+def test_refresh_all_within_ttl_no_fetch() -> None:
+    from twinkle.config.schema import McpServerConfig
+    srv = McpServerConfig(name="fs", transport="stdio", command="npx", args=["-y", "p"])
+    fake = _FakeClient("fs", tools=[("read", "d", {})])
+    mgr = McpManager(_cfg([srv]), client_factory=_factory([fake]))
+    asyncio.run(mgr.startup())
+    # 把 last_update 设成"刚刷过",TTL(300) 内
+    mgr._server_resources["fs"].last_update = time.time()
+    diffs = asyncio.run(mgr.refresh_all())
+    assert diffs == []
+    assert fake.list_tools_call_count == 1   # 仅 startup 调过,refresh 没调
+
+
+def test_refresh_all_expired_fetches_and_diffs() -> None:
+    from twinkle.config.schema import McpServerConfig
+    srv = McpServerConfig(name="fs", transport="stdio", command="npx", args=["-y", "p"])
+    fake = _FakeClient("fs", tools=[("read", "d", {})])
+    mgr = McpManager(_cfg([srv]), client_factory=_factory([fake]))
+    asyncio.run(mgr.startup())
+    # 模拟 server 端工具变了:read 删了,write 新增
+    fake._tools = [("write", "d", {})]
+    # 让 TTL 过期
+    mgr._server_resources["fs"].last_update = time.time() - 301
+    diffs = asyncio.run(mgr.refresh_all())
+    assert len(diffs) == 1
+    assert diffs[0].removed == ["fs.read"]
+    assert [t.card.name for t in diffs[0].added] == ["fs.write"]
+    assert "fs.write" in mgr._tools
+    assert "fs.read" not in mgr._tools
+    assert mgr._server_resources["fs"].tool_names == {"fs.write"}
+
+
+def test_refresh_all_failure_degrades_keep_old() -> None:
+    from twinkle.config.schema import McpServerConfig
+    srv = McpServerConfig(name="fs", transport="stdio", command="npx", args=["-y", "p"])
+    fake = _FakeClient("fs", tools=[("read", "d", {})])
+    mgr = McpManager(_cfg([srv]), client_factory=_factory([fake]))
+    asyncio.run(mgr.startup())
+    # 让 list_tools 抛异常 + TTL 过期
+    fake.list_tools_exc = RuntimeError("server down")
+    mgr._server_resources["fs"].last_update = time.time() - 301
+    diffs = asyncio.run(mgr.refresh_all())
+    assert diffs == []                       # 该 server 无 diff
+    assert "fs.read" in mgr._tools           # 旧清单保留
+    assert mgr._server_resources["fs"].tool_names == {"fs.read"}  # 未更新
+
+
+def test_refresh_all_force_bypasses_ttl() -> None:
+    from twinkle.config.schema import McpServerConfig
+    srv = McpServerConfig(name="fs", transport="stdio", command="npx", args=["-y", "p"])
+    fake = _FakeClient("fs", tools=[("read", "d", {})])
+    mgr = McpManager(_cfg([srv]), client_factory=_factory([fake]))
+    asyncio.run(mgr.startup())
+    # TTL 内(刚刷过),但 force=True 应绕过 TTL 真拉
+    mgr._server_resources["fs"].last_update = time.time()
+    fake._tools = [("write", "d", {})]  # 工具变了,验证真拉+diff
+    diffs = asyncio.run(mgr.refresh_all(force=True))
+    assert len(diffs) == 1
+    assert diffs[0].removed == ["fs.read"]
+    assert [t.card.name for t in diffs[0].added] == ["fs.write"]
+    assert fake.list_tools_call_count == 2  # startup 1 + force 刷新 1
