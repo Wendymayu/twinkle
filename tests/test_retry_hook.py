@@ -1,8 +1,9 @@
-"""RetryHook 的测试 — 针对瞬时异常的 model + tool 调用重试。
+"""RetryHook 的测试 — 针对瞬时异常的 model 调用重试。
 
-RetryHook 同时实现 on_model_exception 和 on_tool_exception：仅当异常为瞬时
-且为第一次尝试时，才请求 loop 重试（一次）。非瞬时错误与第二次尝试的失败
-原样传播。
+RetryHook 实现 on_model_exception：仅当异常为瞬时且为第一次尝试时，才请求
+loop 重试（一次）。非瞬时错误与第二次尝试的失败原样传播。
+
+工具层重试已移除（2026-08-27），on_tool_exception 不再实现。
 """
 from __future__ import annotations
 
@@ -75,11 +76,3 @@ def test_retry_hook_skips_retry_for_non_transient():
     ctx = _ctx(ValueError("bad"), retry_attempt=0)
     asyncio.run(hook.on_model_exception(ctx))
     assert ctx.consume_retry_request() is None
-
-
-def test_retry_hook_handles_tool_exception_too():
-    hook = RetryHook()
-    ctx = _ctx(httpx.ConnectError("net"), retry_attempt=0,
-              event=HookEvent.ON_TOOL_EXCEPTION)
-    asyncio.run(hook.on_tool_exception(ctx))
-    assert ctx.consume_retry_request() is not None

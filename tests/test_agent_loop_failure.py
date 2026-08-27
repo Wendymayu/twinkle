@@ -1,10 +1,10 @@
-"""AgentLoop 失败处理：工具异常捕获 + RetryHook 重试。
+"""AgentLoop 失败处理：工具异常捕获 + model 层 RetryHook 重试。
 
-覆盖为修复失败处理缺口而新增的三种行为：
-- 工具抛非瞬态异常时，变成 "[tool error] ..." tool_result，
+覆盖：
+- 工具抛异常（瞬态或非瞬态）时，不重试，变成 "[tool error] ..." tool_result，
   循环继续（不崩）——该捕获在 agent_loop，而非 ToolManager.execute。
-- 工具抛瞬态异常时重试一次（由 RetryHook 经 @hook 触发），
-  仍失败则变成 "[tool error] ..." tool_result。
+  工具层重试已移除（2026-08-27）：瞬时网络异常重试会重复执行有副作用的
+  方法体、无幂等保护，对写工具有重复副作用风险。
 - model 调用抛瞬态异常时重试一次，重试前有 backoff 睡眠。
 """
 from __future__ import annotations
@@ -90,10 +90,9 @@ def test_tool_non_transient_becomes_tool_error_and_loop_continues(session_store)
     assert tool_msgs and tool_msgs[0]["content"] == "[tool error] ValueError: boom"
 
 
-def test_tool_transient_retried_once_then_becomes_tool_error(session_store):
-    """瞬态工具异常（httpx.ConnectError）重试一次（总共调用
-    两次）；持续失败则变成 "[tool error] ..." tool_result，
-    循环继续。"""
+def test_tool_transient_not_retried_becomes_tool_error(session_store):
+    """瞬态工具异常（httpx.ConnectError）不再重试（工具层重试已移除
+    2026-08-27）；直接变成 "[tool error] ..." tool_result，循环继续。"""
     store = session_store
     calls = {"n": 0}
 
@@ -115,7 +114,7 @@ def test_tool_transient_retried_once_then_becomes_tool_error(session_store):
 
     frames = asyncio.run(run())
 
-    assert calls["n"] == 2                       # 瞬态重试 1 次
+    assert calls["n"] == 1                       # 工具层不重试，只执行 1 次
     assert frames[-1].response_kind == "e2a.complete"
     tool_msgs = [m for m in store.get_messages("s1") if m.get("role") == "tool"]
     assert tool_msgs and tool_msgs[0]["content"].startswith("[tool error]")

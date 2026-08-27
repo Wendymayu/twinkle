@@ -1,10 +1,13 @@
-"""RetryHook — 对瞬时 model/tool 异常重试一次。
+"""RetryHook — 对瞬时 model 异常重试一次。
 
-接入既有 retry 机制（不新增循环）：在 ON_MODEL_EXCEPTION /
-ON_TOOL_EXCEPTION 时，若异常是瞬时的且为第一次尝试，
-通过 ctx.request_retry(delay) 请求 retry。@hook 装饰器（tool 路径）
-与 _inner_run_stream 的 model retry 循环（agent_loop.py）消费该信号并
-重新执行。非瞬时错误与第二次尝试原样传播。
+接入既有 retry 机制（不新增循环）：在 ON_MODEL_EXCEPTION 时，若异常是瞬时的
+且为第一次尝试，通过 ctx.request_retry(delay) 请求 retry。_inner_run_stream
+的 model retry 循环（agent_loop.py）消费该信号并重新执行。非瞬时错误与第二次
+尝试原样传播。
+
+工具层重试已移除（2026-08-27）：瞬时网络异常重试会重新执行有副作用的方法体、
+无幂等保护，对写工具有重复副作用风险。工具异常由 @hook 的 on_exception
+触发观测（AuditHook / RepeatToolCallDetectorHook），不再重试、直接 raise。
 """
 from __future__ import annotations
 
@@ -37,7 +40,7 @@ def is_transient(exc: BaseException | None) -> bool:
 
 
 class RetryHook(AgentHook):
-    """对瞬时 model + tool 异常重试一次。
+    """对瞬时 model 异常重试一次。
 
     priority=50 — 功能层：在安全（100）之后、观察者（0）之前。
     """
@@ -49,9 +52,6 @@ class RetryHook(AgentHook):
         self._delay = delay
 
     async def on_model_exception(self, ctx: HookContext) -> None:
-        self._maybe_request_retry(ctx)
-
-    async def on_tool_exception(self, ctx: HookContext) -> None:
         self._maybe_request_retry(ctx)
 
     def _maybe_request_retry(self, ctx: HookContext) -> None:

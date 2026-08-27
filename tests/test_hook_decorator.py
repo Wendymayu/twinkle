@@ -1,4 +1,4 @@
-"""@hook 装饰器测试 — before/after/exception/force_finish/retry。"""
+"""@hook 装饰器测试 — before/after/exception/force_finish。"""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,6 @@ from twinkle.agentserver.hooks.base import (
     HookInterrupt,
     InvokeInputs,
     ModelCallInputs,
-    RetryRequest,
     ToolCallInputs,
 )
 from twinkle.agentserver.hooks.decorator import hook
@@ -122,43 +121,6 @@ def test_hook_decorator_force_finish_skips_body():
     assert agent.call_log == []  # body was skipped
 
 
-def test_hook_decorator_retry_re_executes_body():
-    """若 on_exception hook 请求 retry,方法体被重新执行。"""
-    class RetryHook(AgentHook):
-        priority = 100
-        fail_count = 0
-
-        async def on_model_exception(self, ctx):
-            self.fail_count += 1
-            if self.fail_count < 2:
-                ctx.request_retry(delay=0)
-
-    agent = _FakeAgent()
-    agent._hook_manager.register_hook(RetryHook())
-
-    agent.attempt = 0
-
-    @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL,
-          on_exception=HookEvent.ON_MODEL_EXCEPTION)
-    async def retryable_work_v2(self, ctx):
-        self.attempt += 1
-        if self.attempt < 2:
-            raise ValueError("temporary failure")
-        self.call_log.append(f"body-attempt-{self.attempt}")
-        return "success"
-
-    ctx = HookContext(
-        agent=agent,
-        event=HookEvent.BEFORE_MODEL_CALL,
-        inputs=ModelCallInputs(messages=[], tools=[]),
-        session_id="s1",
-        request_id="r1",
-    )
-    result = asyncio.run(retryable_work_v2(agent, ctx))
-    assert result == "success"
-    assert agent.call_log == ["body-attempt-2"]
-
-
 def test_hook_decorator_interrupt_propagates_immediately():
     """@hook 装饰的方法内抛出 HookInterrupt 会直接向上传播,
     不触发 on_exception。"""
@@ -214,46 +176,6 @@ def test_hook_decorator_cancelled_error_propagates_immediately():
     assert "after_model_call" not in rec.calls
     # 只有 before hook 被触发
     assert rec.calls == ["before_model_call"]
-
-
-def test_hook_decorator_max_retries_exceeded_boundary():
-    """当 on_exception 持续请求 retry 时,方法执行 original + 3 次 retry
-    (共 4 次),随后异常被重新抛出。"""
-    class AlwaysRetryHook(AgentHook):
-        priority = 100
-        retry_count = 0
-
-        async def on_model_exception(self, ctx):
-            self.retry_count += 1
-            ctx.request_retry(delay=0)  # always request retry
-
-    agent = _FakeAgent()
-    always_retry = AlwaysRetryHook()
-    agent._hook_manager.register_hook(always_retry)
-
-    agent.exec_count = 0
-
-    @hook(HookEvent.BEFORE_MODEL_CALL, HookEvent.AFTER_MODEL_CALL,
-          on_exception=HookEvent.ON_MODEL_EXCEPTION)
-    async def always_failing_work(self, ctx):
-        self.exec_count += 1
-        raise ValueError("persistent failure")
-
-    ctx = HookContext(
-        agent=agent,
-        event=HookEvent.BEFORE_MODEL_CALL,
-        inputs=ModelCallInputs(messages=[], tools=[]),
-        session_id="s1",
-        request_id="r1",
-    )
-    try:
-        asyncio.run(always_failing_work(agent, ctx))
-    except ValueError as e:
-        assert str(e) == "persistent failure"
-    # 共 4 次执行:original(attempt=0)+ 3 次 retry(attempt=1,2,3)
-    assert agent.exec_count == 4
-    # on_exception 被调用 4 次(每次失败执行一次)
-    assert always_retry.retry_count == 4
 
 
 def test_hook_decorator_on_exception_none_propagates_without_hooks():

@@ -19,10 +19,11 @@ from twinkle.observability.attributes import TOOL_ERROR_PREFIX
 class ToolError(Exception):
     """在 tool 内部失败时抛出。绝不把错误编码进返回 content。
 
-    ``kind`` 留在异常对象上供未来消费方使用(RetryHook 按 kind 重试;
-    session-store 的 is_error 元数据 B 计划),format_tool_error 不会把它
-    渲染进 content。当前无消费方 —— 现有 instrumentor 依据 content 上的
-    TOOL_ERROR_PREFIX 而非 kind。保留它作为零成本的交接点(YAGNI 边界)。
+    ``kind`` 留在异常对象上供未来消费方使用(session-store 的 is_error
+    元数据 B 计划),format_tool_error 不会把它渲染进 content。当前无消费方
+    —— 现有 instrumentor 依据 content 上的 TOOL_ERROR_PREFIX 而非 kind。
+    保留它作为零成本的交接点(YAGNI 边界)。工具层重试已移除(2026-08-27),
+    kind 不再与重试相关。
     """
 
     def __init__(self, message: str, *, kind: str = "failed") -> None:

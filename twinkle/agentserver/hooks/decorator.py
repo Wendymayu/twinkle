@@ -5,8 +5,13 @@
 2. 检查 force_finish — 若已设置则跳过方法体
 3. 执行方法体
 4. 触发 *after* 事件
-5. 出错时：触发 *on_exception* 事件，检查 retry 请求，
-   若请求了 retry 则重新执行（最多 3 次）
+5. 出错时：触发 *on_exception* 事件（仅观测，不重试）
+
+工具层重试已移除（2026-08-27）：瞬时网络异常重试会重新执行有副作用的
+工具方法体、无幂等保护，对写工具有重复副作用风险。模型层重试不受影响
+（见 AgentLoop._inner_run_stream 的 retry 循环 + RetryHook.on_model_exception）。
+on_exception 事件仍触发，供 AuditHook / RepeatToolCallDetectorHook 观测
+工具异常，仅是不再重新执行方法体——异常直接 raise。
 
 对于 async generator（如 AgentLoop.run_stream），改用手动
 self._hook_manager.execute() 调用 — @hook 无法包裹 generator。
@@ -22,8 +27,6 @@ from twinkle.agentserver.hooks.base import HookEvent, HookContext, HookInterrupt
 
 log = logging.getLogger("twinkle.hooks.decorator")
 
-_MAX_RETRY_ATTEMPTS = 3
-
 
 def hook(
     before: HookEvent,
@@ -36,11 +39,11 @@ def hook(
         before: 方法体执行前触发的事件。
         after: 方法体成功完成后触发的事件。
         on_exception: 方法抛出异常时触发的事件。None 表示异常直接传播，
-            不触发 exception hook。
+            不触发 exception hook。触发后异常仍向上传播（仅观测，不重试）。
 
     被装饰的方法必须接受 (self, ctx, ...)，其中 ctx 是一个
     HookContext。装饰器管理 ctx.event 与 before/after/exception 流程，
-    以及 force_finish 和 retry 信号。
+    以及 force_finish 信号。
     """
     def decorator(method: Callable) -> Callable:
         @functools.wraps(method)
@@ -55,33 +58,26 @@ def hook(
             if force_finish is not None:
                 return force_finish.result
 
-            # 3. 执行方法体（带 retry 支持）
-            for attempt in range(_MAX_RETRY_ATTEMPTS + 1):
-                ctx.retry_attempt = attempt
-                ctx.exception = None
-                try:
-                    result = await method(self, ctx, *args, **kwargs)
-                    # 为 after 事件 hook（如 RepeatToolCallDetectorHook）存结果
-                    ctx.extra["_tool_result"] = result
-                    # 4. 成功时触发 after 事件
-                    await hook_manager.execute(after, ctx)
-                    return result
-                except asyncio.CancelledError:
-                    raise  # 绝不干扰取消
-                except HookInterrupt:
-                    raise  # interrupt 立即传播
-                except Exception as exc:
-                    ctx.exception = exc
-                    if on_exception is not None:
-                        # 5. 触发 on_exception 事件
-                        await hook_manager.execute(on_exception, ctx)
-                        # 检查 retry 请求
-                        retry_request = ctx.consume_retry_request()
-                        if retry_request is not None and attempt < _MAX_RETRY_ATTEMPTS:
-                            if retry_request.delay > 0:
-                                await asyncio.sleep(retry_request.delay)
-                            continue  # 重试方法体
-                    raise  # 无 retry 或已达最大次数
+            # 3. 执行方法体（工具层不重试 — 见模块 docstring）
+            ctx.retry_attempt = 0
+            ctx.exception = None
+            try:
+                result = await method(self, ctx, *args, **kwargs)
+                # 为 after 事件 hook（如 RepeatToolCallDetectorHook）存结果
+                ctx.extra["_tool_result"] = result
+                # 4. 成功时触发 after 事件
+                await hook_manager.execute(after, ctx)
+                return result
+            except asyncio.CancelledError:
+                raise  # 绝不干扰取消
+            except HookInterrupt:
+                raise  # interrupt 立即传播
+            except Exception as exc:
+                ctx.exception = exc
+                if on_exception is not None:
+                    # 5. 触发 on_exception 事件（仅观测，不重试）
+                    await hook_manager.execute(on_exception, ctx)
+                raise  # 异常直接传播，不重试
 
         return wrapper
     return decorator

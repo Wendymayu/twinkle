@@ -47,7 +47,9 @@ class ToolManager:
         if t is None:
             raise ToolError(f"unknown tool: {name}", kind="validation")
         # Tool 抛出的异常在此传播(不被吞掉),以便 @hook 装饰的
-        # _hooked_tool_call 能触发 ON_TOOL_EXCEPTION,RetryHook 能重试
-        # 瞬时失败。agent loop 把未重试/耗尽重试的失败转成
-        # "[tool error] ..." tool_result 字符串 —— loop 仍不会崩溃。
+        # _hooked_tool_call 能触发 ON_TOOL_EXCEPTION 供观测
+        # (AuditHook / RepeatToolCallDetectorHook)。工具层不再重试
+        # (2026-08-27 移除:瞬时网络异常重试会重复执行有副作用的方法体,
+        # 无幂等保护)。agent loop 把失败转成 "[tool error] ..." tool_result
+        # 字符串 —— loop 仍不会崩溃。
         return await t.invoke(args)

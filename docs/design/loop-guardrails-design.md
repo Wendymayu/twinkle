@@ -3,7 +3,7 @@
 > 日期:2026-08-24
 > 状态:已实现(改动 1 + 改动 2 + 改动 1-扩展);改动 3a/3b 经实现期核实后取消(详见 §4)
 > 对齐参考:openclaw(死循环检测硬停 + 流级 idle 超时 + idle-timeout-breaker);jiuwenswarm(护栏"插槽"默认全关,作反面参照)
-> 关联调研:`docs/design/context-window-budget-comparison.md`、记忆 `agent-loop-guardrails-cross-project`
+> 关联调研:`docs/design/context-window-layout-twinkle.md`、记忆 `agent-loop-guardrails-cross-project`
 >
 > **后续扩展(2026-08-24,同日)**:改动 1 扩展到子 agent —— subagent + team member 步数上限一并去掉(`max_steps` 参数从 `ReActAgent` 彻底移除,executor/manager 零传参,主/子全无界)。兜底分工:subagent 保留现有 `hard_timeout=300s` 整执行硬上限;team member 无 hard 上限,故补注册 `RepeatToolCallDetectorHook`(对齐主 agent CRITICAL force_finish)防"活跃但无效"空转。至此全部 agent 无步数上限,对齐 openclaw(非 jiuwenswarm 子 agent 有界路线)。详见 §2/§6/§8。
 >
