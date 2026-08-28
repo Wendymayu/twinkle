@@ -462,6 +462,10 @@ class ReActAgent:
             await self._hook_manager.execute(HookEvent.ON_MODEL_EXCEPTION, ctx)
             raise
         finally:
+            if completed_normally:
+                # 正常完成:save 最终 messages(含最后 append)供下次多轮续接
+                self._session_store.save_checkpoint(
+                    session_id, self._session_store.get_messages(session_id), request_id)
             if not completed_normally:
                 try:
                     snapshot = await self._build_interrupt_snapshot(ctx, session_id)
@@ -495,6 +499,12 @@ class ReActAgent:
         PLAN_TODO_SESSION_ID.set(session_id or "default")
         reset_todo_events()
         set_permission_channel(request.channel)
+        # resume:若存在 checkpoint(上次未完成 run 的压缩窗口快照),
+        # 灌回 cache 使后续 get_messages 命中快照而非重读全量 history
+        # (对齐 jiuwenswarm load_state 灌回 _message_buffer;不存 offload)。
+        checkpoint = self._session_store.load_checkpoint(session_id)
+        if checkpoint and checkpoint.get("messages"):
+            self._session_store.set_cache(session_id, checkpoint["messages"])
         await self._fill_missing_tool_results(session_id, request_id)
 
         is_team_mode = request.mode == "team"
@@ -519,6 +529,10 @@ class ReActAgent:
                 new_messages = self._inbox.drain()
                 if new_messages:
                     msgs = list(msgs) + [{"role": "user", "content": m} for m in new_messages]
+            # 每步 save 当前 messages 窗口(含到上步的 append)到 checkpoint.json
+            # (崩溃恢复 checkpoint;硬杀 finally 跑不到,靠这步续)。存 cache 全量
+            # (对齐 jiuwenswarm save_state 的 messages = 当前窗口,不 offload)。
+            self._session_store.save_checkpoint(session_id, msgs, request_id)
 
             # -- BEFORE_MODEL_CALL -- #
             # 每步新建 builder + 注 base sections(normal/leader by mode,或构造时注入的 member/subagent)

@@ -17,6 +17,17 @@ class _Store:
     async def append(self, session_id, message, request_id=None, event_type=None):
         self._msgs.append(dict(message))
 
+    # checkpoint 接口(agent.py 调用);mock 下 load_checkpoint 返回 None
+    # → agent fallback 到 get_messages(本测试只验压缩,不验 resume)。
+    def load_checkpoint(self, session_id):
+        return None
+
+    def save_checkpoint(self, session_id, messages, request_id=None):
+        pass
+
+    def set_cache(self, session_id, messages):
+        self._msgs = list(messages)
+
 
 class _Tools:
     def schemas(self):

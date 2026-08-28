@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,10 @@ class SessionStore:
 
     def _history_path(self, session_id: str) -> Path:
         return self._session_dir(session_id) / "history.json"
+
+    def _checkpoint_path(self, session_id: str) -> Path:
+        """该 session 的 checkpoint（压缩窗口快照，崩溃恢复用）。"""
+        return self._session_dir(session_id) / "checkpoint.json"
 
     # --- session 生命周期 ---
 
@@ -213,6 +218,46 @@ class SessionStore:
         msgs = [self._record_to_openai(r) for r in self.get_history(session_id)]
         self._cache[session_id] = msgs
         return list(msgs)
+
+    # --- 运行态 checkpoint（崩溃恢复）------------------------------
+
+    def set_cache(self, session_id: str, messages: list[dict]) -> None:
+        """resume 灌回:把 checkpoint.json 的压缩窗口快照直接写进 cache,
+        使后续 get_messages 命中 cache 而非重读全量 history(对齐 jiuwenswarm
+        load_state 灌回 _message_buffer)。不写 history.jsonl。"""
+        self._cache[session_id] = list(messages)
+
+    def load_checkpoint(self, session_id: str) -> dict | None:
+        """读 checkpoint.json。文件缺失/损坏返回 None(fail-soft)。"""
+        path = self._checkpoint_path(session_id)
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            log.warning("corrupt checkpoint.json for session %s, ignoring", session_id)
+            return None
+
+    def save_checkpoint(
+        self, session_id: str, messages: list[dict], request_id: str | None = None
+    ) -> None:
+        """原子写 checkpoint.json:压缩窗口快照(对齐 jiuwenswarm save_state 的
+        messages 部分,不存 offload)。每步 before_model_call 压缩后调用,
+        使硬杀(finally 跑不到)也能靠最后一步快照恢复。"""
+        path = self._checkpoint_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "messages": messages,
+            "request_id": request_id,
+            "updated_at": time.time(),
+        }
+        temp_path = path.with_suffix(".tmp")
+        try:
+            temp_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            os.replace(temp_path, path)
+        except Exception:
+            log.exception("failed to write checkpoint.json for session %s", session_id)
+            temp_path.unlink(missing_ok=True)
 
     async def append(
         self,
