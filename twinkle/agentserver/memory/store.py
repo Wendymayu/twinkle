@@ -16,6 +16,12 @@ import threading
 from pathlib import Path
 from typing import NamedTuple
 
+try:
+    from watchdog.events import FileSystemEventHandler
+except ImportError:  # watchdog 未装 → 降级,基类用空占位
+    class FileSystemEventHandler:  # type: ignore[no-redef]
+        pass
+
 from twinkle.agentserver.memory.fts import build_fts_query, tokenize_for_fts
 
 log = logging.getLogger("twinkle.memory")
@@ -34,6 +40,48 @@ class Chunk(NamedTuple):
     text: str
 
 
+class _MemoryEventHandler(FileSystemEventHandler):
+    """watchdog 事件 → MemoryManager 的 _mark_dirty / _remove_file_from_index。
+    事件回调跑在 watchdog emitter 线程,只做轻量标 dirty(复用 _mark_dirty 的
+    set+Timer 防抖),不直接 _index_file(避免每条 OS 噪音事件都重索引+embed)。"""
+
+    def __init__(self, mgr: "MemoryManager") -> None:
+        self._mgr = mgr
+
+    def _on(self, abs_path: str, is_delete: bool = False) -> None:
+        try:
+            rel = str(Path(abs_path).resolve().relative_to(self._mgr._dir))
+        except (ValueError, OSError):
+            return
+        rel = self._mgr._validate_memory_path(rel)
+        if rel is None:
+            return
+        try:
+            if is_delete:
+                self._mgr._remove_file_from_index(rel)
+            else:
+                self._mgr._mark_dirty(rel)
+        except Exception:
+            log.exception("watcher event handling failed path=%s", rel)
+
+    def on_modified(self, event) -> None:
+        if not event.is_directory:
+            self._on(event.src_path)
+
+    def on_created(self, event) -> None:
+        if not event.is_directory:
+            self._on(event.src_path)
+
+    def on_deleted(self, event) -> None:
+        if not event.is_directory:
+            self._on(event.src_path, is_delete=True)
+
+    def on_moved(self, event) -> None:
+        if not event.is_directory:
+            self._on(event.src_path, is_delete=True)
+            self._on(event.dest_path)
+
+
 class MemoryManager:
     def __init__(
         self,
@@ -49,6 +97,8 @@ class MemoryManager:
         candidate_multiplier: float = 2.0,
         max_chunks_per_file: int = 200,
         index_debounce_seconds: float = 2.0,
+        enable_watcher: bool = True,
+        watch_interval_seconds: float = 0.0,
     ) -> None:
         self._dir = Path(memory_dir).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -62,12 +112,12 @@ class MemoryManager:
         self._text_weight = text_weight
         self._candidate_multiplier = candidate_multiplier
         self._max_chunks_per_file = max_chunks_per_file
-        self._debounce = index_debounce_seconds
-        # 防抖:写入路径零索引(write/edit/replace 只落盘标 dirty,不调 _index_file);
-        # 索引由 search 兜底(if dirty 同步)或后台 threading.Timer 异步做——对齐
-        # jiuwenswarm 写入零索引 + watchDebounceMs 去抖(省 watchdog:write 在
-        # manager 内直接 mark_dirty,不需文件监听桥)。check_same_thread=False +
-        # RLock:_flush_dirty 跑在 timer 线程,与主线程 search/flush_now 并发访问 SQLite。
+        self._debounce_seconds = index_debounce_seconds
+        # 模型 B(对齐 jiuwenswarm/openclaw):write/edit/replace 只落盘,不标 dirty。
+        # dirty 完全由 watchdog 事件标(_MemoryEventHandler.on_modified/created/moved)。
+        # search 兜底(if dirty: _flush_dirty)+ interval(默认关)兜漏。watchdog 复用
+        # _mark_dirty 的 set+Timer 防抖合并 OS 事件噪音。check_same_thread=False +
+        # RLock:_flush_dirty 跑在 timer 线程/emitter 线程,与主线程 search 并发访问 SQLite。
         self._db = sqlite3.connect(str(self._dir / "memory.db"), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db_lock = threading.RLock()  # 重入:_index_file 持锁调 _embed_chunks/_evict
@@ -77,6 +127,78 @@ class MemoryManager:
         self._vec_enabled = False
         self._ensure_schema()
         self._clear_if_model_changed()
+        self._watch_interval = watch_interval_seconds
+        self._observer = None
+        self._interval_timer: threading.Timer | None = None
+        if enable_watcher:
+            self._start_watcher()
+        self._ensure_interval_sync()
+
+    def _start_watcher(self) -> None:
+        """起 watchdog Observer 监听 memory_dir 递归。失败降级无 watcher
+        (对齐 _ensure_schema sqlite-vec 可选降级)。事件回调只调 _mark_dirty/
+        _remove_file_from_index,复用现有防抖链路。"""
+        try:
+            from watchdog.observers import Observer
+        except ImportError:
+            log.warning("watchdog unavailable; memory degrades to no-watcher "
+                        "(external edits won't auto-index)")
+            return
+        handler = _MemoryEventHandler(self)
+        self._observer = Observer()
+        self._observer.schedule(handler, str(self._dir), recursive=True)
+        try:
+            self._observer.start()
+        except Exception as exc:
+            log.warning("watchdog observer start failed: %s; no-watcher", exc)
+            self._observer = None
+
+    def _ensure_interval_sync(self) -> None:
+        """起 interval 定时全扫(默认关)。防 watchdog 漏标:遍历 list_files() 白名单
+        逐个 _index_file(指纹跳过未变,只重建变了的)。对齐 jiuwenswarm intervalMinutes /
+        openclaw ensureIntervalSync(均默认关)。"""
+        if self._watch_interval <= 0:
+            return
+        if self._interval_timer is not None:
+            return
+
+        def _interval_loop() -> None:
+            if self._observer is None and self._interval_timer is None:
+                return  # 已 close
+            try:
+                for rel in self.list_files():
+                    self._index_file(rel)
+            except Exception:
+                log.exception("interval sync failed")
+            # 重排下一次(若未 close)
+            if self._interval_timer is not None:
+                self._interval_timer = threading.Timer(
+                    self._watch_interval, _interval_loop)
+                self._interval_timer.daemon = True
+                self._interval_timer.start()
+
+        self._interval_timer = threading.Timer(self._watch_interval, _interval_loop)
+        self._interval_timer.daemon = True
+        self._interval_timer.start()
+
+    def close(self) -> None:
+        """停 Observer + 取消 timer + 最终 flush。幂等可重入。
+        生产由 atexit + _set_memory_manager 调;测试 try/finally 调。"""
+        if self._observer is not None:
+            try:
+                self._observer.stop()
+                self._observer.join(timeout=2.0)
+            except Exception:
+                pass
+            self._observer = None
+        if self._interval_timer is not None:
+            self._interval_timer.cancel()
+            self._interval_timer = None
+        with self._dirty_lock:
+            if self._sync_timer:
+                self._sync_timer.cancel()
+                self._sync_timer = None
+        self._flush_dirty()
 
     @property
     def memory_dir(self) -> Path:
@@ -114,7 +236,7 @@ class MemoryManager:
         db.commit()
 
     # --- path 校验 --------------------------------------------------
-    def _resolve_relative_path(self, path: str) -> str | None:
+    def _validate_memory_path(self, path: str) -> str | None:
         """白名单:USER.md / MEMORY.md(根)或 daily_memory/YYYY-MM-DD.md。
         返回校验通过的相对路径,无效返回 None。"""
         if path in _ROOT_FILES:
@@ -141,12 +263,12 @@ class MemoryManager:
             if not p.is_file():
                 continue
             relative_path = p.relative_to(self._dir).as_posix()
-            if self._resolve_relative_path(relative_path) is not None:
+            if self._validate_memory_path(relative_path) is not None:
                 out.append(relative_path)
         return out
 
     def read(self, path: str, offset: int | None = None, limit: int | None = None) -> str:
-        relative_path = self._resolve_relative_path(path)
+        relative_path = self._validate_memory_path(path)
         if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
@@ -164,7 +286,7 @@ class MemoryManager:
 
     # --- 写入 + 索引 ----------------------------------------------
     def write(self, path: str, content: str, append: bool = False) -> str:
-        relative_path = self._resolve_relative_path(path)
+        relative_path = self._validate_memory_path(path)
         if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
@@ -177,12 +299,11 @@ class MemoryManager:
                     f.write("\n")
         except OSError as exc:
             return f"Error writing '{path}': {exc}"
-        self._mark_dirty(relative_path)
         log.info("write_memory path=%s append=%s", relative_path, append)
         return f"Stored to {relative_path}."
 
     def edit(self, path: str, old_text: str, new_text: str) -> str:
-        relative_path = self._resolve_relative_path(path)
+        relative_path = self._validate_memory_path(path)
         if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
@@ -196,7 +317,6 @@ class MemoryManager:
         if old_text not in text:
             return f"Error: old_text not found in '{path}'."
         fpath.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-        self._mark_dirty(relative_path)
         log.info("edit_memory path=%s", relative_path)
         return f"Edited {relative_path}."
 
@@ -205,7 +325,7 @@ class MemoryManager:
         rename 是原子的)。供 dreaming 的整合步骤在读快照后重写 MEMORY.md
         使用:原子 rename 防止与 agent append 的写竞争产生撕裂写,且经
         _index_file 重建反映新内容。"""
-        relative_path = self._resolve_relative_path(path)
+        relative_path = self._validate_memory_path(path)
         if relative_path is None:
             return (f"Error: invalid memory path '{path}'. "
                     "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
@@ -218,7 +338,6 @@ class MemoryManager:
         except OSError as exc:
             tmp.unlink(missing_ok=True)  # 别留 .tmp 残留
             return f"Error replacing '{path}': {exc}"
-        self._mark_dirty(relative_path)
         log.info("replace_memory path=%s", relative_path)
         return f"Replaced {relative_path}."
 
@@ -231,11 +350,11 @@ class MemoryManager:
             self._dirty_paths.add(relative_path)
             if self._sync_timer:
                 self._sync_timer.cancel()
-            self._sync_timer = threading.Timer(self._debounce, self._flush_dirty)
+            self._sync_timer = threading.Timer(self._debounce_seconds, self._flush_dirty)
             self._sync_timer.start()
 
     def _drain_dirty(self) -> list[str]:
-        """取出并清空 dirty 集 + 取消 pending timer(主线程 _flush_now 和 timer
+        """取出并清空 dirty 集 + 取消 pending timer(主线程 search 兜底和 timer
         线程 _flush_dirty 都走这里,pop 原子在锁内防重复索引)。"""
         with self._dirty_lock:
             if self._sync_timer:
@@ -246,14 +365,9 @@ class MemoryManager:
             return paths
 
     def _flush_dirty(self) -> None:
-        """timer 线程:去抖窗口到期后批量重索引 dirty 文件(文件级 hash 跳过未变)。
-        与主线程 search 并发 → _index_file 持 _db_lock(RLock)互斥。"""
-        for path in self._drain_dirty():
-            self._index_file(path)
-
-    def _flush_now(self) -> None:
-        """主线程同步重索引 dirty(search 兜底 / 测试用)。取消 pending timer
-        避免重复,立即索引保证 search 搜到刚写的内容。"""
+        """重索引 dirty 集(逐个 _index_file,文件级 hash 跳过未变)。
+        被 timer 线程(去抖 2s 到期后)和主线程(search 兜底/测试)调用,
+        _drain_dirty 的锁原子保证不重复,跨线程并发 → _index_file 持 _db_lock(RLock)互斥。"""
         for path in self._drain_dirty():
             self._index_file(path)
 
@@ -265,8 +379,8 @@ class MemoryManager:
         except OSError:
             return
         file_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
-        # 防抖后 _index_file 跑在 timer 线程(_flush_dirty)或主线程(search 兜底
-        # _flush_now),跨线程并发 → _db_lock(RLock)互斥。文件 stat/read/hash 在锁外。
+        # 防抖后 _index_file 跑在 timer 线程(_flush_dirty)或主线程(search 兜底),
+        # 跨线程并发 → _db_lock(RLock)互斥。文件 stat/read/hash 在锁外。
         with self._db_lock:
             fingerprint = self._db.execute(
                 "SELECT mtime, size, hash FROM files WHERE path=?", (relative_path,)).fetchone()
@@ -325,6 +439,25 @@ class MemoryManager:
             except Exception:
                 self._db.rollback()
                 raise
+
+    def _remove_file_from_index(self, relative_path: str) -> None:
+        """删该文件在索引里的全部痕迹(chunks/fts/vec/files),供 on_deleted 调。
+        不删 embedding_cache(其 key=md5(text) 跨 chunk 共享,删了影响别处复用)。
+        对齐 _index_file 删旧 chunk 的 rowid 模式(store.py:283-290)。"""
+        with self._db_lock:
+            stale_row_ids = [r["rowid"] for r in self._db.execute(
+                "SELECT rowid FROM chunks WHERE path=?", (relative_path,)).fetchall()]
+            if stale_row_ids:
+                placeholders = ",".join("?" * len(stale_row_ids))
+                self._db.execute("DELETE FROM chunks WHERE path=?", (relative_path,))
+                self._db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({placeholders})",
+                                 stale_row_ids)
+                if self._vec_enabled:
+                    self._db.execute(
+                        f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})",
+                        stale_row_ids)
+            self._db.execute("DELETE FROM files WHERE path=?", (relative_path,))
+            self._db.commit()
 
     def _chunk(self, content: str) -> list[Chunk]:
         lines = content.splitlines()
@@ -440,7 +573,7 @@ class MemoryManager:
         # 兜底:写入零索引后,刚写的内容可能还在 dirty 集未索引→搜不到。
         # search 前同步 flush 保证可见性(对齐 jiuwenswarm search 前确保索引最新)。
         if self._dirty_paths:
-            self._flush_now()
+            self._flush_dirty()
         max_results = max_results or self._max_results
         candidates = min(200, max(1, int(max_results * self._candidate_multiplier)))
         with self._db_lock:

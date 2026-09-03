@@ -26,10 +26,10 @@
 
 写入路径:
   write_memory / edit_memory / replace
-    └─ store.write/edit/replace 落盘 markdown
-         └─ _mark_dirty(标 dirty + 排程 Timer)        ← 不碰 DB 索引
+    └─ store.write/edit/replace 落盘 markdown         ← 不碰 DB 索引,不标 dirty
+         └─ watchdog 事件 → _mark_dirty(标 dirty + 排程 Timer)
               ├─ 后台 Timer 到期 → _flush_dirty 批量重索引
-              └─ search 前 _flush_now → 立即索引保证可见
+              └─ search 前 _flush_dirty 兜底 → 立即索引保证可见
 
 AgentServer 启动:
   └─ start_dreaming(llm, _get_inflight_count)  后台 task
@@ -110,7 +110,7 @@ prompt 还规定**不该写**：临时数据、过程性状态（那是 todo 的
 
 `MemoryManager.__init__` 连接单库，`_ensure_schema` 建表。6 张表分两类：**主链三表**（一个 chunk 的内容/全文/向量三副本，共享 rowid）和**辅助三表**（指纹、缓存、元信息，各自独立）。
 
-`check_same_thread=False` + `RLock(_db_lock)` + 独立 `Lock(_dirty_lock)`——去抖后 `_index_file` 跑在 timer 线程（`_flush_dirty`），与主线程 search/`_flush_now` 并发访问 SQLite，需重入锁互斥。
+`check_same_thread=False` + `RLock(_db_lock)` + 独立 `Lock(_dirty_lock)`——去抖后 `_index_file` 跑在 timer 线程（`_flush_dirty`），与主线程 search 兜底`_flush_dirty` 并发访问 SQLite，需重入锁互斥。
 
 #### 各表作用
 
@@ -189,56 +189,56 @@ prompt 还规定**不该写**：临时数据、过程性状态（那是 todo 的
 
 ```
 write(path, content, append)
-  1. _resolve_relative_path(path)     # 白名单校验,非法返回错误串
+  1. _validate_memory_path(path)     # 白名单校验,非法返回错误串
   2. 打开文件 append("a") 或覆盖("w") 写入
      └─ append 且内容不以 \n 结尾 → 补 \n
-  3. _mark_dirty(relative_path)        # 标 dirty + 排程去抖 Timer（不碰 DB 索引）
-  4. 返回 "Stored to {relative_path}."
+  3. 返回 "Stored to {relative_path}."
+  # write 只落盘,不标 dirty(模型 B:dirty 由 watchdog 事件标,见 §4)
 ```
 
 `write_memory(path, content, append=False)` 默认覆盖整文件；`append=True` 追加。写入触发完全靠模型读策略 prompt 主动调——代码层没有"检测到关键词就自动写"的逻辑。
 
 ### 3.1 路径白名单
 
-`_resolve_relative_path` 是写入/读取/改写的统一前置校验（[`store.py`](../../twinkle/agentserver/memory/store.py)）：
+`_validate_memory_path` 是写入/读取/改写的统一前置校验（[`store.py`](../../twinkle/agentserver/memory/store.py)）：
 
 - 只放行 `USER.md` / `MEMORY.md`（根）或 `daily_memory/YYYY-MM-DD.md`（日期须匹配 `^\d{4}-\d{2}-\d{2}\.md$`）。
 - `is_relative_to(self._dir)` 防路径穿越。
 - 不合法返回错误串（不抛异常）——`write` / `read` / `edit` / `replace` 都返回 `Error: invalid memory path ...`，模型拿到 tool_result 自己改。
 
-### 3.2 写入触发索引，但经去抖（非同步）
+### 3.2 写入只落盘,索引由 watchdog 异步触发（非同步）
 
-`write` / `edit` / `replace` 落盘后只 `_mark_dirty` 标 dirty + 排程后台 Timer，**不碰 DB 索引**。索引由 search 兜底或 Timer 异步做（见 §4）。
+`write` / `edit` / `replace` 落盘后**不碰 DB 索引,不标 dirty**（模型 B,对齐 jiuwenswarm/openclaw）。dirty 由 watchdog 监到文件改动事件后调 `_mark_dirty` 标 + 排程后台 Timer,索引由 Timer 异步或 search 兜底做（见 §4）。
 
-实际后果：直接往 `memory/` 目录丢现成的 `USER.md` / `MEMORY.md` 再启动 → `MemoryHook` 仍注入策略 prompt + 静态召回（`list_files()` 扫文件系统发现有 `.md` 就注入）；但 `memory_search` 召回为空——因为这些文件没经过 `_index_file`，DB 里没 chunks/向量。要让"外部塞进来的"文件进检索库，需等模型对它们调一次 `write_memory`/`edit_memory`（触发 `_mark_dirty` → Timer/search 兜底索引）。Twinkle 无 watchdog，不自动感知外部编辑重索引。
+实际后果:直接往 `memory/` 目录丢现成的 `USER.md` / `MEMORY.md` 再启动 → watchdog 监到改动 → `_mark_dirty` → Timer/search 兜底索引 → 可被 `memory_search` 搜到。外部编辑也自动重索引（无需写工具调用）。
 
 ---
 
 ## 4. 写入后如何索引：去抖 + 兜底
 
-### 4.1 去抖机制（`_mark_dirty` + Timer）
+### 4.1 去抖机制（watchdog 事件 → `_mark_dirty` + Timer）
 
-`write` / `edit` / `replace` 落盘后调 `_mark_dirty(relative_path)`（[`store.py`](../../twinkle/agentserver/memory/store.py)）：
+watchdog 监到 memory/ 下文件改动（on_modified/created/moved）后,在 emitter 线程调 `_mark_dirty(relative_path)`（[`store.py`](../../twinkle/agentserver/memory/store.py)）:
 
 - 把 `relative_path` 加入 `_dirty_paths` 集（去重）。
-- 取消 pending Timer（若有），重新排程 `threading.Timer(self._debounce, self._flush_dirty)`（默认 `index_debounce_seconds=2.0`）。
-- **写入路径不碰 DB**：零 embedding API、零 SQL。
+- 取消 pending Timer（若有），重新排程 `threading.Timer(self._debounce_seconds, self._flush_dirty)`（默认 `index_debounce_seconds=2.0`）。
+- **watchdog 回调只标 dirty**：零 embedding API、零 SQL。
 
-Timer 到期后 `_flush_dirty` 在 timer 线程批量重索引 dirty 文件（逐个 `_index_file`，文件级 hash 跳过未变）。连续写塌成一次重索引。
+OS 一次写可能触发多次事件（modify+modify），`_mark_dirty` 的 set 去重 + Timer 取消-重启把连续事件塌成一次重索引。Timer 到期后 `_flush_dirty` 在 timer 线程批量重索引 dirty 文件（逐个 `_index_file`，文件级 hash 跳过未变）。
 
-### 4.2 search 兜底（`_flush_now`）
+### 4.2 search 兜底（`_flush_dirty`）
 
-`search()` 开头：`if self._dirty_paths: self._flush_now()`——主线程同步重索引所有 dirty 文件，立即保证搜到刚写的内容。`_flush_now` 先 `_drain_dirty`（取清 dirty 集 + 取消 pending Timer，原子在 `_dirty_lock` 内防重复索引），再逐个 `_index_file`。
+`search()` 开头：`if self._dirty_paths: self._flush_dirty()`——主线程同步重索引所有 dirty 文件，立即保证搜到刚写的内容。`_drain_dirty` 取清 dirty 集 + 取消 pending Timer（原子在 `_dirty_lock` 内防重复索引），再逐个 `_index_file`。
 
 ### 4.3 并发与锁
 
 - `check_same_thread=False`：Timer 线程能共享连接。
-- `_db_lock`（`RLock`，重入）：`_index_file` 持锁调 `_embed_chunks`/`_evict_excess_chunks`；timer 线程 `_flush_dirty` 与主线程 search/`_flush_now` 并发时互斥。文件 stat/read/hash 在锁外。
+- `_db_lock`（`RLock`，重入）：`_index_file` 持锁调 `_embed_chunks`/`_evict_excess_chunks`；timer 线程 `_flush_dirty` 与主线程 search 兜底`_flush_dirty` 并发时互斥。文件 stat/read/hash 在锁外。
 - `_dirty_lock`（`Lock`）：保护 `_dirty_paths` + `_sync_timer`，跨线程（主线程 add / timer 线程 drain）。
 
 ### 4.4 `_index_file` 内部
 
-`_index_file(relative_path)` 把"markdown 文件"变成"可检索 chunks/FTS/向量"，被 `_flush_dirty`/`_flush_now` 调用：
+`_index_file(relative_path)` 把"markdown 文件"变成"可检索 chunks/FTS/向量"，被 `_flush_dirty` 调用（timer 线程去抖后 / 主线程 search 兜底）：
 
 ```
 _index_file(rel):
@@ -279,7 +279,7 @@ _index_file(rel):
 
 ```
 search(query, max_results)
-  if self._dirty_paths: self._flush_now()          # 兜底:保证搜到刚写的内容
+  if self._dirty_paths: self._flush_dirty()        # 兜底:保证搜到刚写的内容
   candidates = min(200, max(1, max_results * 2.0))  # 候选放大
   持 _db_lock:
     fts = _fts_search(query, candidates)            # FTS5 bm25
@@ -591,8 +591,8 @@ consolidate 识别并剔除"故意注入的危险记忆"（指令式/越权式�
 | 嵌入维度 | 硬编码 1536（匹配 `text-embedding-3-small`），换模型/维度须删 `memory.db` 重建 |
 | 无 API key | 降级 FTS-only，CJK 靠 jieba 词级（无则逐字空格）仍可召回 |
 | embed 失败 | chunk 进 FTS 不进向量，不重试，待文件再变（去抖/兜底触发重索引） |
-| 写入路径 LLM | **零**（write/edit/replace 只 `_mark_dirty`，不碰 DB 索引/不调 LLM/不调 embedding） |
-| 索引触发 | 后台 Timer（去抖 2s 批量）+ search 兜底（`_flush_now` 同步） |
+| 写入路径 LLM | **零**（write/edit/replace 只落盘,不标 dirty/不碰 DB/不调 LLM/embedding；dirty 由 watchdog 事件标） |
+| 索引触发 | watchdog 事件 → _mark_dirty → 后台 Timer（去抖 2s 批量）+ search 兜底（`_flush_dirty` 同步） |
 | 自动淘汰 | 单文件 FIFO（>200 chunk 删最旧检索块，不删 markdown）+ dreaming compact（MEMORY.md >10000 字符丢行） |
 | 写路由 | 纯 prompt 教模型往哪个文件写，代码不强制 |
 | 被动注入 | 默认开：USER.md+MEMORY.md 分预算 head+tail 截断；daily 不自动注入（需 memory_search）；关=只策略 |

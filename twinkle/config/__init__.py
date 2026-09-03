@@ -49,6 +49,7 @@ MEMORY_CHUNKING_TOKENS = settings.memory.chunking.tokens
 MEMORY_CHUNKING_OVERLAP = settings.memory.chunking.overlap
 MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE = settings.memory.cleanup.max_chunks_per_file
 MEMORY_INDEX_DEBOUNCE_SECONDS = settings.memory.index.debounce_seconds
+MEMORY_WATCH_INTERVAL_SECONDS = settings.memory.index.watch_interval_seconds
 MEMORY_AUTO_INJECT_ENABLED = settings.memory.auto_inject.enabled
 MEMORY_AUTO_INJECT_MAX_CHARS_USER = settings.memory.auto_inject.max_chars_user
 MEMORY_AUTO_INJECT_MAX_CHARS_MEMORY = settings.memory.auto_inject.max_chars_memory

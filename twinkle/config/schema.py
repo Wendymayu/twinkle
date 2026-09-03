@@ -124,6 +124,7 @@ class MemoryCleanupConfig(_StrictModel):
 
 class MemoryIndexConfig(_StrictModel):
     debounce_seconds: float = 2.0  # 写后去抖窗口:连续写塌成一次重索引(对齐 jiuwenswarm watchDebounceMs)
+    watch_interval_seconds: float = 0.0  # interval 兜底全扫间隔(0=关,对齐 j/openclaw 默认关);防 watchdog 漏标
 
 
 class MemoryAutoInjectConfig(_StrictModel):

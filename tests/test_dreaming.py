@@ -13,7 +13,7 @@ from twinkle.agentserver.memory.store import MemoryManager
 
 
 def _mgr(tmp_path):
-    return MemoryManager(str(tmp_path), embed_provider=None)
+    return MemoryManager(str(tmp_path), embed_provider=None, enable_watcher=False)
 
 
 def _with_mgr(mgr):

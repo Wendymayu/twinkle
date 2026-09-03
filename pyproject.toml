@@ -15,6 +15,7 @@ dependencies = [
     "pyyaml>=6",
     "croniter>=2",
     "tzdata>=2024.1",
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]

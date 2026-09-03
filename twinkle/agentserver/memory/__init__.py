@@ -23,6 +23,7 @@ def get_memory_manager() -> MemoryManager:
             MEMORY_HYBRID_TEXT_WEIGHT, MEMORY_HYBRID_VECTOR_WEIGHT,
             MEMORY_INDEX_DEBOUNCE_SECONDS,
             MEMORY_QUERY_MAX_RESULTS,
+            MEMORY_WATCH_INTERVAL_SECONDS,
         )
         provider = None
         dims = 1536  # 对齐 text-embedding-3-small;改 model + dims 后需删 memory.db
@@ -38,13 +39,21 @@ def get_memory_manager() -> MemoryManager:
             text_weight=MEMORY_HYBRID_TEXT_WEIGHT,
             candidate_multiplier=MEMORY_HYBRID_CANDIDATE_MULTIPLIER,
             max_chunks_per_file=MEMORY_CLEANUP_MAX_CHUNKS_PER_FILE,
-            index_debounce_seconds=MEMORY_INDEX_DEBOUNCE_SECONDS)
+            index_debounce_seconds=MEMORY_INDEX_DEBOUNCE_SECONDS,
+            enable_watcher=True,
+            watch_interval_seconds=MEMORY_WATCH_INTERVAL_SECONDS)
+        import atexit
+        atexit.register(_MEMORY_MANAGER.close)
     return _MEMORY_MANAGER
 
 
 def _set_memory_manager(mgr: MemoryManager | None) -> None:
-    """测试钩子:替换/重置单例。生产代码从不调用此函数。"""
+    """测试钩子:替换/重置单例。生产代码从不调用此函数。
+    替换时先 close 旧实例(停其 watchdog observer),防线程泄露。"""
     global _MEMORY_MANAGER
+    old = _MEMORY_MANAGER
+    if old is not None and old is not mgr:
+        old.close()
     _MEMORY_MANAGER = mgr
 
 
