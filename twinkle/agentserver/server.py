@@ -187,7 +187,7 @@ def ws_handler(agent: ReActAgent) -> Callable[[ServerConnection], Awaitable[None
                         await send(frame)
                     continue
                 if handles_skill_rpc(envelope.method):
-                    if envelope.method == "skills.list_local":
+                    if envelope.method in ("skills.list_local", "skills.evolve_list", "skills.evolve_pending"):
                         async for frame in dispatch_skill_rpc(envelope):
                             await send(frame)
                     else:

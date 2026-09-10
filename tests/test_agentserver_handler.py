@@ -165,3 +165,80 @@ def test_skill_search_runs_as_background_task(tmp_path) -> None:
         asyncio.run(run())
     finally:
         _set_skillnet_client(None)
+
+
+def test_skill_evolve_list_routes_inline(tmp_path) -> None:
+    """skills.evolve_list 由 ws_handler 内联路由(改前走后台分支报 unknown skill method)。"""
+    from twinkle.agentserver.evolution import EvolutionStore, _set_evolution_store
+    port = _free_port()
+    store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = _RecordingLoop(store)
+    sk_dir = tmp_path / "skills" / "foo"
+    sk_dir.mkdir(parents=True)
+    (sk_dir / "SKILL.md").write_text("---\nname: foo\ndescription: d\n---\n", encoding="utf-8")
+    _set_evolution_store(EvolutionStore(str(tmp_path / "skills")))
+    try:
+        async def run() -> None:
+            server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
+            try:
+                async with connect(f"ws://127.0.0.1:{port}") as ws:
+                    await ws.recv()  # connection.ack
+                    env = E2AEnvelope(
+                        request_id="r1", session_id="s1", method="skills.evolve_list",
+                        params={"name": "foo"},
+                    )
+                    await ws.send(env.model_dump_json())
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                    data = json.loads(raw)
+                    assert data["response_kind"] == "e2a.result"
+                    assert data["body"]["type"] == "skills.evolve_list"
+                    assert data["body"]["skill_name"] == "foo"
+                    assert data["body"]["records"] == []
+                assert loop_obj.seen is None  # 内联短路,不到 ReAct loop
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+    finally:
+        _set_evolution_store(None)
+
+
+def test_skill_evolve_pending_routes_inline(tmp_path) -> None:
+    """skills.evolve_pending 由 ws_handler 内联路由。"""
+    from twinkle.agentserver.evolution import (
+        EvolutionStore, OnlineEvolutionOrchestrator, ConversationSignalDetector,
+        _set_evolution_store, _set_orchestrator,
+    )
+    port = _free_port()
+    store = SessionStore(str(tmp_path / "sessions"))
+    loop_obj = _RecordingLoop(store)
+    evo_store = EvolutionStore(str(tmp_path / "skills"))
+    orch = OnlineEvolutionOrchestrator(
+        store=evo_store, optimizer=None, scorer=None,
+        detector=ConversationSignalDetector())
+    _set_evolution_store(evo_store)
+    _set_orchestrator(orch)
+    try:
+        async def run() -> None:
+            server = await serve(ws_handler(loop_obj), "127.0.0.1", port)
+            try:
+                async with connect(f"ws://127.0.0.1:{port}") as ws:
+                    await ws.recv()  # connection.ack
+                    env = E2AEnvelope(
+                        request_id="r2", session_id="s2", method="skills.evolve_pending",
+                        params={},
+                    )
+                    await ws.send(env.model_dump_json())
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                    data = json.loads(raw)
+                    assert data["response_kind"] == "e2a.result"
+                    assert data["body"]["type"] == "skills.evolve_pending"
+                    assert data["body"]["pending"] == {}
+                assert loop_obj.seen is None
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+    finally:
+        _set_evolution_store(None)
+        _set_orchestrator(None)

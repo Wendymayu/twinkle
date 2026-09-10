@@ -4,6 +4,7 @@ import { useSessions } from './composables/useSessions'
 import ChatView from './components/ChatView.vue'
 import SessionsView from './components/SessionsView.vue'
 import SkillsView from './components/SkillsView.vue'
+import EvolutionView from './components/EvolutionView.vue'
 
 const { init, activeNav, setNav, connected } = useSessions()
 
@@ -21,10 +22,12 @@ onMounted(() => { init() })
         <button :class="{ active: activeNav === 'chat' }" @click="setNav('chat')">💬 聊天</button>
         <button :class="{ active: activeNav === 'sessions' }" @click="setNav('sessions')">🗂 会话</button>
         <button :class="{ active: activeNav === 'skills' }" @click="setNav('skills')">🧩 技能</button>
+        <button :class="{ active: activeNav === 'evolution' }" @click="setNav('evolution')">🧬 进化</button>
       </nav>
       <main class="content">
         <ChatView v-if="activeNav === 'chat'" />
         <SkillsView v-else-if="activeNav === 'skills'" />
+        <EvolutionView v-else-if="activeNav === 'evolution'" />
         <SessionsView v-else />
       </main>
     </div>

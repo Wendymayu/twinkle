@@ -282,3 +282,44 @@ def test_uninstall_rejects_traversal_name(monkeypatch, tmp_path):
                        send, FakeClient()))
     f = send.frames[0]
     assert f.status == "failed"  # safe_skill_name 拒绝含斜杠的名字
+
+
+def test_evolve_list_returns_empty_when_no_records(tmp_path):
+    """evolve_list 内联 dispatch:无 evolutions.json 的 skill 返空 records。"""
+    from twinkle.agentserver.evolution import EvolutionStore, _set_evolution_store
+    (tmp_path / "skills" / "foo").mkdir(parents=True)
+    _set_evolution_store(EvolutionStore(str(tmp_path / "skills")))
+    try:
+        frames = _run(_frames(_env("skills.evolve_list", params={"name": "foo"})))
+    finally:
+        _set_evolution_store(None)
+    assert len(frames) == 1
+    f = frames[0]
+    assert f.response_kind == "e2a.result"
+    assert f.body["type"] == "skills.evolve_list"
+    assert f.body["skill_name"] == "foo"
+    assert f.body["records"] == []
+
+
+def test_evolve_pending_returns_empty_when_no_staged(tmp_path):
+    """evolve_pending 内联 dispatch:无待批返空 pending(调 get_staged_records,非 get_pending)。"""
+    from twinkle.agentserver.evolution import (
+        EvolutionStore, OnlineEvolutionOrchestrator, ConversationSignalDetector,
+        _set_evolution_store, _set_orchestrator,
+    )
+    evo_store = EvolutionStore(str(tmp_path / "skills"))
+    orch = OnlineEvolutionOrchestrator(
+        store=evo_store, optimizer=None, scorer=None,
+        detector=ConversationSignalDetector())
+    _set_evolution_store(evo_store)
+    _set_orchestrator(orch)
+    try:
+        frames = _run(_frames(_env("skills.evolve_pending", params={})))
+    finally:
+        _set_evolution_store(None)
+        _set_orchestrator(None)
+    assert len(frames) == 1
+    f = frames[0]
+    assert f.response_kind == "e2a.result"
+    assert f.body["type"] == "skills.evolve_pending"
+    assert f.body["pending"] == {}

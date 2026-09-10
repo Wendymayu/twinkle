@@ -21,6 +21,21 @@ export interface ChatMsg {
 }
 interface TodoState { tasks: TodoTask[]; remaining: number; total: number }
 export interface InstalledSkill { name: string; description: string }
+export interface EvolveRecord {
+  id: string
+  source: string
+  score: number
+  section: string
+  summary: string
+  used: number
+  positive: number
+}
+export interface EvolvePendingItem {
+  id: string
+  source: string
+  section: string
+  summary: string
+}
 export interface SkillNetSkillItem { name: string; description: string; skill_url: string }
 export interface SkillHubSkillItem { name: string; description: string; slug: string; downloads: number; score: number }
 
@@ -35,7 +50,7 @@ const todo = ref<TodoState | null>(null)
 // approval.ask 等待用户决策期间为 true——禁用聊天输入
 const inputDisabled = ref(false)
 
-type NavKey = 'chat' | 'sessions' | 'skills'
+type NavKey = 'chat' | 'sessions' | 'skills' | 'evolution'
 type AgentMode = 'normal' | 'team'
 const activeNav = ref<NavKey>('chat')
 const agentMode = ref<AgentMode>('normal')
@@ -49,6 +64,13 @@ const searchResults = ref<(SkillNetSkillItem | SkillHubSkillItem)[]>([])
 const installedSkills = ref<InstalledSkill[]>([])
 const skillsLoading = ref(false)
 const skillsError = ref<string | null>(null)
+const evolveRecords = ref<EvolveRecord[]>([])
+const evolvePending = ref<Record<string, EvolvePendingItem[]>>({})
+const evolveSelectedSkill = ref<string>('')
+const evolveRecordsLoading = ref(false)
+const evolvePendingLoading = ref(false)
+const evolveActionLoading = ref(false)
+const evolveError = ref<string | null>(null)
 
 function setNav(key: NavKey) {
   activeNav.value = key
@@ -200,6 +222,85 @@ async function uninstallSkill(name: string): Promise<{ ok: boolean; error?: stri
   }
 }
 
+async function loadEvolveRecords(name: string) {
+  if (!name) { evolveRecords.value = []; return }
+  evolveRecordsLoading.value = true
+  evolveError.value = null
+  try {
+    const payload = await client.request('skills.evolve_list', { name })
+    evolveRecords.value = payload?.records ?? []
+  } catch (e: any) {
+    evolveRecords.value = []
+    evolveError.value = e?.message || '加载经验记录失败'
+  } finally {
+    evolveRecordsLoading.value = false
+  }
+}
+
+async function loadEvolvePending() {
+  evolvePendingLoading.value = true
+  evolveError.value = null
+  try {
+    const payload = await client.request('skills.evolve_pending', {})
+    evolvePending.value = payload?.pending ?? {}
+  } catch (e: any) {
+    evolvePending.value = {}
+    evolveError.value = e?.message || '加载待批失败'
+  } finally {
+    evolvePendingLoading.value = false
+  }
+}
+
+/** approve/reject/simplify 成功后刷新 inbox(+选中 skill 的 records)。 */
+async function refreshEvolve() {
+  await Promise.all([loadEvolvePending(), loadEvolveRecords(evolveSelectedSkill.value)])
+}
+
+async function approveEvolve(name: string, ids: string[] | null) {
+  evolveActionLoading.value = true
+  evolveError.value = null
+  try {
+    await client.request('skills.evolve_approve', { name, record_ids: ids }, 60000)
+    await refreshEvolve()
+  } catch (e: any) {
+    evolveError.value = e?.message || '批准失败'
+  } finally {
+    evolveActionLoading.value = false
+  }
+}
+
+async function rejectEvolve(name: string, ids: string[] | null) {
+  evolveActionLoading.value = true
+  evolveError.value = null
+  try {
+    await client.request('skills.evolve_reject', { name, record_ids: ids }, 60000)
+    await refreshEvolve()
+  } catch (e: any) {
+    evolveError.value = e?.message || '拒绝失败'
+  } finally {
+    evolveActionLoading.value = false
+  }
+}
+
+async function simplifyEvolve(name: string) {
+  if (!name) return
+  evolveActionLoading.value = true
+  evolveError.value = null
+  try {
+    await client.request('skills.evolve_simplify', { name }, 180000)
+    await loadEvolveRecords(name)
+  } catch (e: any) {
+    evolveError.value = e?.message || '蒸馏失败'
+  } finally {
+    evolveActionLoading.value = false
+  }
+}
+
+function selectEvolveSkill(name: string) {
+  evolveSelectedSkill.value = name
+  loadEvolveRecords(name)
+}
+
 function sendQuery(q: string) {
   if (!q.trim() || !connected.value) return
   messages.value.push({ role: 'user', content: q })
@@ -309,6 +410,10 @@ export function useSessions() {
     previewLoading, historyAsBubbles,
     searchResults, installedSkills, skillsLoading, skillsError,
     searchSkills, loadInstalled, clearSearch, installSkill, uninstallSkill,
+    evolveRecords, evolvePending, evolveSelectedSkill,
+    evolveRecordsLoading, evolvePendingLoading, evolveActionLoading, evolveError,
+    loadEvolveRecords, loadEvolvePending, approveEvolve, rejectEvolve,
+    simplifyEvolve, selectEvolveSkill,
     init, loadSessions, createSession, selectSession, deleteSession, sendQuery,
     loadSessionFiles, readSessionFile, restoreSession,
     webClient: client,

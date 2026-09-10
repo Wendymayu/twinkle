@@ -24,7 +24,9 @@
 | approve/reject 逐条 + 批量 | 不做单条经验详情 RPC(`evolve_list` 投影够 v1 看) |
 | 后端路由修复的 pytest | `skills.evolve` 手动触发(见 §10,默认不做) |
 
-## 2. 后端改动(1 行,修路由 bug)
+## 2. 后端改动(2 处,修两个阻断 bug)
+
+### 2.1 路由放行(server.py:190)
 
 [`server.py:190`](../../twinkle/agentserver/server.py#L190) 把内联放行条件从只认 `list_local` 扩到含两个只读进化方法:
 
@@ -41,6 +43,19 @@ if envelope.method in ("skills.list_local", "skills.evolve_list", "skills.evolve
 ```
 
 `_dispatch_evolve_list` / `_dispatch_evolve_pending` 已在 [`rpc.py:137/159`](../../twinkle/agentserver/skills/rpc.py#L137) 实现,改完即通。其余 4 个后台 RPC(`evolve`/`approve`/`reject`/`simplify` 走 `run_skill_rpc`)本来就通,不动。Gateway 层无需改动——它已把任意 `e2a.result` 映射为浏览器 `result` 事件。
+
+### 2.2 修 evolve_pending 的方法名(rpc.py:164)
+
+`_dispatch_evolve_pending` 调 `orch.get_pending(name)`,但编排器的方法叫 `get_staged_records(skill_name=None)`([`orchestrator.py:153`](../../twinkle/agentserver/evolution/orchestrator.py#L153))——`get_pending` 不存在,会 `AttributeError`。改为:
+
+```python
+# 前(rpc.py:164)
+pending = orch.get_pending(name)
+# 后
+pending = orch.get_staged_records(name)
+```
+
+> 调研发现:这是计划阶段新发现的第二处阻断 bug(设计文档 §1.1 原只提路由 bug)。两处都修,`evolve_pending` 才能真正跑通。
 
 ## 3. 前端架构(3 处,纯加法)
 
