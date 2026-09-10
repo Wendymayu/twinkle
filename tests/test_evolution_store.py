@@ -33,7 +33,7 @@ def _make_record(source="execution_failure", section="Troubleshooting",
 
 def test_read_empty_evolution_log(store):
     _make_skill(store, "test")
-    log = store._read_evolution_log("test")
+    log = store.read_evolution_log("test")
     assert log.entries == []
 
 
@@ -42,7 +42,7 @@ def test_save_and_read_evolution_log(store):
     rec = _make_record()
     store.save_evolution_log("test", [rec])
 
-    log = store._read_evolution_log("test")
+    log = store.read_evolution_log("test")
     assert len(log.entries) == 1
     assert log.entries[0].id == rec.id
     assert log.entries[0].change.section == "Troubleshooting"
@@ -56,7 +56,7 @@ def test_append_record(store):
     store.append_record("test", rec1)
     store.append_record("test", rec2)
 
-    log = store._read_evolution_log("test")
+    log = store.read_evolution_log("test")
     assert len(log.entries) == 2
 
 
@@ -70,7 +70,7 @@ def test_append_record_merge(store):
     rec2.change.merge_target = rec1.id
     store.append_record("test", rec2)
 
-    log = store._read_evolution_log("test")
+    log = store.read_evolution_log("test")
     assert len(log.entries) == 1  # merge 不增加条目
     assert log.entries[0].change.content == "updated content"
 
@@ -98,7 +98,7 @@ def test_render_evolution_markdown_writes_index_block(store):
 
     store.render_evolution_markdown("test", [rec])
 
-    skill_md = store._skill_md_path("test")
+    skill_md = store.skill_md_path("test")
     content = skill_md.read_text(encoding="utf-8")
     assert "<!-- evolution-index-start -->" in content
     assert "<!-- evolution-index-end -->" in content
@@ -114,7 +114,7 @@ def test_render_evolution_markdown_replaces_existing_index(store):
 
     store.render_evolution_markdown("test", [rec])
 
-    content = store._skill_md_path("test").read_text(encoding="utf-8")
+    content = store.skill_md_path("test").read_text(encoding="utf-8")
     assert "OLD" not in content
     assert "new summary" in content
 
@@ -151,3 +151,20 @@ def test_atomic_write_survives(store):
     assert path.exists()
     data = json.loads(path.read_text(encoding="utf-8"))
     assert len(data["entries"]) == 5
+
+
+def test_render_does_not_mutate_input_record_content(store):
+    """render 不得改写传入 record 的 content。
+
+    脚本工件渲染为引用串是渲染层的事，不该污染调用方的记录对象——
+    否则后续 append/重渲染读到的 content 是引用串而非源码（footgun）。
+    """
+    _make_skill(store, "test")
+    patch = EvolutionPatch(section="Scripts", action="append", target="script",
+                           content="print('hi')", script_filename="hi.py",
+                           summary="hi script")
+    rec = EvolutionRecord.make(source="script_artifact", context="ctx", change=patch)
+
+    store.render_evolution_markdown("test", [rec])
+
+    assert rec.change.content == "print('hi')"  # 未被改写为 "See ..." 引用

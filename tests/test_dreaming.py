@@ -639,6 +639,46 @@ def test_consolidate_infectious_over_budget_skips_infectious_keeps_redundant(tmp
     assert result.count("- ") == 3
 
 
+# --- 组J+：USER.md consolidate（复用 MEMORY.md 流程,参数化 file_path）---
+
+
+def test_consolidate_user_md_resolves_contradiction(tmp_path):
+    """USER.md 矛盾行(同一属性不同取值)→ 保留更后写入那条,删旧值。复用 MEMORY.md 同流程。"""
+    import json
+    mgr = _mgr(tmp_path)
+    mgr.write("USER.md", "- 姓名:张三\n- 用 Windows\n- 用 macOS\n- 偏好中文\n", append=False)
+    orch = DreamingOrchestrator(
+        llm=_FakeLLM([json.dumps({"injectious": [], "redundant": [2]})]),
+        get_inflight=lambda: 0)
+    asyncio.run(orch._consolidate(mgr, "USER.md"))
+    result = mgr.read("USER.md")
+    assert "用 Windows" not in result   # 旧值删
+    assert "用 macOS" in result         # 新值留
+    assert "姓名:张三" in result
+
+
+def test_consolidate_user_md_dedup_semantic(tmp_path):
+    """USER.md 语义重复(同义不同措辞)→ 删冗余留更完整那条。"""
+    import json
+    mgr = _mgr(tmp_path)
+    mgr.write("USER.md", "- 偏好中文\n- 喜欢用中文沟通\n- 操作系统 Windows\n- 常用 Python\n", append=False)
+    orch = DreamingOrchestrator(
+        llm=_FakeLLM([json.dumps({"injectious": [], "redundant": [2]})]),
+        get_inflight=lambda: 0)
+    asyncio.run(orch._consolidate(mgr, "USER.md"))
+    result = mgr.read("USER.md")
+    assert "喜欢用中文沟通" not in result
+    assert "偏好中文" in result
+
+
+def test_consolidate_user_md_empty_noop(tmp_path):
+    """USER.md 不存在 → read 返回 Error: → <2 行不调 LLM,no-op 不崩。"""
+    mgr = _mgr(tmp_path)
+    orch = DreamingOrchestrator(llm=_FakeLLM([]), get_inflight=lambda: 0)
+    asyncio.run(orch._consolidate(mgr, "USER.md"))  # 不崩,无 LLM 调用
+    assert orch.llm.calls == 0
+
+
 # --- 组K：_compact_if_over_budget ---
 
 

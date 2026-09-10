@@ -263,7 +263,7 @@ spec `docs/superpowers/specs/2026-08-03-phase11a-workflow-engine.md` + `2026-08-
 **目标**：skill 定义能根据运行反馈自动改进。
 
 **已落地**：`twinkle/agentserver/evolution/` 包——命名自定，不用 jiuwenswarm 的 EvolutionRail/SkillEvolver/SignalDetector。
-- **信号检测**（`signal_detector.py` `ConversationSignalDetector`）：纯正则+路径匹配，不调 LLM。`execution_failure`（扫 tool result 命中 `error/exception/failed/timeout/traceback/...`，默认开）、`script_artifact`（command_exec 等成功且内容>20 字，默认开）、`user_intent`（纠正词 `不对/应该是/...`，默认关）。从 tool_call 参数反推活跃 skill（SKILL.md 路径正则 + skill_name + 内容 fallback）。
+- **信号检测**（`signal_detector.py` `ConversationSignalDetector`）：纯正则+路径匹配，不调 LLM。`execution_failure`（扫 tool result 命中 `error/exception/failed/timeout/traceback/...`，默认开）、`script_artifact`（command_exec 等成功且内容>20 字，默认开）、`user_intent`（纠正词 `不对/应该是/...`，默认开）。从 tool_call 参数反推活跃 skill（SKILL.md 路径正则 + skill_name + 内容 fallback）。
 - **经验生成**（`optimizer.py` `SkillExperienceOptimizer`）：LLM 产 JSON draft，硬上限 text≤2/script≤1；去重+优先级筛选委托 prompt（priority「导致失败 > 低效但成功；高频 > 偶发」），`merge_target` 改写已有记录。
 - **打分**（`scorer.py` `ExperienceScorer`）：E(贝叶斯效能)+U(利用率)+F(90 天半衰期新鲜度)+版本不匹配惩罚。
 - **审批**（`orchestrator.py` `OnlineEvolutionOrchestrator`）：手动 pending（内存 dict，**v1 不持久化**）+ `evolve_pending`/`evolve_approve`/`evolve_reject` RPC；`auto_save=true` 走自动落盘（见 deferred——当前单例硬编码 false）。

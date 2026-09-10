@@ -13,9 +13,21 @@ def _make_id() -> str:
     return f"ev_{secrets.token_hex(4)}"
 
 
+def strip_code_fence(content: str) -> str:
+    """剥 markdown 代码围栏（```lang ... ```），返回内容。无围栏原样返回。
+
+    optimizer/scorer 调 LLM 拿 JSON 时复用——避免三处抄同一份围栏剥离逻辑。
+    """
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.splitlines()
+        content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+    return content
+
+
 @dataclass
 class UsageStats:
-    """经验使用统计——由 scorer + 注入层共同维护。"""
+    """经验使用统计——由 scorer + 呈现层共同维护。"""
     times_presented: int = 0
     times_used: int = 0
     times_positive: int = 0

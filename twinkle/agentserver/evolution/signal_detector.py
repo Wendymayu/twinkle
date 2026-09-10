@@ -8,6 +8,12 @@ import re
 
 from twinkle.agentserver.evolution.types import FAILURE_KEYWORDS, ConversationSignal
 
+# 代码执行类工具名——script_artifact 信号只认这些工具的成功输出
+_CODE_EXEC_TOOL_NAMES: set[str] = {"command_exec", "run_code", "execute", "python", "bash", "shell"}
+
+# 用户纠正短语——user_intent 信号靠它识别"用户在更正方向"
+_USER_CORRECTION_PHRASES: list[str] = ["wrong", "should be", "not that", "actually", "不对", "应该是", "不是这个"]
+
 
 class ConversationSignalDetector:
     """规则信号检测器：扫工具调用结果，检测 failure/script/user_intent 信号。"""
@@ -21,7 +27,7 @@ class ConversationSignalDetector:
         *enabled_signals*: 启用的信号类型，默认只开 failure+script
         """
         if enabled_signals is None:
-            enabled_signals = {"execution_failure", "script_artifact"}
+            enabled_signals = {"execution_failure", "script_artifact", "user_intent"}
 
         signals: list[ConversationSignal] = []
         skill_read_history = self._detect_skill_from_tool_calls(messages)
@@ -69,9 +75,7 @@ class ConversationSignalDetector:
 
     def _is_script_success(self, tool_name: str, content: str) -> bool:
         """检查是否是成功执行的代码工具调用。"""
-        # 代码执行类工具名
-        script_tools = {"command_exec", "run_code", "execute", "python", "bash", "shell"}
-        if tool_name not in script_tools:
+        if tool_name not in _CODE_EXEC_TOOL_NAMES:
             return False
         return not self._is_failure(content) and len(content.strip()) > 20
 
@@ -79,8 +83,7 @@ class ConversationSignalDetector:
                             skill_names: list[str], idx: int) -> ConversationSignal | None:
         """检测用户纠正信号。"""
         content = str(msg.get("content", "")).lower()
-        correction_phrases = ["wrong", "should be", "not that", "actually", "不对", "应该是", "不是这个"]
-        if not any(phrase in content for phrase in correction_phrases):
+        if not any(phrase in content for phrase in _USER_CORRECTION_PHRASES):
             return None
         skill = active_skill or self._guess_skill_from_content(content, skill_names)
         if not skill:

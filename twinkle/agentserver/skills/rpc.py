@@ -161,14 +161,14 @@ async def _dispatch_evolve_pending(envelope: E2AEnvelope) -> E2AResponse:
     from twinkle.agentserver.evolution import get_orchestrator
     name = (envelope.params.get("name") or "").strip() or None
     orch = get_orchestrator()
-    pending = orch.get_pending(name)
+    staged = orch.get_staged_records(name)
     body = {
         "type": "skills.evolve_pending",
         "pending": {
             sn: [{"id": r.id, "source": r.source, "section": r.change.section,
                   "summary": r.summary or r.change.summary}
                  for r in recs]
-            for sn, recs in pending.items()
+            for sn, recs in staged.items()
         },
     }
     return _result(envelope, body)
@@ -192,15 +192,14 @@ async def _run_evolve_rpc(envelope: E2AEnvelope, send) -> None:
 
     try:
         if method == "skills.evolve":
-            # 手动触发进化：从 store 读 SKILL.md 内容 + 已有消息
-            skill_md = store._skill_md_path(name)
+            # 手动触发进化：校验 skill 存在 + 传消息（SKILL.md 内容由 evolve 内部读）
+            skill_md = store.skill_md_path(name)
             if not skill_md.exists():
                 await send(_result(envelope,
                     {"type": method, "error": f"skill '{name}' not found"}, succeeded=False))
                 return
-            skill_content = skill_md.read_text(encoding="utf-8")
             messages_raw = envelope.params.get("messages") or []
-            result = await orch.evolve(name, messages_raw, skill_content=skill_content)
+            result = await orch.evolve(name, messages_raw)
             body = {"type": method, "skill_name": name, "status": result.status,
                     "message": result.message,
                     "record_count": len(result.records)}

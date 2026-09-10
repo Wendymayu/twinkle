@@ -141,7 +141,7 @@ evolution:
   signals:
     execution_failure: true
     script_artifact: true
-    user_intent: false          # 默认关
+    user_intent: true           # 默认开（用户纠正=高质量信号，价值高于失败/脚本）
 team:
   enabled: false                # 默认关；true = 开启 Team 协作（delegate_to_member 工具 + leader prompt 注入）
 mcp:

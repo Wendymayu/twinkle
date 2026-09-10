@@ -237,7 +237,7 @@ class EvolutionDistillConfig(_StrictModel):
 class EvolutionSignalsConfig(_StrictModel):
     execution_failure: bool = True
     script_artifact: bool = True
-    user_intent: bool = False
+    user_intent: bool = True
 
 
 class EvolutionConfig(_StrictModel):

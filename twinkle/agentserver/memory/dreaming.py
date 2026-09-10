@@ -18,7 +18,7 @@ from twinkle.agentserver.llm_client import TextDelta
 log = logging.getLogger("twinkle.memory.dreaming")
 
 
-_CONSOLIDATE_PROMPT = """你是记忆去重整合器。下面是【MEMORY.md 当前的非空行，已编号】。
+_CONSOLIDATE_PROMPT = """你是记忆去重整合器。下面是【{file_name} 当前的非空行，已编号】。
 
 对每行判断它属于哪类删除（每行至多进一类）：
 
@@ -91,6 +91,8 @@ class DreamingOrchestrator:
             self._save_state(promotion_state, sidecar_path)
             # ⑥ 整合:单次 LLM 删 MEMORY.md 内语义重复/矛盾行(≤25%),fail-soft
             await self._consolidate(mgr)
+        # ⑥' USER.md 不走晋升门,每轮整理手写累积的冗余/矛盾(复用 consolidate,独立触发)
+        await self._consolidate(mgr, "USER.md")
         # ⑦ 容量预算:无论晋升与否都跑——手写行膨胀不靠新晋升,compact 独立兜底
         self._compact_if_over_budget(mgr, promotion_state)
 
@@ -202,7 +204,7 @@ class DreamingOrchestrator:
                 "source_path": cand["source_path"],
             }
 
-    async def _consolidate(self, mgr) -> None:
+    async def _consolidate(self, mgr, file_path="MEMORY.md") -> None:
         """单次 LLM 整合:MEMORY.md 非空行编号 → LLM 出 {injectious,redundant} 两类删行 →
         各自校验行号+上限(infectious ≤max_infectious_fraction 注入去毒不受冗余额度约束;
         redundant ≤max_delete_fraction 兼容旧 delete 字段)→ 合并删行 mgr.replace。
@@ -212,14 +214,14 @@ class DreamingOrchestrator:
         """
         from twinkle.config import (MEMORY_DREAMING_MAX_DELETE_FRACTION,
                                     MEMORY_DREAMING_MAX_INFECTIOUS_FRACTION)
-        text = mgr.read("MEMORY.md")
+        text = mgr.read(file_path)
         if text.startswith("Error:"):
-            return  # 无 MEMORY.md → 无可整合
+            return  # 无可整合(文件不存在/空)
         lines = self._nonempty_lines(text)
         if len(lines) < 2:
             return  # 不足 2 行 → 无可合并
         numbered = "".join(f"{i}: {line}\n" for i, line in enumerate(lines, 1))
-        raw = await self._ask_llm(_CONSOLIDATE_PROMPT.format(numbered_lines=numbered))
+        raw = await self._ask_llm(_CONSOLIDATE_PROMPT.format(numbered_lines=numbered, file_name=file_path))
         if not raw:
             return  # LLM 失败/空 → fail-soft(append-only 版留着)
         try:
@@ -265,7 +267,7 @@ class DreamingOrchestrator:
         if not delete_set:
             return  # 无可删 → 不必重写
         kept = [line for i, line in enumerate(lines, 1) if i not in delete_set]
-        mgr.replace("MEMORY.md", "\n".join(kept) + "\n")
+        mgr.replace(file_path, "\n".join(kept) + "\n")
 
     @staticmethod
     def _compact_if_over_budget(mgr, promotion_state: dict) -> None:

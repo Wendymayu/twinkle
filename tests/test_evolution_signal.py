@@ -94,16 +94,8 @@ def test_is_failure():
     assert not detector._is_failure("OK")
 
 
-def test_user_intent_disabled_by_default():
-    detector = ConversationSignalDetector()
-    messages = [
-        _make_tool_msg("user", "不对，我要的是上海不是北京"),
-    ]
-    signals = detector.detect(messages, ["weather"])
-    assert len(signals) == 0  # user_intent 默认关
-
-
-def test_user_intent_enabled():
+def test_user_intent_enabled_by_default():
+    """user_intent 默认开：不显式传 enabled_signals（走默认集）也能检出用户纠正信号。"""
     detector = ConversationSignalDetector()
     messages = [
         _make_assistant_with_tool_calls([
@@ -111,7 +103,7 @@ def test_user_intent_enabled():
         ]),
         _make_tool_msg("user", "不对，should be 上海 not 北京"),
     ]
-    signals = detector.detect(messages, ["weather"], enabled_signals={"user_intent"})
+    signals = detector.detect(messages, ["weather"])  # 不传 enabled_signals，走默认集（含 user_intent）
     assert len(signals) == 1
     assert signals[0].type == "user_intent"
     assert signals[0].skill_name == "weather"

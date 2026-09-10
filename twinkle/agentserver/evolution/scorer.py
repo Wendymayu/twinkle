@@ -10,8 +10,12 @@ import json
 import logging
 import math
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-from twinkle.agentserver.evolution.types import EvolutionRecord, UsageStats
+from twinkle.agentserver.evolution.types import EvolutionRecord, UsageStats, strip_code_fence
+
+if TYPE_CHECKING:
+    from twinkle.agentserver.llm_client import LLMClient
 
 log = logging.getLogger("twinkle.evolution.scorer")
 
@@ -116,8 +120,8 @@ def calc_score(record: EvolutionRecord, current_skill_version: str | None = None
 class ExperienceScorer:
     """经验打分 + 效果评估 + 蒸馏。"""
 
-    def __init__(self, llm_client):
-        self._llm = llm_client
+    def __init__(self, llm_client: LLMClient) -> None:
+        self._llm: LLMClient = llm_client
 
     # --- 反馈环 ---
 
@@ -134,8 +138,8 @@ class ExperienceScorer:
                        conversation_snippet: str) -> list[dict]:
         """LLM 逐条判定 used/positive/negative，返 [{record_id, used, positive, negative, reason}]。
 
-        *presented_records*: 本轮注入给 agent 的经验记录
-        *conversation_snippet*: 注入后的对话片段（截断到 ~4000 字）
+        *presented_records*: 本轮呈现给 agent 的经验记录
+        *conversation_snippet*: 呈现后的对话片段（截断到 ~4000 字）
         """
         if not presented_records:
             return []
@@ -152,13 +156,7 @@ class ExperienceScorer:
             messages = [{"role": "user", "content": prompt}]
             resp = await self._llm.chat(messages, tools=None)
             content = resp.choices[0].message.content if resp.choices else ""
-            # 尝试提取 JSON 数组
-            content = content.strip()
-            if content.startswith("```"):
-                # 剥 markdown 代码块
-                lines = content.splitlines()
-                content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            return json.loads(content)
+            return json.loads(strip_code_fence(content))
         except Exception:
             log.exception("evaluate failed for skill=%s", skill_name)
             return []
@@ -218,11 +216,7 @@ class ExperienceScorer:
             messages = [{"role": "user", "content": prompt}]
             resp = await self._llm.chat(messages, tools=None)
             content = resp.choices[0].message.content if resp.choices else ""
-            content = content.strip()
-            if content.startswith("```"):
-                lines = content.splitlines()
-                content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            llm_results = json.loads(content)
+            llm_results = json.loads(strip_code_fence(content))
             results.extend(llm_results)
         except Exception:
             log.exception("simplify LLM call failed for skill=%s", skill_name)

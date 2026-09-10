@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 from twinkle.agentserver.evolution.types import (
     EvolutionRecord, EvolutionPatch, ConversationSignal,
-    INITIAL_SCORE_BY_SIGNAL,
+    INITIAL_SCORE_BY_SIGNAL, strip_code_fence,
 )
+
+if TYPE_CHECKING:
+    from twinkle.agentserver.llm_client import LLMClient
 
 log = logging.getLogger("twinkle.evolution.optimizer")
 
@@ -72,8 +76,8 @@ C. **脚本工件提取** — Agent 生成并成功执行的脚本（图表/数�
 class SkillExperienceOptimizer:
     """LLM 驱动的经验记录生成器。"""
 
-    def __init__(self, llm_client):
-        self._llm = llm_client
+    def __init__(self, llm_client: LLMClient) -> None:
+        self._llm: LLMClient = llm_client
 
     async def generate_records(self, skill_name: str, signals: list[ConversationSignal],
                                skill_content: str, existing_records: list[dict],
@@ -108,14 +112,7 @@ class SkillExperienceOptimizer:
                 messages = [{"role": "user", "content": prompt}]
                 resp = await self._llm.chat(messages, tools=None)
                 content = resp.choices[0].message.content if resp.choices else ""
-                content = content.strip()
-
-                # 剥 markdown 代码块
-                if content.startswith("```"):
-                    lines = content.splitlines()
-                    content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-                drafts = json.loads(content)
+                drafts = json.loads(strip_code_fence(content))
                 if isinstance(drafts, list):
                     return drafts
             except Exception:
@@ -135,6 +132,10 @@ class SkillExperienceOptimizer:
 
         for draft in drafts:
             action = draft.get("action", "append")
+            # skip 不占名额、不构建——前置于上限计数，否则 skip 会吃掉一个
+            # text/script 名额把后面的 real 挤掉
+            if action == "skip":
+                continue
             target = draft.get("target", "body")
             is_script = target == "script"
 
@@ -147,9 +148,6 @@ class SkillExperienceOptimizer:
                 if text_count >= max_text:
                     continue
                 text_count += 1
-
-            if action == "skip":
-                continue
 
             patch = EvolutionPatch(
                 section=draft.get("section", "Troubleshooting"),
