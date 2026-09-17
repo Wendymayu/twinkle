@@ -20,7 +20,7 @@ skill 自进化 = 一个**闭环反馈系统**：从 agent 运行时的工具调
 | **接线层** | `SkillEvolutionHook`（priority 80） | 把进化事件路由到核心层；`after_tool_call` 监听 read_skill 记经验 presented、`after_invoke` 跑反馈环 + 进化扫描 |
 | **对外入口** | `skills/rpc.py` 6 个 RPC | 手动触发进化 / 查看经验 / 审批 / 蒸馏 |
 
-进程级单例 `get_orchestrator()` 惰性构造，组合 store + optimizer + scorer + detector；optimizer 与 scorer **共用同一个 `LLMClient`**（与 agent 主循环同模型）。`server.py` 在 `if EVOLUTION_ENABLED` 为真时条件注册 Hook（`evolution.enabled` 默认 `false` = opt-in）。
+进程级单例 `get_orchestrator()` 惰性构造，组合 store + optimizer + scorer + detector；optimizer 与 scorer **共用同一个 `LLMClient`**（与 agent 主循环同模型）。`server.py` 在 `if EVOLUTION_ENABLED` 为真时条件注册 Hook（`evolution.enabled` 默认 `true`——进化链默认跑）。
 
 ## 2. 闭环：5 步
 
@@ -29,7 +29,7 @@ flowchart LR
     S1["① 信号检测<br/>ConversationSignalDetector<br/>失败/纠正/脚本工件<br/>规则 · 零 LLM"]
     S2["② LLM 生成经验<br/>SkillExperienceOptimizer<br/>generate_records<br/>LLM · 数量上限 文本≤2 脚本≤1"]
     S3["③ 存储 + 固化<br/>EvolutionStore<br/>evolutions.json<br/>原子写 + 索引块"]
-    S4["④ 打分 E/U/F<br/>calc_score<br/>0.5E + 0.3U + 0.2F"]
+    S4["④ 打分 E/U/F<br/>calculate_score<br/>0.5E + 0.3U + 0.2F"]
 
     subgraph loop["⑤ 反馈环 · ExperienceScorer.evaluate"]
         direction LR
@@ -126,12 +126,12 @@ LLM 判定每条经验输出 `{record_id, used, positive, negative, reason}`。`
 if used:     stats.times_used += 1
 if positive: stats.times_positive += 1
 if negative: stats.times_negative += 1
-record.score = calc_score(...)   # 重算
+record.score = calculate_score(...)   # 重算
 ```
 
 > **注意分工**：`update_score` 不自增 `times_presented`——分母 U 由"呈现层"（`after_tool_call` 监听 read_skill 记 presented 的 Hook）维护。
 
-**呈现计数落盘点**：`after_tool_call` 呈现时只在内存记 `_presented_ids_by_skill`（对象不入盘）；`run_feedback_loop` 时从 store fresh 读出记录后 `times_presented += 1` 再 save。否则 `evolutions.json` 里 presented 恒 0、`calc_utilization` 永走 0.5 兜底、U 维失效。这是当前迭代修的关键点。
+**呈现计数落盘点**：`after_tool_call` 呈现时只在内存记 `_presented_ids_by_skill`（对象不入盘）；`run_feedback_loop` 时从 store fresh 读出记录后 `times_presented += 1` 再 save。否则 `evolutions.json` 里 presented 恒 0、`calculate_utilization` 永走 0.5 兜底、U 维失效。这是当前迭代修的关键点。
 
 闭环完整跑通：**生成经验 → 打种子分 → 呈现（模型 read_skill）→ 跑对话 → LLM 判定 → 更新 used/positive/negative → 重算 E/U/F → 重排 → 高分在索引块靠前、低分被蒸馏淘汰**。
 
@@ -141,12 +141,12 @@ record.score = calc_score(...)   # 重算
 
 | 时机 | 做什么 |
 |---|---|
-| `after_tool_call` | 监听 `read_skill(skill,"SKILL.md")`：模型加载该 skill 主体（含经验索引块）= 经验被呈现 → 记该 skill 全部 non-skip 经验 id 进 `_presented_ids_by_skill`（只记事件，不进上下文、不 +1）。非 read_skill / 读 sidecar 不记。 |
+| `after_tool_call` | 监听 `read_skill(skill,"SKILL.md")`：返回值 = SKILL.md 原文（含索引块）+ top-3 高分经验正文追加块 → 记这 top-3 为 presented 进 `_presented_ids_by_skill`（只记事件、不 +1）。读 `evolution/<section>.md` sidecar 记该 section 全部 non-skip；非 read_skill 不记。 |
 | `after_invoke` | 先 `_run_feedback_loop`（对本轮 presented 的经验取对话片段做 LLM 效果判定、回写 times_presented/used、重算分），再 `_run_evolution`（调 `orchestrator.evolve_all`：detector 只跑一次、按 `skill_name` 分发信号给各 skill，从 `ctx.agent._messages` 取对话消息做信号检测 + 生成经验）。末尾清空 `_presented_ids_by_skill`。 |
 
-触发点由 config `evolution.trigger` 控制（默认 `after_invoke`，可选 `after_tool_call` / `after_model_call` / `none`）。`evolution.enabled=false` 时 Hook 不注册，整条链路零开销。
+触发点由 config `evolution.trigger` 控制：`after_invoke`（默认）和 `none` **已接通**；`after_tool_call` / `after_model_call` 两档 **仍 deferred**（需新回调，成本/语义风险高）。`evolution.enabled` 默认 `true`；关时 Hook 不注册，整条链路零开销。
 
-> **缓存视角**：经验不进 system message、不进前缀也不进 history messages——只在 hook 内部记 presented 事件。所以经验呈现完全不占上下文、不扰 cache。
+> **缓存视角**：经验正文不进 system message / 前缀 / history，只随 `read_skill` 返回值进 tool_result（动态区，不扰前缀 cache）。返回值的"两块"都进上下文：索引块（id+score+summary+sidecar 链接，SKILL.md body 的一部分）+ top-3 正文追加块。top-3 这几条会出现两次——索引块里带 summary+链接，追加块里带详细正文；索引块的 sidecar 链接模型用不上，真正喂模型的是追加块正文，索引块对模型属半冗余。
 
 ## 4. 数据模型
 
@@ -216,9 +216,9 @@ RPC 失败帧 body 带 `error`，前端 `request()` 因 `payload.error` reject�
 
 | 配置块 | 字段 | 默认 | 作用 |
 |---|---|---|---|
-| `evolution` | `enabled` | `False` | 总开关（opt-in；关 = Hook 不注册，零开销） |
-| | `trigger` | `after_invoke` | 触发点（after_tool_call / after_model_call / none） |
-| | `auto_save` | `False` | 自动批 vs 审批门（关 = stage 等人批） |
+| `evolution` | `enabled` | `True` | 总开关（默认开，进化链默认跑；关 = Hook 不注册，零开销） |
+| | `trigger` | `after_invoke` | 触发点；`after_invoke`/`none` 已接通，`after_tool_call`/`after_model_call` 仍 deferred |
+| | `auto_save` | `False` | 自动批 vs 审批门（已接通 config；默认关 = stage 等人批，不静默写改） |
 | | `max_text_records` | `2` | 单轮文本经验上限 |
 | | `max_script_records` | `1` | 单轮脚本经验上限 |
 | `scoring` | `w_effectiveness`/`w_utilization`/`w_freshness` | `0.5`/`0.3`/`0.2` | E/U/F 权重 |
@@ -257,14 +257,14 @@ Twinkle 是学习精简版，对齐 jiuwenswarm `agent_evolving` 的闭环骨架
 
 | 边界 | 现状 |
 |---|---|
-| 总开关 | `evolution.enabled` 默认关（opt-in）；关 = Hook 不注册零开销 |
-| 触发点 | 默认 `after_invoke`，可选 none |
+| 总开关 | `evolution.enabled` 默认开（进化链默认跑）；关 = Hook 不注册零开销 |
+| 触发点 | 默认 `after_invoke`；`after_invoke`/`none` 已接通，另两档 deferred |
 | 写改前默认审批 | 是（`auto_save=False`）；`auto_save=True` 才自动落盘 |
 | 信号检测 LLM | **零**（纯正则 + 路径匹配，便宜可复现） |
 | 经验生成 LLM | 每次 `evolve` 一调（含重试） |
 | 反馈环 LLM | 每轮呈现后一调（判定 used/positive/negative） |
 | 数量上限 | 单轮文本 ≤2 / 脚本 ≤1，独立计数 |
-| 呈现 | `read_skill(SKILL.md)` 时记该 skill 全部 non-skip 经验为 presented（不进上下文，只记 id 供反馈环） |
+| 呈现 | `read_skill(SKILL.md)` 返回值含索引块 + top-3 正文追加块（都进上下文）；记 top-3 为 presented；读 sidecar 记该 section 全部 non-skip；只记 id+呈现点索引供反馈环 |
 | 待批持久化 | v1 内存（重启丢失） |
 | 蒸馏 | 分 <0.4 且零调用 → 直接 DELETE（不调 LLM）；其余 LLM 判定 |
 | 跨用户分享 | `read_pristine_skill_content` 剥掉索引块，存作者原文 |

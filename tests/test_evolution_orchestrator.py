@@ -1,7 +1,7 @@
 """测试 OnlineEvolutionOrchestrator — run_feedback_loop 呈现计数落盘(U 维回归)。
 
 回归 🔴:presented 计数若只改临时对象不落盘 → evolutions.json 里 times_presented
-恒 0 → calc_utilization 永走 0.5 兜底 → EUF 的 U 维失效。
+恒 0 → calculate_utilization 永走 0.5 兜底 → EUF 的 U 维失效。
 机制:after_tool_call(read_skill) 记 _presented_ids_by_skill(只记 id,不 +1);
 run_feedback_loop 从 store fresh 读后 +1 再 save 落盘。本测试直调 run_feedback_loop 验落盘。
 """
@@ -11,7 +11,7 @@ import json
 import pytest
 
 from twinkle.agentserver.evolution.orchestrator import OnlineEvolutionOrchestrator
-from twinkle.agentserver.evolution.scorer import ExperienceScorer, calc_utilization
+from twinkle.agentserver.evolution.scorer import ExperienceScorer, calculate_utilization
 from twinkle.agentserver.evolution.store import EvolutionStore
 from twinkle.agentserver.evolution.types import ConversationSignal, EvolutionPatch, EvolutionRecord
 
@@ -89,7 +89,7 @@ def test_feedback_loop_persists_times_presented(store):
     assert r2.usage_stats.times_presented == 2   # 累积 → 证明落盘非临时对象
     assert r2.usage_stats.times_used == 2
     # U 维真生效:走 used/presented = 2/2 = 1.0,非 0.5 兜底
-    assert calc_utilization(r2.usage_stats) == 1.0
+    assert calculate_utilization(r2.usage_stats) == 1.0
 
 
 def test_feedback_loop_no_presented_ids_is_noop(store):
@@ -237,7 +237,7 @@ def test_feedback_loop_reads_agent_messages_not_ctx_inputs():
 
     spy = _SnippetSpyOrch()
     hook = SkillEvolutionHook(orchestrator=spy)
-    hook._presented_ids_by_skill = {"alpha": ["ev_1"]}  # 模拟 after_tool_call(read_skill) 呈现过
+    hook._presented_ids_by_skill = {"alpha": (["ev_1"], 0)}  # (ids, 呈现点索引);模拟 read_skill 呈现过
 
     # ctx.inputs = InvokeInputs(无 messages);真消息只在 agent._messages
     agent = SimpleNamespace(_messages=[
@@ -313,8 +313,8 @@ def test_evolve_passes_configured_max_records_to_optimizer(store, monkeypatch):
 
 
 def test_after_tool_call_read_skill_marks_presented(store):
-    """模型调 read_skill(skill,"SKILL.md") = 加载该 skill 主体(含经验索引块) →
-    记该 skill 全部 non-skip 经验 presented,供 after_invoke 反馈环判定。
+    """模型调 read_skill(skill,"SKILL.md") = 加载该 skill 主体 →
+    read_skill 已把 top-3 高分经验正文拼进返回值,故记 top-3 为 presented(供 after_invoke 反馈环)。
 
     取代旧 before_model_call 每步全量所有 skill 注入摘要:经验不再主动灌进
     system message,只在模型真 read_skill 时才算"被呈现",presented 真实(不读不涨)。
@@ -341,7 +341,11 @@ def test_after_tool_call_read_skill_marks_presented(store):
     )
     asyncio.run(hook.after_tool_call(ctx))
 
-    assert hook._presented_ids_by_skill.get("alpha") == [rec1.id, rec2.id]
+    # read SKILL.md 记 top-3 经验 presented(top-N 正文随 SKILL.md 返回值进上下文)
+    # 2 条都在 top-3 内；结构 (ids, 呈现点索引)；agent 无 _messages → index=0
+    ids, idx = hook._presented_ids_by_skill["alpha"]
+    assert ids == [rec1.id, rec2.id]
+    assert idx == 0
 
 
 def test_after_tool_call_non_read_skill_is_noop(store):
@@ -369,15 +373,15 @@ def test_after_tool_call_non_read_skill_is_noop(store):
     assert "alpha" not in hook._presented_ids_by_skill  # 非 read_skill 不记
 
 
-def test_after_tool_call_read_sidecar_not_marked(store):
-    """read_skill 读 sidecar(evolution/*.md)不重复记 presented——
-    读 SKILL.md(主体含索引块)时已记全部索引,sidecar 是详情,不二次 +1。"""
+def test_after_tool_call_read_sidecar_marks_section_presented(store):
+    """read_skill(skill,"evolution/<section>.md") sidecar = 该 section 正文进上下文 →
+    记该 section 全部 non-skip 经验为 presented(不再是 no-op)。呈现点索引 = 当前消息数。"""
     from types import SimpleNamespace
     from twinkle.agentserver.hooks.base import HookContext, HookEvent, ToolCallInputs
     from twinkle.agentserver.hooks.builtin.evolution_hook import SkillEvolutionHook
 
     _make_skill(store, "alpha")
-    rec = _make_record()
+    rec = _make_record()  # section == "Troubleshooting"
     store.save_evolution_log("alpha", [rec])
 
     orch = OnlineEvolutionOrchestrator(store=store, optimizer=None,
@@ -395,4 +399,166 @@ def test_after_tool_call_read_sidecar_not_marked(store):
     )
     asyncio.run(hook.after_tool_call(ctx))
 
-    assert "alpha" not in hook._presented_ids_by_skill  # 读 sidecar 不记
+    ids, idx = hook._presented_ids_by_skill["alpha"]  # 记该 section 全部 non-skip
+    assert ids == [rec.id]
+    assert idx == 0
+
+
+# --- read_skill 呈现 / snippet / trigger 接通 / scoring 接通 回归 --- #
+
+
+def test_read_skill_appends_top_experiences_when_evolution_on(store, monkeypatch):
+    """read_skill(SKILL.md) 在 evolution 开启且有经验时,返回值含 top-N 经验正文段。"""
+    from twinkle.agentserver.tools.builtin.skill_tools import _append_top_experiences
+
+    _make_skill(store, "alpha", content="# Alpha\n\nbody\n")
+    rec = _make_record(summary="先装 openpyxl")
+    store.save_evolution_log("alpha", [rec])
+
+    monkeypatch.setattr("twinkle.config.EVOLUTION_ENABLED", True)
+    monkeypatch.setattr("twinkle.agentserver.evolution.get_evolution_store", lambda: store)
+
+    out = _append_top_experiences("alpha", "# Alpha\n\nbody\n")
+    assert "evolution-experiences-start" in out
+    assert rec.id in out
+    assert "先装 openpyxl" in out  # 正文进返回值
+
+
+def test_read_skill_no_experiences_or_disabled_returns_original(store, monkeypatch):
+    """无经验 / evolution 关 → 返回原文,不拼段。"""
+    from twinkle.agentserver.tools.builtin.skill_tools import _append_top_experiences
+
+    _make_skill(store, "alpha")
+    monkeypatch.setattr("twinkle.config.EVOLUTION_ENABLED", True)
+    monkeypatch.setattr("twinkle.agentserver.evolution.get_evolution_store", lambda: store)
+    assert _append_top_experiences("alpha", "# Alpha\n\nbody\n") == "# Alpha\n\nbody\n"  # 无经验
+
+    monkeypatch.setattr("twinkle.config.EVOLUTION_ENABLED", False)
+    assert _append_top_experiences("alpha", "# Alpha\n\nbody\n") == "# Alpha\n\nbody\n"  # 关
+
+
+def test_read_skill_script_record_only_summary(store, monkeypatch):
+    """脚本类记录只取 summary,不展开源码(源码是引用串,模型要再 read 脚本文件)。"""
+    from twinkle.agentserver.evolution.types import EvolutionPatch, EvolutionRecord
+    from twinkle.agentserver.tools.builtin.skill_tools import _append_top_experiences
+
+    _make_skill(store, "alpha")
+    patch = EvolutionPatch(section="Scripts", action="append", target="script",
+                           content="def safe_export(): ...",  # 源码不应进返回值
+                           script_filename="safe_export.py", summary="安全导出脚本")
+    rec = EvolutionRecord.make(source="script_artifact", context="ctx",
+                               change=patch, summary="安全导出脚本")
+    store.save_evolution_log("alpha", [rec])
+
+    monkeypatch.setattr("twinkle.config.EVOLUTION_ENABLED", True)
+    monkeypatch.setattr("twinkle.agentserver.evolution.get_evolution_store", lambda: store)
+
+    out = _append_top_experiences("alpha", "# Alpha\n")
+    assert "def safe_export" not in out  # 不展开源码
+    assert "安全导出脚本" in out       # summary 在
+
+
+def test_feedback_loop_snippet_uses_post_presentation_messages():
+    """闸门3：_run_feedback_loop 取呈现点之后的片段,不是尾部 10 条。
+
+    构造呈现点在消息列表中段(index=2),验 snippet 含后段、不含前段。
+    """
+    from types import SimpleNamespace
+    from twinkle.agentserver.hooks.builtin.evolution_hook import SkillEvolutionHook
+    from twinkle.agentserver.hooks.base import HookContext, InvokeInputs, HookEvent
+
+    class _Spy:
+        def __init__(self): self.snippet = ""
+        async def run_feedback_loop(self, skill_name, record_ids, snippet):
+            self.snippet = snippet
+
+    spy = _Spy()
+    hook = SkillEvolutionHook(orchestrator=spy)
+    hook._presented_ids_by_skill = {"alpha": (["ev_1"], 2)}  # 呈现点 index=2
+    agent = SimpleNamespace(_messages=[
+        {"role": "user", "content": "BEFORE_PRESENTATION_不应出现"},
+        {"role": "assistant", "content": "also_before"},
+        {"role": "tool", "content": "skill read done"},  # 呈现点
+        {"role": "assistant", "content": "AFTER_采纳经验重试"},
+        {"role": "user", "content": "AFTER_成功了"},
+    ])
+    ctx = HookContext(agent=agent, event=HookEvent.AFTER_INVOKE,
+                      inputs=InvokeInputs(query="x"), session_id=None, request_id=None)
+    asyncio.run(hook._run_feedback_loop(ctx))
+
+    assert "AFTER_采纳经验重试" in spy.snippet
+    assert "AFTER_成功了" in spy.snippet
+    assert "BEFORE_PRESENTATION_不应出现" not in spy.snippet  # 前段不进 snippet
+
+
+def test_after_invoke_trigger_none_does_not_run():
+    """trigger=none → after_invoke 不跑反馈环/进化(只手动 RPC)。"""
+    from types import SimpleNamespace
+    from twinkle.agentserver.hooks.builtin.evolution_hook import SkillEvolutionHook
+    from twinkle.agentserver.hooks.base import HookContext, InvokeInputs, HookEvent
+
+    class _Spy:
+        def __init__(self): self.calls = 0
+        async def run_feedback_loop(self, *a, **k): self.calls += 1
+        async def evolve_all(self, *a, **k): self.calls += 1; return {}
+
+    spy = _Spy()
+    hook = SkillEvolutionHook(orchestrator=spy, trigger="none")
+    hook._presented_ids_by_skill = {"alpha": (["ev_1"], 0)}  # 有 presented 也不该跑
+    agent = SimpleNamespace(_messages=[{"role": "user", "content": "x"}])
+    ctx = HookContext(agent=agent, event=HookEvent.AFTER_INVOKE,
+                      inputs=InvokeInputs(query="x"), session_id=None, request_id=None)
+    asyncio.run(hook.after_invoke(ctx))
+    assert spy.calls == 0  # none → 零调用
+
+
+def test_after_invoke_trigger_after_invoke_runs(monkeypatch):
+    """trigger=after_invoke(默认) → 跑反馈环 + 进化。"""
+    from types import SimpleNamespace
+    from twinkle.agentserver.hooks.builtin.evolution_hook import SkillEvolutionHook
+    from twinkle.agentserver.hooks.base import HookContext, InvokeInputs, HookEvent
+
+    class _Spy:
+        def __init__(self): self.calls = 0
+        async def run_feedback_loop(self, *a, **k): self.calls += 1
+        async def evolve_all(self, *a, **k): self.calls += 1; return {}
+
+    spy = _Spy()
+    hook = SkillEvolutionHook(orchestrator=spy, trigger="after_invoke")
+    hook._presented_ids_by_skill = {"alpha": (["ev_1"], 0)}
+    # mock get_skill_manager 返回非空,让 _run_evolution 调到 evolve_all
+    monkeypatch.setattr(
+        "twinkle.agentserver.skills.get_skill_manager",
+        lambda: SimpleNamespace(list_skills=lambda: [SimpleNamespace(name="alpha")]),
+    )
+    agent = SimpleNamespace(_messages=[{"role": "user", "content": "x"}])
+    ctx = HookContext(agent=agent, event=HookEvent.AFTER_INVOKE,
+                      inputs=InvokeInputs(query="x"), session_id=None, request_id=None)
+    asyncio.run(hook.after_invoke(ctx))
+    assert spy.calls == 2  # 反馈环 + 进化
+
+
+def test_scorer_uses_injected_weights_not_defaults():
+    """scoring 死配置接通：ExperienceScorer 用实例(config)权重,非 _DEFAULT_SCORING。"""
+    from twinkle.agentserver.evolution.scorer import ExperienceScorer
+    from twinkle.agentserver.evolution.types import EvolutionRecord, EvolutionPatch, UsageStats
+    from twinkle.config.schema import EvolutionScoringConfig
+
+    patch = EvolutionPatch(section="T", action="append", content="x")
+    rec = EvolutionRecord.make(source="execution_failure", context="c", change=patch)
+    rec.usage_stats = UsageStats(times_positive=1, times_negative=0)  # E = 2/3 ≈ 0.667
+
+    default_scorer = ExperienceScorer(llm_client=None)                          # w=0.5/0.3/0.2
+    skewed_scorer = ExperienceScorer(
+        llm_client=None,
+        scoring_config=EvolutionScoringConfig(w_effectiveness=0.9, w_utilization=0.05, w_freshness=0.05),
+    )
+    default_scorer.update_score(rec, {"used": True, "positive": True, "negative": False})
+    score_default = rec.score
+
+    rec.usage_stats = UsageStats(times_positive=1, times_negative=0)
+    skewed_scorer.update_score(rec, {"used": True, "positive": True, "negative": False})
+    score_skewed = rec.score
+
+    # 权重变了 + E≠0.5 → 分必不同,证明实例权重生效(非 DEFAULT 一视同仁)
+    assert score_skewed != score_default

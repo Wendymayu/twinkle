@@ -3,7 +3,7 @@ import math
 from datetime import datetime, timezone, timedelta
 
 from twinkle.agentserver.evolution.scorer import (
-    calc_effectiveness, calc_utilization, calc_freshness, calc_score,
+    calculate_effectiveness, calculate_utilization, calculate_freshness, calculate_score,
 )
 from twinkle.agentserver.evolution.types import (
     EvolutionRecord, EvolutionPatch, UsageStats,
@@ -19,77 +19,77 @@ def _make_record(timestamp=None, score=0.6):
     return rec
 
 
-def test_calc_effectiveness_no_data():
-    assert calc_effectiveness(None) == 0.5
-    assert calc_effectiveness(UsageStats()) == 0.5
+def test_calculate_effectiveness_no_data():
+    assert calculate_effectiveness(None) == 0.5
+    assert calculate_effectiveness(UsageStats()) == 0.5
 
 
-def test_calc_effectiveness_all_positive():
+def test_calculate_effectiveness_all_positive():
     stats = UsageStats(times_positive=5)
     # (5+1)/(5+0+2) = 6/7 ≈ 0.857
     expected = 6 / 7
-    assert abs(calc_effectiveness(stats) - expected) < 0.001
+    assert abs(calculate_effectiveness(stats) - expected) < 0.001
 
 
-def test_calc_effectiveness_mixed():
+def test_calculate_effectiveness_mixed():
     stats = UsageStats(times_positive=3, times_negative=2)
     # (3+1)/(3+2+2) = 4/7 ≈ 0.571
     expected = 4 / 7
-    assert abs(calc_effectiveness(stats) - expected) < 0.001
+    assert abs(calculate_effectiveness(stats) - expected) < 0.001
 
 
-def test_calc_effectiveness_all_negative():
+def test_calculate_effectiveness_all_negative():
     stats = UsageStats(times_negative=5)
     # (0+1)/(0+5+2) = 1/7 ≈ 0.143
     expected = 1 / 7
-    assert abs(calc_effectiveness(stats) - expected) < 0.001
+    assert abs(calculate_effectiveness(stats) - expected) < 0.001
 
 
-def test_calc_utilization_no_data():
-    assert calc_utilization(None) == 0.5
-    assert calc_utilization(UsageStats()) == 0.5
+def test_calculate_utilization_no_data():
+    assert calculate_utilization(None) == 0.5
+    assert calculate_utilization(UsageStats()) == 0.5
 
 
-def test_calc_utilization_half_used():
+def test_calculate_utilization_half_used():
     stats = UsageStats(times_presented=10, times_used=5)
-    assert calc_utilization(stats) == 0.5
+    assert calculate_utilization(stats) == 0.5
 
 
-def test_calc_utilization_all_used():
+def test_calculate_utilization_all_used():
     stats = UsageStats(times_presented=10, times_used=10)
-    assert calc_utilization(stats) == 1.0
+    assert calculate_utilization(stats) == 1.0
 
 
-def test_calc_freshness_recent():
+def test_calculate_freshness_recent():
     now = datetime.now(timezone.utc).isoformat()
     rec = _make_record(timestamp=now)
-    f = calc_freshness(rec, half_life_days=90)
+    f = calculate_freshness(rec, half_life_days=90)
     assert f > 0.95  # 刚创建，接近 1.0
 
 
-def test_calc_freshness_old():
+def test_calculate_freshness_old():
     old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
     rec = _make_record(timestamp=old)
-    f = calc_freshness(rec, half_life_days=90)
+    f = calculate_freshness(rec, half_life_days=90)
     assert 0.7 < f < 0.8  # 一个半衰期后：0.5+0.5*0.5=0.75
 
 
-def test_calc_freshness_very_old():
+def test_calculate_freshness_very_old():
     ancient = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
     rec = _make_record(timestamp=ancient)
-    f = calc_freshness(rec, half_life_days=90)
+    f = calculate_freshness(rec, half_life_days=90)
     assert f < 0.55  # 接近 0.5 底部
 
 
-def test_calc_freshness_version_mismatch():
+def test_calculate_freshness_version_mismatch():
     now = datetime.now(timezone.utc).isoformat()
     rec = _make_record(timestamp=now)
     rec.skill_version = "1.0"
-    f = calc_freshness(rec, current_skill_version="2.0", stale_penalty=0.7)
+    f = calculate_freshness(rec, current_skill_version="2.0", stale_penalty=0.7)
     assert f < 0.75  # fresh=~1.0, ×0.7 = ~0.7
 
 
-def test_calc_score_default_weights():
+def test_calculate_score_default_weights():
     now = datetime.now(timezone.utc).isoformat()
     rec = _make_record(timestamp=now)
     rec.usage_stats = UsageStats(times_presented=10, times_used=5, times_positive=3, times_negative=1)
@@ -97,7 +97,7 @@ def test_calc_score_default_weights():
     # U = 5/10 = 0.5
     # F ≈ 1.0（新鲜度）
     # score = 0.5*0.667 + 0.3*0.5 + 0.2*1.0 = 0.333 + 0.15 + 0.2 = 0.683
-    s = calc_score(rec)
+    s = calculate_score(rec)
     assert 0.67 < s < 0.70
 
 

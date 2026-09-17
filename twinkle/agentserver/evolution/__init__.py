@@ -33,14 +33,19 @@ def get_orchestrator() -> OnlineEvolutionOrchestrator:
     global _ORCHESTRATOR
     if _ORCHESTRATOR is None:
         from twinkle.agentserver.llm_client import LLMClient
-        from twinkle.config import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT
+        from twinkle.config import (
+            LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT,
+            EVOLUTION_AUTO_SAVE, settings,
+        )
         llm = LLMClient(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_MODEL, timeout=LLM_TIMEOUT)
         store = get_evolution_store()
+        scorer = ExperienceScorer(llm, settings.evolution.scoring)
         _ORCHESTRATOR = OnlineEvolutionOrchestrator(
             store=store,
             optimizer=SkillExperienceOptimizer(llm),
-            scorer=ExperienceScorer(llm),
+            scorer=scorer,
             detector=ConversationSignalDetector(),
+            auto_save=EVOLUTION_AUTO_SAVE,
         )
     return _ORCHESTRATOR
 

@@ -125,8 +125,8 @@ repeat_tool_detection:
   global_stop: 30
   remediation_max_per_minute: 5
 evolution:
-  enabled: false                # 总开关，默认关（进化改用户 skill，保守 opt-in）
-  trigger: after_invoke         # after_invoke | after_tool_call | after_model_call | none
+  enabled: true                 # 总开关默认开（进化链路默认跑；auto_save 默认仍 false 走审批门，不静默写改）
+  trigger: after_invoke         # after_invoke(已接通) | none(已接通) | after_tool_call/after_model_call(回调 deferred，本轮不实现)
   auto_save: false              # 默认审批门（不静默写改）；true 才自动落盘
   max_text_records: 2           # 单轮文本经验上限
   max_script_records: 1         # 单轮脚本经验上限

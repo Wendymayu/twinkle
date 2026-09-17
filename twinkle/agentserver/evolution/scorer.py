@@ -13,19 +13,18 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from twinkle.agentserver.evolution.types import EvolutionRecord, UsageStats, strip_code_fence
+from twinkle.config.schema import EvolutionScoringConfig
 
 if TYPE_CHECKING:
     from twinkle.agentserver.llm_client import LLMClient
 
 log = logging.getLogger("twinkle.evolution.scorer")
 
-# 默认权重（可由 config 覆盖）
-DEFAULT_W_E = 0.5
-DEFAULT_W_U = 0.3
-DEFAULT_W_F = 0.2
-DEFAULT_HALF_LIFE_DAYS = 90
-DEFAULT_STALE_PENALTY = 0.7
+# 蒸馏阈值默认（属 distill 子节口径；打分系数统一走 EvolutionScoringConfig）
 DEFAULT_MIN_SCORE = 0.4
+
+# 打分系数单一来源：schema 默认值。模块级函数作默认参数,实例由 ctor 注入覆盖。
+_DEFAULT_SCORING = EvolutionScoringConfig()
 
 EXPERIENCE_EVAL_PROMPT = """你是一个经验评估专家。根据对话片段，评估之前展示给 Agent 的经验是否被有效使用。
 
@@ -63,7 +62,7 @@ SIMPLIFY_PROMPT = """你是一个经验库清理专家。检查以下经验记�
 只输出 JSON，不要其他内容。"""
 
 
-def calc_effectiveness(stats: UsageStats | None) -> float:
+def calculate_effectiveness(stats: UsageStats | None) -> float:
     """贝叶斯平滑效能: (pos+1)/(pos+neg+2)，Beta(1,1) 先验。无数据 → 0.5。"""
     if stats is None:
         return 0.5
@@ -74,16 +73,16 @@ def calc_effectiveness(stats: UsageStats | None) -> float:
     return (pos + 1) / (pos + neg + 2)
 
 
-def calc_utilization(stats: UsageStats | None) -> float:
+def calculate_utilization(stats: UsageStats | None) -> float:
     """利用率: used/presented。无数据 → 0.5。"""
     if stats is None or stats.times_presented == 0:
         return 0.5
     return stats.times_used / stats.times_presented
 
 
-def calc_freshness(record: EvolutionRecord, current_skill_version: str | None = None,
-                   half_life_days: int = DEFAULT_HALF_LIFE_DAYS,
-                   stale_penalty: float = DEFAULT_STALE_PENALTY) -> float:
+def calculate_freshness(record: EvolutionRecord, current_skill_version: str | None = None,
+                   half_life_days: int = _DEFAULT_SCORING.freshness_half_life_days,
+                   stale_penalty: float = _DEFAULT_SCORING.stale_version_penalty) -> float:
     """新鲜度衰减: 0.5 + 0.5 * 2^(-days/half_life)。版本不匹配 × penalty。"""
     try:
         ts = datetime.fromisoformat(record.timestamp)
@@ -105,23 +104,34 @@ def calc_freshness(record: EvolutionRecord, current_skill_version: str | None = 
     return freshness
 
 
-def calc_score(record: EvolutionRecord, current_skill_version: str | None = None,
-               w_e: float = DEFAULT_W_E, w_u: float = DEFAULT_W_U, w_f: float = DEFAULT_W_F,
-               half_life_days: int = DEFAULT_HALF_LIFE_DAYS,
-               stale_penalty: float = DEFAULT_STALE_PENALTY) -> float:
+def calculate_score(record: EvolutionRecord, current_skill_version: str | None = None,
+               w_e: float = _DEFAULT_SCORING.w_effectiveness,
+               w_u: float = _DEFAULT_SCORING.w_utilization,
+               w_f: float = _DEFAULT_SCORING.w_freshness,
+               half_life_days: int = _DEFAULT_SCORING.freshness_half_life_days,
+               stale_penalty: float = _DEFAULT_SCORING.stale_version_penalty) -> float:
     """综合: w_e*E + w_u*U + w_f*F。"""
     stats = record.usage_stats
-    e = calc_effectiveness(stats)
-    u = calc_utilization(stats)
-    f = calc_freshness(record, current_skill_version, half_life_days, stale_penalty)
+    e = calculate_effectiveness(stats)
+    u = calculate_utilization(stats)
+    f = calculate_freshness(record, current_skill_version, half_life_days, stale_penalty)
     return w_e * e + w_u * u + w_f * f
 
 
 class ExperienceScorer:
     """经验打分 + 效果评估 + 蒸馏。"""
 
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(self, llm_client: LLMClient,
+                 scoring_config: EvolutionScoringConfig | None = None) -> None:
         self._llm: LLMClient = llm_client
+        self._scoring_config: EvolutionScoringConfig = scoring_config or _DEFAULT_SCORING
+
+    def _score_record(self, record: EvolutionRecord, current_skill_version: str | None = None) -> float:
+        """用实例（config 注入的）权重算综合分。"""
+        s = self._scoring_config
+        return calculate_score(record, current_skill_version,
+                          s.w_effectiveness, s.w_utilization, s.w_freshness,
+                          s.freshness_half_life_days, s.stale_version_penalty)
 
     # --- 反馈环 ---
 
@@ -173,7 +183,7 @@ class ExperienceScorer:
             stats.times_negative += 1
         stats.last_evaluated_at = datetime.now(timezone.utc).isoformat()
         record.usage_stats = stats
-        record.score = calc_score(record, current_skill_version)
+        record.score = self._score_record(record, current_skill_version)
 
     # --- 蒸馏 ---
 

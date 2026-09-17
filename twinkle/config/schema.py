@@ -241,7 +241,7 @@ class EvolutionSignalsConfig(_StrictModel):
 
 
 class EvolutionConfig(_StrictModel):
-    enabled: bool = False
+    enabled: bool = True
     trigger: Literal["after_invoke", "after_tool_call", "after_model_call", "none"] = "after_invoke"
     auto_save: bool = False
     max_text_records: int = 2

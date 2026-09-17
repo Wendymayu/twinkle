@@ -266,18 +266,18 @@ spec `docs/superpowers/specs/2026-08-03-phase11a-workflow-engine.md` + `2026-08-
 - **信号检测**（`signal_detector.py` `ConversationSignalDetector`）：纯正则+路径匹配，不调 LLM。`execution_failure`（扫 tool result 命中 `error/exception/failed/timeout/traceback/...`，默认开）、`script_artifact`（command_exec 等成功且内容>20 字，默认开）、`user_intent`（纠正词 `不对/应该是/...`，默认开）。从 tool_call 参数反推活跃 skill（SKILL.md 路径正则 + skill_name + 内容 fallback）。
 - **经验生成**（`optimizer.py` `SkillExperienceOptimizer`）：LLM 产 JSON draft，硬上限 text≤2/script≤1；去重+优先级筛选委托 prompt（priority「导致失败 > 低效但成功；高频 > 偶发」），`merge_target` 改写已有记录。
 - **打分**（`scorer.py` `ExperienceScorer`）：E(贝叶斯效能)+U(利用率)+F(90 天半衰期新鲜度)+版本不匹配惩罚。
-- **审批**（`orchestrator.py` `OnlineEvolutionOrchestrator`）：手动 pending（内存 dict，**v1 不持久化**）+ `evolve_pending`/`evolve_approve`/`evolve_reject` RPC；`auto_save=true` 走自动落盘（见 deferred——当前单例硬编码 false）。
+- **审批**（`orchestrator.py` `OnlineEvolutionOrchestrator`）：手动 pending（内存 dict，**v1 不持久化**）+ `evolve_pending`/`evolve_approve`/`evolve_reject` RPC；`auto_save` 接通 config（默认 false 走审批门，`auto_save=true` 自动落盘）。
 - **持久化**（`store.py` `EvolutionStore`）：`<skills>/<name>/evolutions.json` 原子写（temp+fsync+replace）；`render_evolution_markdown` 往 `SKILL.md` 注 `<!-- evolution-index-start -->…end -->` 索引块 + 正文写 `evolution/<section>.md` sidecar + 脚本工件写 `evolution/scripts/`。经验**外挂**，不 merge 进 SKILL.md 正文（`read_pristine_skill_content` 可剥索引块供分享）。
 - **反馈环**：`run_feedback_loop` 注入后对话片段送 LLM 判 used/positive/negative → 回写 UsageStats → 重算分。
 - **蒸馏**：`orchestrator.simplify()` LLM 给 DELETE/MERGE/REFINE/KEEP，分<min_score 且零调用规则前置直接 DELETE。
-- **Hook**：`SkillEvolutionHook`（priority 80，`before_model_call` 注入 top-3 高分经验 + `after_invoke` 遍历所有 skill 跑 evolve）；`server.py` `if EVOLUTION_ENABLED` 条件注册（`evolution.enabled` 默认 false = opt-in）。
+- **Hook**：`SkillEvolutionHook`（priority 80，`after_tool_call` 记 read_skill 呈现(top-3 高分+sidecar section) + `after_invoke` 跑反馈环+遍历 skill 跑 evolve）；`server.py` `if EVOLUTION_ENABLED` 条件注册（`evolution.enabled` 默认 true）。
 - **暴露**：6 个 E2A RPC（`skills.evolve`/`evolve_list`/`evolve_simplify`/`evolve_pending`/`evolve_approve`/`evolve_reject`），**非 `@tool`**，LLM 不能自主触发。
 
 落地 commit `f89fcb5`。测试 37 个（`tests/test_evolution_{types,signal,store,scorer}.py`，覆盖纯函数部分）。
 
-**验收**：跑失败的任务产出 skill 演进经验，经审批持久化到 sidecar + 索引块，`before_model_call` 注入高分经验。 ✅
+**验收**：跑失败的任务产出 skill 演进经验，经审批持久化到 sidecar + 索引块，`read_skill(SKILL.md)` 拼接 top-3 高分经验正文（B2）。 ✅
 
-**仍 deferred**：① `config.evolution.trigger` 四档挂点切换（声明 but hook 只实现 after_invoke，**死配置**）；② `auto_save`/`max_*`/`scoring.*` 旋钮接通（单例不读 config，**死配置**）；③ pending 持久化跨进程恢复；④ `solidify` 经验回融 SKILL.md 本体（当前外挂）；⑤ `/evolve` 斜杠命令（当前是 RPC 形态）；⑥ optimizer/orchestrator/hook 集成测试；⑦ 成功率回归埋点。
+**仍 deferred**：① `config.evolution.trigger` 的 `after_model_call`/`after_tool_call` 两档回调（`after_invoke`/`none` 已接通，另两档需新回调、成本/语义风险高）；② pending 持久化跨进程恢复（用户决策不做——待批是临时态，丢了重跑一轮进化就有）；③ `solidify` 经验回融 SKILL.md 本体（当前外挂）；④ `/evolve` 斜杠命令（当前是 RPC 形态）；⑤ 成功率回归埋点（度量"有了经验后任务成功率上升"的真因果）。
 
 ---
 

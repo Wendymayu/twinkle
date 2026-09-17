@@ -242,7 +242,7 @@ This skill has accumulated **3** evolution experiences (Instructions(1), Scripts
 | **U 利用率** | 被采纳率 | `used/presented`（:77） | 0.5 |
 | **F 新鲜度** | 时间衰减 | `0.5 + 0.5·2^(-days/90)`（:84，90 天从 1.0 衰到 0.5）；版本不匹配再 ×0.7 | 0.5 |
 
-**刚生成的记录，score 是种子分（0.65），不是 calc_score 算出来的**——因为还没有任何使用数据，E/U 都走 0.5 兜底，算出来没区分度。`calc_score` 要等反馈环跑过、有了真实 used/pos/neg 才有意义（在 `update_score` 里调，:182）。
+**刚生成的记录，score 是种子分（0.65），不是 calculate_score 算出来的**——因为还没有任何使用数据，E/U 都走 0.5 兜底，算出来没区分度。`calculate_score` 要等反馈环跑过、有了真实 used/pos/neg 才有意义（在 `update_score` 里调，:182）。
 
 三个"为什么"值得记：
 - **E 为什么贝叶斯平滑**？防止"只用过 1 次且成功"就冲到 1.0 满分。加 1 个假阳 + 1 个假阴做先验，少量样本时往 0.5 拉一把，样本多了才信真实比例。
@@ -261,7 +261,7 @@ This skill has accumulated **3** evolution experiences (Instructions(1), Scripts
 if used:     stats.times_used += 1
 if positive: stats.times_positive += 1
 if negative: stats.times_negative += 1
-record.score = calc_score(...)   # 重算
+record.score = calculate_score(...)   # 重算
 ```
 
 `times_presented`（U 的分母）不在 `update_score` 里加——它在反馈环节点落盘：呈现时（`after_tool_call`）只记内存 id，反馈环从 store 重新读出记录后 `+1` 再 save。
@@ -291,8 +291,8 @@ record.score = calc_score(...)   # 重算
 
 | 时机 | 做什么 | 代码 |
 |---|---|---|
-| `after_tool_call` | 监听 `read_skill(skill,"SKILL.md")`：模型加载该 skill 主体（含经验索引块）= 经验被呈现 → 记该 skill 全部 non-skip 经验 id 进 `_presented_ids_by_skill`（只记事件，不进上下文、不 +1）。非 read_skill / 读 sidecar 不记。 | :31 |
-| `after_invoke` | 先 `_run_feedback_loop`（对本轮 presented 的经验取对话片段做 LLM 判定、回写 times_presented/used、重算——片段从 `ctx.agent._messages` 取，因 AFTER_INVOKE 时 `ctx.inputs` 是 `InvokeInputs`、**无 messages 字段**），再 `_run_evolution`（调 `orchestrator.evolve_all`：detector 只跑一次、按 `skill_name` 分发信号给各 skill）。末尾清空 `_presented_ids_by_skill`。 | :60 |
+| `after_tool_call` | 监听 `read_skill`：读 `SKILL.md` 时记 **top-3 高分**经验 id + 呈现点消息索引进 `_presented_ids_by_skill`（B2 已把 top-3 正文拼进 SKILL.md 返回值 → 正文进上下文）；读 sidecar `evolution/<section>.md` 时记该 **section 全部 non-skip** 经验；其他路径不记。只记事件，不进上下文、不 +1。 | :39 |
+| `after_invoke` | `trigger != "after_invoke"` 时直接 return（`none` 不跑、`after_model_call`/`after_tool_call` 回调 deferred）；默认 `after_invoke`：先 `_run_feedback_loop`（取**呈现点之后**的对话片段做 LLM 判定——`_presented_ids_by_skill` 记了呈现点索引，片段从 `ctx.agent._messages[presented_index:]` 取，因 AFTER_INVOKE 时 `ctx.inputs` 是 `InvokeInputs`、**无 messages 字段**），再 `_run_evolution`（调 `orchestrator.evolve_all`：detector 只跑一次、按 `skill_name` 分发信号给各 skill）。末尾清空 `_presented_ids_by_skill`。 | :90 |
 
 ### 经验的渐进加载（三层按需）
 
@@ -301,9 +301,9 @@ record.score = calc_score(...)   # 重算
 | 层 | 何时触发 | 注入什么 | 上下文归宿 |
 |---|---|---|---|
 | **L0a·清单** | 每步自动（`SkillHook` `before_invoke`） | skill name+desc | `frozen_sections` → 前缀（跨步稳定，命中 cache） |
-| **L0b·呈现** | 模型调 `read_skill(skill,"SKILL.md")` 时（`SkillEvolutionHook` `after_tool_call`） | 记该 skill 全部 non-skip 经验为 presented（**不进上下文**，只记 id 供反馈环） | hook 内部 `_presented_ids_by_skill` |
-| **L1·目录** | 同一次 `read_skill(SKILL.md)`（`skill_tools.py:25`） | 整份 SKILL.md **原样**（不剥块、不截断），含索引块——但索引块只有摘要行 + 锚点链接，**无正文** | `tool_result` → history |
-| **L2·正文** | 模型再调 `read_skill(skill, "evolution/<section>.md")` | 单条经验正文全文（sidecar 文件，`store.py:198` 写） | `tool_result` → history |
+| **L0b·呈现** | 模型调 `read_skill(skill,"SKILL.md")` 时（`SkillEvolutionHook` `after_tool_call`） | 记该 skill **top-3 高分**经验为 presented + 呈现点消息索引（**不进上下文**，只记 id 供反馈环取呈现后片段） | hook 内部 `_presented_ids_by_skill` |
+| **L1·目录+摘要正文** | 同一次 `read_skill(SKILL.md)`（`skill_tools.py:64`） | 整份 SKILL.md 原样 + 拼接的 **top-3 高分经验正文段**（B2，`<!-- evolution-experiences-start -->`…，每条 content 截 500 字、脚本类只取 summary 不展开源码） | `tool_result` → history |
+| **L2·正文** | 模型再调 `read_skill(skill, "evolution/<section>.md")` | 单条经验正文全文（sidecar 文件，`store.py:198` 写）；读 sidecar 时记该 section 全部 non-skip 经验 presented（同 L0b 结构） | `tool_result` → history |
 | **L2·脚本** | 模型再调 `read_skill(skill, "evolution/scripts/<file>")` | 脚本工件源码 | `tool_result` → history |
 
 读法是**按需逐层**：
@@ -311,19 +311,19 @@ record.score = calc_score(...)   # 重算
 ```
 L0a 清单（每步自动·前缀，很轻）
   ↓ 模型决定要用某 skill
-L1 read_skill(SKILL.md) → 看到索引块（目录页：哪条经验、分多少、锚点 [→]）
-    同时 L0b 记该 skill 经验 presented（不进上下文，只供反馈环）
-  ↓ 模型点开某条有用的
-L2 read_skill(evolution/Troubleshooting.md) → 那一条正文全文（详情页）
+L1 read_skill(SKILL.md) → 看到索引块（目录页）+ top-3 高分经验正文段（B2 自动拼接）
+    同时 L0b 记该 skill top-3 经验 presented + 呈现点索引（供反馈环取呈现后片段）
+  ↓ 模型点开某条不在 top-3 的有用经验
+L2 read_skill(evolution/Troubleshooting.md) → 那一条正文全文（详情页）；记该 section 经验 presented
 ```
 
 关键设计点：
 
 - **经验不进 system message**：旧实现的 `before_model_call` 每步遍历所有 skill 把 top-3 摘要 prepend 到 messages——这会让所有 skill 的 times_presented 每步虚涨（哪怕模型这步没碰它们），U=used/presented 分母失真，且 N×3×150 字每步浪费上下文。已改为 `after_tool_call` 监听 `read_skill`：模型真加载某 skill 才记其经验 presented，**presented 计数真实**（不读不涨），与 jiuwenswarm 的 `ExperienceTracker.record_presented`（"a non-rail presentation path displayed" 时才记）对齐。
-- **`read_skill` 默认只读 SKILL.md，不跟随链接**（`skill_tools.py:38` 一行 `read_text` 原样返回）。索引块里的 `[→](evolution/Troubleshooting.md#ev_xxx)` 只是 markdown 文本，不会触发自动读 sidecar——要正文，模型得**显式再调一次 `read_skill` 传 sidecar 路径**。这是"目录页/详情页"分离，避免一读 SKILL.md 就把全部经验正文拖进来。
-- **L0a 进前缀、L0b 不进上下文**：清单是跨步稳定的 → 进 `frozen_sections` 前缀命中 cache；presented 只是 hook 内部的事件记录（`_presented_ids_by_skill` dict），既不进前缀也不进 history messages——所以经验呈现**完全不占上下文、不扰 cache**。
+- **`read_skill(SKILL.md)` 拼接 top-3 高分经验正文（B2）**：读出原文后追加 `<!-- evolution-experiences-start -->` 段含 top-3 经验（`skill_tools.py:26` `_append_top_experiences`，每条 content 截 500 字、脚本类只取 summary 不展开源码）。正文随 `tool_result` 进 history——**不扰前缀 cache**（对齐 refactor `1a6c414` 对 KV-cache 的重视），模型一次 read 即得目录页 + top-3 详情。evolution 关 / 无经验 / 异常 → 原样返回（fail-soft）。索引块里其余经验要正文，仍得显式 `read_skill(skill, "evolution/<section>.md")`。
+- **L0a 进前缀、L0b 不扰前缀 cache**：清单跨步稳定 → 进 `frozen_sections` 前缀命中 cache；top-3 正文随 `read_skill` 的 `tool_result` 进 history（B2），**不进前缀**——前缀段跨步不变，cache 命中不受经验更新影响；presented 是 hook 内部事件记录（`_presented_ids_by_skill`：ids + 呈现点索引），不额外占上下文。
 
-**触发点**由 config `evolution.trigger` 控制（默认 `after_invoke`，可选 `after_tool_call` / `after_model_call` / `none`）。`evolution.enabled=false` 时 `SkillEvolutionHook` **根本不注册**（在 `server.py` 里条件注册），整条进化链路零开销——但 `SkillHook`（清单注入）和 `read_skill` 工具**始终在**，不依赖进化开关：没开进化时，skill 仍是普通的"清单 → 按需读 body"两段式，只是没有 presented 记录和索引块。这是"opt-in 保守"的体现：进化会改用户的 skill，默认关着，要的人自己开。
+**触发点**由 config `evolution.trigger` 控制：`after_invoke`（默认，跑反馈环+进化）和 `none`（不自动跑，只手动 RPC）**已接通**；`after_tool_call`/`after_model_call` 两档需实现新回调（每次工具/模型调用都触发检测+潜在 LLM，成本/语义风险高），**仍 deferred**。`evolution.enabled` **默认 true**——进化链路默认跑（`SkillEvolutionHook` 在 `server.py` 条件注册）；但 `auto_save` **默认仍 false**（写改 skill 走审批门，不静默写改）。`SkillHook`（清单注入）和 `read_skill` 工具始终在，不依赖进化开关：关进化时，skill 仍是普通"清单 → 按需读 body"两段式，只是没有 presented 记录和经验正文拼接。
 
 进程级单例 `get_orchestrator()`（[`evolution/__init__.py`](../../twinkle/agentserver/evolution/__init__.py) :31）惰性构造，把 store + optimizer + scorer + detector 装配好。**optimizer 和 scorer 共用同一个 `LLMClient`**（和 agent 主循环同模型），不 per-component 各开一个——精简。
 
@@ -374,9 +374,9 @@ L2 read_skill(evolution/Troubleshooting.md) → 那一条正文全文（详情�
 ```yaml
 # twinkle/resources/config.yaml
 evolution:
-  enabled: true              # 总开关（默认 false，opt-in）
-  trigger: after_invoke      # 触发点
-  auto_save: true            # 想看闭环自动跑就开；想体验审批门就 false
+  enabled: true              # 总开关（默认 true，进化链默认跑）
+  trigger: after_invoke      # after_invoke(已接通,跑反馈环+进化) | none(已接通,不自动跑) | after_tool_call/after_model_call(deferred 未实现)
+  auto_save: false           # 默认 false 走审批门(不静默写改 skill)；想看闭环自动跑就 true(已接通 config)
   signals:
     execution_failure: true
     script_artifact: true
@@ -387,7 +387,7 @@ evolution:
 
 然后跑一个会触发失败的对话（比如故意让 agent 用一个没装依赖的 skill），对话结束后去看 `skills/<skill>/`：会多出 `evolutions.json` + `evolution/` 目录 + SKILL.md 末尾的索引块。再用 `skills.evolve_list` RPC 看分数。
 
-想看闭环分数变化：同一个 skill 多用几轮，观察 `usage_stats` 的 `times_presented/used` 累积、`score` 从种子分（0.65）变到 calc_score 重算值。
+想看闭环分数变化：同一个 skill 多用几轮，观察 `usage_stats` 的 `times_presented/used` 累积、`score` 从种子分（0.65）变到 calculate_score 重算值。
 
 ---
 
@@ -449,9 +449,9 @@ evolution:
 
 **判定在哪**：`scorer.py` 的 `evaluate()`（:137），由 `evolution_hook.py:71` 的 `_run_feedback_loop` 触发。流程：
 
-1. 模型 `read_skill(skill,"SKILL.md")` 时 `after_tool_call` 记该 skill 全部 non-skip 经验 id 进 `_presented_ids_by_skill[skill]`（:31）；
+1. 模型 `read_skill(skill,"SKILL.md")` 时 `after_tool_call` 记该 skill **top-3 高分**经验 id + 呈现点消息索引进 `_presented_ids_by_skill[skill]`（:39；B2 已把 top-3 正文拼进返回值 → 正文进上下文）；
 2. agent 跑完这一轮 ReAct（调工具、回话）；
-3. `after_invoke` 取"最后 ~10 条消息、~3000 字"作 snippet（hook:90-94）；
+3. `after_invoke` 取**呈现点之后**的对话片段（`_messages[presented_index:]`，截断 ~4000 字）作 snippet（hook:104）；
 4. `evaluate` 把「经验内容 + 这段对话」喂给 LLM，逐条输出 `{record_id, used, positive, negative, reason}`（prompt 见 `EXPERIENCE_EVAL_PROMPT` :30）；
 5. `update_score`（:170）消费三个布尔，自增 `times_used/positive/negative`，重算分。
 
@@ -468,10 +468,57 @@ evolution:
 **已知局限（按严重度）**：
 
 1. **相关性 ≠ 因果性**：不追踪 agent 是否真执行了建议（比如有没有真跑 `pip install`）。LLM 只看"后面行为像不像照经验做"——agent 本来就会的事也可能被算成 used（假阳）。
-2. **snippet 只取 tail**：经验在对话前段被用、后段聊别的 → tail 看不到使用痕迹 → 漏判 used=false。长对话尤其严重。
+2. **~~snippet 只取 tail~~（已修）**：改取呈现点之后的片段（`_messages[presented_index:]`），不再漏判长对话前段的使用痕迹。
 3. **单次判定无重试**：`evaluate` 解析失败直接 `except → return []`（:166），不像 `optimizer._generate_drafts_with_retries` 有 2 轮重试。一次 LLM 抽风就丢一条反馈。
-4. **U 的分母 presented 在反馈环节点落盘**（呈现时只记内存）：落盘点错位会让 presented 恒 0、`calc_utilization` 永走 0.5 兜底 → U 维失效。
+4. **U 的分母 presented 在反馈环节点落盘**（呈现时只记内存）：落盘点错位会让 presented 恒 0、`calculate_utilization` 永走 0.5 兜底 → U 维失效。
 
 **为什么明知不完美还这么设计**：YAGNI——机械追踪需把经验里的具体动作对齐到 agent 的工具调用参数（语义对齐本身就难、易错）。改用便宜的 LLM 判定 × 多轮累积 × 贝叶斯平滑 `(pos+1)/(pos+neg+2)`，靠量纠偏单次噪声；fail-soft：判错或解析失败只是这轮没反馈、不崩。本质是"便宜的语义猜测 × 多轮 × 平滑"逼近真相，承认单次会错、靠趋势纠偏，不是精确计量。
 
-> 最值得加固的点：把 snippet 从"最后 10 条"改成"呈现点之后的全部 trace"——能直接堵住局限 2（长对话漏判）。当前未做，属可识别的已知缺口。
+> ~~最值得加固的点：把 snippet 从”最后 10 条”改成”呈现点之后的全部 trace”~~ **已修**（`_run_feedback_loop` 现取 `_messages[presented_index:]`，堵住局限 2）。
+
+### Q2. ~~我把 `evolution.enabled: true` 打开了，为什么还是看不到任何经验沉淀？~~（已修）
+
+**核心（历史）：`enabled` 只管 Hook 注册，经验的”落地”还卡在第二道门 `auto_save`、第三道门 pending 持久化。三道门默认全关，默认路径产出为零。**
+
+**已修（2026-09）**：`enabled` 默认改为 `true`（进化链默认跑）；`auto_save` 接通读 `EVOLUTION_AUTO_SAVE`（`evolution/__init__.py:53` 传 ctor），但**默认仍 `false`**（写改 skill 走审批门，不静默写改——有意的保守，非死配置）。即：默认开 `enabled` 后，经验会生成并进内存 pending，对话后用 `skills.evolve_pending` 看待批列表、`skills.evolve_approve` 批准即落盘。要闭环自动跑（不经审批），显式设 `auto_save: true`。
+
+| 门 | 默认 | 现状 |
+|---|---|---|
+| `enabled`（总开关） | **true**（已改） | Hook 注册，进化链默认跑 |
+| `auto_save`（自动批 vs 审批门） | false（**已接通** config） | 经验进内存 pending 等人批；`auto_save=true` 自动落盘 |
+| pending 持久化 | 不持久化（仍 deferred） | 重启丢待批（用户决策不做） |
+
+> pending 持久化跨进程恢复仍 deferred（用户决策不做）——待批是临时态，丢了重跑一轮进化就有。
+
+### Q3. ~~`times_presented` 到底计的是什么？为什么经验”被呈现过”，U 还是偏低？~~（已修 A+B2）
+
+**核心（历史）：`times_presented` 计的是”索引块被看到”，不是”经验正文进了上下文”——正文在 sidecar 里，模型大概率根本没读到。这是最硬的结构性缺口。**
+
+**已修（2026-09，A+B2 双修）**：
+
+- **A（presented 收窄）**：`after_tool_call` 不再把”读 SKILL.md = 全部经验 presented”。改为：
+  - 读 `SKILL.md` → 记 **top-3 高分**经验 presented（`get_records_by_score(limit=3)`，`evolution_hook.py:72`）；
+  - 读 sidecar `evolution/<section>.md` → 记该 **section 全部 non-skip** 经验 presented（`evolution_hook.py:74`）；
+  - 其他 read_skill → 不记。
+  即”正文真进上下文”才算 presented。
+- **B2（正文随 SKILL.md 进上下文）**：`read_skill(SKILL.md)` 读出原文后拼接 top-3 高分经验正文段（`skill_tools.py:26` `_append_top_experiences`，content 截 500 字、脚本类只取 summary）。正文随 `tool_result` 进 history——**不扰前缀 cache**（优于 B1 的 `frozen_sections` 注入方案，那会重演 refactor `1a6c414` 想避免的 cache 失效）。
+
+后果链不再放大：presented 真实（正文确实进了上下文）→ 反馈环 LLM 判 used 时 agent 真见过正文 → U 不再系统性偏低 → 蒸馏不再误删有价值经验。
+
+> 选型记录：B1（`frozen_sections` 注入前缀）会扰前缀 cache 且注入时机/清除细节多；B2（read_skill 返回值拼接）cache 友好、实现简单、正文一次到位。选 B2。
+
+### Q4. ~~config 里写了 `auto_save` / `scoring.w_*` / `evolution.trigger`，改了为什么不生效？~~（已修）
+
+**核心（历史）：这几个旋钮曾是”死配置”——config schema 导出了、`config/__init__.py` 也 re-export 了，但消费方没读，改了静默无效。**
+
+**已修（2026-09）**：
+
+| 配置 | 现状 | 证据 |
+|---|---|---|
+| `max_text_records` / `max_script_records` | ✓ 通（之前已通） | `evolve()` 读 `EVOLUTION_MAX_*` 传入 optimizer，测试 `test_evolve_passes_configured_max_records_to_optimizer` 证 |
+| `auto_save` | ✓ **已接通** | `get_orchestrator()`（`evolution/__init__.py:53`）读 `EVOLUTION_AUTO_SAVE` 传 ctor |
+| `scoring.w_effectiveness` / `w_utilization` / `w_freshness` / `freshness_half_life_days` / `stale_version_penalty` | ✓ **已接通** | `ExperienceScorer.__init__` 收 `EvolutionScoringConfig` 子对象存实例；`get_orchestrator` 直接传 `settings.evolution.scoring`（不再经打散的 `EVOLUTION_SCORING_*` 常量）；模块级 `calculate_score` 默认参数取自 `_DEFAULT_SCORING` 单一来源；`update_score` 经 `_score_record` 用实例权重 |
+| `evolution.trigger` 的 `after_invoke`/`none` | ✓ **已接通** | hook 读 `EVOLUTION_TRIGGER`（`evolution_hook.py:30`），`after_invoke` 跑反馈环+进化、`none` 不跑（`evolution_hook.py:99`） |
+| `evolution.trigger` 的 `after_model_call`/`after_tool_call` 两档 | ✗ 仍 deferred | 需实现新回调（每模型/工具调用触发检测+潜在 LLM，成本/语义风险），本轮不做 |
+
+> 即：现在配 `auto_save: true` / 改 scoring 权重 / `trigger: none` 都**真生效**了。仍 deferred 的只有 trigger 的另两档回调。

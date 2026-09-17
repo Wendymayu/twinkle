@@ -19,14 +19,18 @@ def test_create_agent_wires_permission(monkeypatch):
     assert loop._hook_manager.has_callbacks_for(HookEvent.BEFORE_TOOL_CALL)
 
 
-def test_create_agent_auto_wires_subagent_and_compression():
+def test_create_agent_auto_wires_subagent_and_compression(monkeypatch):
     """最小 AgentLoop（无显式 hooks）自动装配：
     - SubagentContextHook (BEFORE_INVOKE)
     - ContextCompressionHook (BEFORE_MODEL_CALL)
     - MemoryFlushHook (BEFORE_MODEL_CALL)
     - ContextOverflowRecoveryHook (ON_MODEL_EXCEPTION, AFTER_MODEL_CALL)
     - RepeatToolCallDetectorHook (ON_TOOL_EXCEPTION, BEFORE_MODEL_CALL)
-    其余（retry/permission/skill/memory/logging）由调用方传入（无依赖），不自动装配。"""
+    其余（retry/permission/skill/memory/logging）由调用方传入（无依赖），不自动装配。
+    evolution.enabled 默认 true 会自动装配 SkillEvolutionHook(AFTER_TOOL_CALL+AFTER_INVOKE);
+    本测试聚焦 subagent/compression 装配,关 evolution 隔离之。"""
+    import twinkle.agentserver.server as _server
+    monkeypatch.setattr(_server, "_EVOLUTION_ENABLED", False)  # 关 evolution 隔离
     from twinkle.agentserver.sessions import session_store
     from twinkle.agentserver.server import create_agent
     from twinkle.agentserver.hooks.base import HookEvent
