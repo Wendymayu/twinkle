@@ -300,6 +300,46 @@ search(query, max_results)
 
 **无分数截断**：只排序 + top-N，不靠魔法阈值砍结果。召回质量交给候选放大（2 倍）、融合权重、top-N 控制。低质结果也进 top-N，由模型自行判断取舍。
 
+### 召回数量与原始分数速查
+
+**数量参数**（[`store.py:568-612`](../../twinkle/agentserver/memory/store.py) + [`config.yaml:53-58`](../../twinkle/resources/config.yaml)）：
+
+| 参数 | 值 | 性质 |
+|---|---|---|
+| `max_results` | `10` | config `query.max_results`，最终返回 top-N |
+| `candidate_multiplier` | `2.0` | config `hybrid.candidate_multiplier`，召回放大倍率（召回比返回多几倍） |
+| `candidates` | `20` | `max_results × 倍率 = 10×2`，**两路各自的 LIMIT** |
+| 候选硬上限 | `200` | 代码硬编码 `min(200, …)`（[`store.py:578`](../../twinkle/agentserver/memory/store.py)），**不可 config 调**，防倍率/max_results 设太大召回爆炸 |
+
+召回流程：**FTS 召回 20 + 向量召回 20 → 两路并集（≤40，去重）→ 融合排序取前 10 返回**。当前 10×2=20 ≪ 200，硬上限未起作用，实际候选就是 20。
+
+**原始分数（两路各自归一化到 [0,1]，再加权融合）**：
+
+向量腿 `vec_sim = 1 - distance/2`（sqlite-vec cosine distance ∈ [0,2]）：
+
+| distance | 含义 | vec_sim |
+|---|---|---|
+| 0 | 完全相同 | 1.0 |
+| 1 | 正交（无关） | 0.5 |
+| 2 | 完全相反 | 0.0 |
+
+文本腿 `text_sim = |bm25| / (1 + |bm25|)`（FTS5 `bm25()` ≤ 0，越负越相关）：
+
+| bm25 | 含义 | text_sim |
+|---|---|---|
+| 0 | 弱匹配 | 0.0 |
+| -1 | 中等 | 0.5 |
+| -10 | 强相关 | ≈0.909 |
+| → -∞ | 越相关 | → 1.0（不达） |
+
+融合 `fused = 0.7·vec_sim + 0.3·text_sim` ∈ [0,1]；返回 hit 里的 `score` = `round(fused, 4)`（[`store.py:641`](../../twinkle/agentserver/memory/store.py)），就是 `memory_search` 输出 `(score 0.8231)` 那个数。
+
+**只命中一路的候选**：另一路 sim 记 `0.0`（[`store.py:603-604`](../../twinkle/agentserver/memory/store.py) `text_sim=0.0 if not in fts` / `vec_sim=0.0 if not in vec_sims`），即只走 0.7 或 0.3 那条腿，不补齐——单路命中的条目天然比双路命中得分低。
+
+**FTS-only 降级**：无向量腿时 `score = text_sim`（[`store.py:586`](../../twinkle/agentserver/memory/store.py)），不走融合。
+
+**返回格式**（[`memory_tools.py:19-22`](../../twinkle/agentserver/tools/builtin/memory_tools.py)）：10 条 hit 拼成 `## 记忆召回 (10 条)` + 每条 `### {path} (score {score})\n{text}`，作为 `memory_search` 的 **tool_result 进上下文**（动态区，不是自动注入；被动召回另见 §1 的 USER.md+MEMORY.md 注入）。
+
 ### CJK 分词：jieba 可选 + 降级逐字空格
 
 FTS5 的 `unicode61` 分词器不切 CJK，中文查询会召回失败。分词逻辑在 [`fts.py`](../../twinkle/agentserver/memory/fts.py)，双路径：
