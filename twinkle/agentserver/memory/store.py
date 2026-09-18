@@ -544,25 +544,56 @@ class MemoryManager:
         if self._vec_enabled:
             self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", oldest_rowids)
 
+    def _vec0_table_dims(self) -> int | None:
+        """已建 vec0 表的实际维度(从 sqlite_master 的 CREATE 语句解析
+        float[N])。表不存在/解析失败返回 None。vec0 维度是表级 schema,
+        不在行里——这是判断是否需要重建表的唯一可靠源(meta embed_model 戳
+        可能被旧逻辑删/维度变但名没变时都漏)。"""
+        if not self._vec_enabled:
+            return None
+        row = self._db.execute(
+            "SELECT sql FROM sqlite_master WHERE name='chunks_vec'").fetchone()
+        if not row or not row["sql"]:
+            return None
+        m = re.search(r"float\[(\d+)\]", row["sql"], re.IGNORECASE)
+        return int(m.group(1)) if m else None
+
     def _clear_if_model_changed(self) -> None:
         if self._provider is None:
             return
         row = self._db.execute(
             "SELECT value FROM meta WHERE key='embed_model'").fetchone()
-        if row and row["value"] and row["value"] != self._provider.model:
+        model_changed = bool(row and row["value"] and row["value"] != self._provider.model)
+        # 维度不匹配独立判断:meta 戳可能已被旧逻辑删(本次 bug 现场),
+        # 或维度变但模型名没变。读 vec0 表 schema 维度对比 self._dims。
+        existing_dims = self._vec0_table_dims()
+        dims_mismatch = existing_dims is not None and existing_dims != self._dims
+        if not (model_changed or dims_mismatch):
+            return
+        if model_changed:
             log.warning("embed model %r -> %r, clearing stale index",
                         row["value"], self._provider.model)
-            self._db.execute("DELETE FROM chunks")
-            self._db.execute("DELETE FROM chunks_fts")
-            if self._vec_enabled:
-                self._db.execute("DELETE FROM chunks_vec")
-            self._db.execute("DELETE FROM embedding_cache")
-            self._db.execute("DELETE FROM files")
-            # 清掉过期的 embed_model 戳——下一次 _index_file 调用会经
-            # INSERT OR REPLACE 重新盖戳。留着会让记录的 model 名比它所
-            # 描述的 chunk 活得更久。
-            self._db.execute("DELETE FROM meta WHERE key='embed_model'")
-            self._db.commit()
+        if dims_mismatch:
+            log.warning("vec0 dims %d -> %d, rebuilding vec0 table",
+                        existing_dims, self._dims)
+        self._db.execute("DELETE FROM chunks")
+        self._db.execute("DELETE FROM chunks_fts")
+        if self._vec_enabled:
+            # vec0 维度是表级 schema(不在行里),DELETE FROM chunks_vec 只删行
+            # 不改 schema——换维度时旧维度表残留,新维度 INSERT 报 dim mismatch。
+            # 必须 DROP + 按 self._dims 重建。(CREATE VIRTUAL TABLE IF NOT EXISTS
+            # 在 _ensure_schema 已 no-op 过,救不了旧维度表。)
+            self._db.execute("DROP TABLE chunks_vec")
+            self._db.execute(
+                f"CREATE VIRTUAL TABLE chunks_vec "
+                f"USING vec0(embedding float[{self._dims}] distance=cosine)")
+        self._db.execute("DELETE FROM embedding_cache")
+        self._db.execute("DELETE FROM files")
+        # 清掉过期的 embed_model 戳——下一次 _index_file 调用会经
+        # INSERT OR REPLACE 重新盖戳。留着会让记录的 model 名比它所
+        # 描述的 chunk 活得更久。
+        self._db.execute("DELETE FROM meta WHERE key='embed_model'")
+        self._db.commit()
 
     # --- search ----------------------------------------------------------
     def search(self, query: str, max_results: int | None = None) -> list[dict]:

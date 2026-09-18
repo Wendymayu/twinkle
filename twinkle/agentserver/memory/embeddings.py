@@ -73,3 +73,35 @@ class MockEmbeddingProvider:
             h = hashlib.md5(t.encode("utf-8")).digest()
             out.append([(h[i % len(h)] / 255.0) for i in range(self._dims)])
         return out
+
+
+class SentenceTransformerProvider:
+    """进程内本地 embedding(sentence-transformers,离线零成本)。
+
+    懒加载:构造不 import sentence_transformers(故无 torch 也能 construct,
+    provider 选择逻辑可先探 importable),首次 embed() 才 import + load 模型。
+    embed 在 MemoryManager._db_lock 下串行调用(_index_file/search 都持锁),
+    故本类无需自带锁。model.encode(...).tolist() 把 numpy 2D array 转 list。
+    """
+
+    def __init__(self, model_path: str, dims: int, model_name: str) -> None:
+        self._model_path = model_path
+        self._dims = dims
+        self._model_name = model_name
+        self._model = None
+
+    @property
+    def dims(self) -> int:
+        return self._dims
+
+    @property
+    def model(self) -> str:
+        return self._model_name
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer(self._model_path)
+        return self._model.encode(texts, normalize_embeddings=True).tolist()

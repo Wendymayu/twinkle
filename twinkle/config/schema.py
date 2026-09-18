@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 SkillMode = Literal["all", "auto_list"]
 PermissionTier = Literal["allow", "require-approval", "deny"]
 McpTransport = Literal["stdio", "streamable-http"]
+EmbedProvider = Literal["local", "openai_compat", "none"]
 
 
 class _StrictModel(BaseModel):
@@ -150,9 +151,21 @@ class MemoryDreamingConfig(_StrictModel):
     # prompt 同 flush：硬编码进 dreaming.py（JSON 契约，不进 config）；见 docs/design/memory-system-design.md §9.4
 
 
+class MemoryEmbedConfig(_StrictModel):
+    """embedding provider 选择。默认 local(进程内 sentence-transformers,离线零成本);
+    openai_compat=线上 HTTP /embeddings(可配独立 base_url/api_key,空则复用 llm.*);
+    none=纯 FTS(不调 embed,诚实 (fts-only) 路径)。"""
+    provider: EmbedProvider = "local"
+    model: str = "bge-small-zh-v1.5"        # local: stamp 进 meta;openai_compat: 发给 API
+    model_path: str = "models/bge-small-zh-v1.5"  # local 用;相对 CWD(项目根);改 model 后同步改
+    dims: int = 512                          # vec0 维度;bge-small-zh-v1.5=512,改 model 须同步改+删 memory.db
+    base_url: str = ""                       # openai_compat 用;空→复用 llm.base_url
+    api_key: str = ""                        # openai_compat 用;空→复用 llm.api_key
+
+
 class MemoryConfig(_StrictModel):
     dir: str = ""  # "" -> <workspace>/.twinkle_data/memory
-    embed_model: str = "text-embedding-3-small"
+    embed: MemoryEmbedConfig = MemoryEmbedConfig()
     query: MemoryQueryConfig = MemoryQueryConfig()
     hybrid: MemoryHybridConfig = MemoryHybridConfig()
     chunking: MemoryChunkingConfig = MemoryChunkingConfig()

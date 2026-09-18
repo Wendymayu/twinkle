@@ -344,7 +344,7 @@ search(query, max_results)
 
 FTS5 的 `unicode61` 分词器不切 CJK，中文查询会召回失败。分词逻辑在 [`fts.py`](../../twinkle/agentserver/memory/fts.py)，双路径：
 
-- **有 jieba**（装 `[memory]` extra）：索引走 `jieba.cut_for_search`（细粒度提召回），查询走 `jieba.cut`（粗切），再过停用词（`stopwords_zh.txt` 793 词）——词级召回质量高。
+- **有 jieba**（核心依赖）：索引走 `jieba.cut_for_search`（细粒度提召回），查询走 `jieba.cut`（粗切），再过停用词（`stopwords_zh.txt` 793 词）——词级召回质量高。
 - **无 jieba**：降级 `_space_cjk` 逐字空格（每个汉字前后加空格让 unicode61 切单字 token）+ OR——召回率够用但单字语义弱。
 
 无 API key 时检索降级为 FTS-only，`_embed_chunks` 失败的 chunk 不嵌向量只进 FTS，这时 CJK 召回全靠分词。
@@ -357,7 +357,7 @@ FTS5 的 `unicode61` 分词器不切 CJK，中文查询会召回失败。分词�
 | `sqlite-vec` 没装 / load 失败 | FTS-only（bm25 排序） |
 | 无 `LLM_API_KEY`（provider=None） | FTS-only（写时不嵌向量） |
 | 查询 embedding 失败 | 向量腿 skip，退回 FTS-only |
-| 无 jieba（未装 `[memory]` extra） | FTS 仍工作，CJK 降级逐字空格 + OR |
+| 无 jieba（缺依赖时降级；默认已装为核心依赖） | FTS 仍工作，CJK 降级逐字空格 + OR |
 
 任何一腿失败都不让整次 search 崩——`search` 总返回一个 list（可能空）。jieba 有无只影响 CJK 召回质量，不影响检索是否工作。
 

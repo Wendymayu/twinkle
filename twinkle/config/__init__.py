@@ -40,7 +40,12 @@ SKILLS_REMOTE_MAX_RETRIES = settings.skills.remote_max_retries
 
 # --- memory (Phase 5a) ---
 MEMORY_DIR = settings.memory.dir
-MEMORY_EMBED_MODEL = settings.memory.embed_model
+MEMORY_EMBED_PROVIDER = settings.memory.embed.provider
+MEMORY_EMBED_MODEL = settings.memory.embed.model
+MEMORY_EMBED_MODEL_PATH = settings.memory.embed.model_path
+MEMORY_EMBED_DIMS = settings.memory.embed.dims
+MEMORY_EMBED_BASE_URL = settings.memory.embed.base_url
+MEMORY_EMBED_API_KEY = settings.memory.embed.api_key
 MEMORY_QUERY_MAX_RESULTS = settings.memory.query.max_results
 MEMORY_HYBRID_VECTOR_WEIGHT = settings.memory.hybrid.vector_weight
 MEMORY_HYBRID_TEXT_WEIGHT = settings.memory.hybrid.text_weight

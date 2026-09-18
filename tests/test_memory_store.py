@@ -221,6 +221,65 @@ def test_mtv_degrades_to_fts_only_when_no_provider(tmp_path):
     assert any("偏好" in h["text"] for h in hits)  # FTS 仍可用
 
 
+def test_clear_if_model_changed_rebuilds_vec0_at_new_dims(tmp_path):
+    """换 embedding 模型(含维度变)时,_clear_if_model_changed 必须重建 vec0
+    虚表:vec0 维度是表级 schema(不在行里),DELETE FROM chunks_vec 只删行不
+    改 schema,旧维度表留着 → 新维度 INSERT 报 'Expected N received M'。
+    本次 bug 的同源复发(text-embedding-3-small 1536 → bge 512 时旧表残留)。"""
+    pytest.importorskip("sqlite_vec")
+    from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
+    # phase 1: 8 维 model-A,索引一个 chunk → vec0 表 float[8]
+    mgr1 = MemoryManager(str(tmp_path),
+                         embed_provider=MockEmbeddingProvider(dims=8, model="model-A"),
+                         dims=8, enable_watcher=False)
+    assert mgr1._vec_enabled  # noqa: SLF001
+    mgr1.write("MEMORY.md", "用户偏好中文交流。", append=True)
+    mgr1._index_file("MEMORY.md")  # noqa: SLF001
+    assert mgr1._db.execute(  # noqa: SLF001
+        "SELECT count(*) FROM chunks_vec").fetchone()[0] > 0
+    mgr1.close()
+
+    # phase 2: 同目录换 4 维 model-B —— _clear_if_model_changed 应 DROP+重建 vec0
+    mgr2 = MemoryManager(str(tmp_path),
+                         embed_provider=MockEmbeddingProvider(dims=4, model="model-B"),
+                         dims=4, enable_watcher=False)
+    mgr2.write("MEMORY.md", "项目用两进程 WebSocket。", append=True)
+    # 改之前:此处抛 OperationalError Dimension mismatch Expected 8 received 4
+    mgr2._index_file("MEMORY.md")  # noqa: SLF001
+    assert mgr2._db.execute(  # noqa: SLF001
+        "SELECT count(*) FROM chunks_vec").fetchone()[0] > 0
+    mgr2.close()
+
+
+def test_clear_rebuilds_vec0_when_meta_stamp_deleted_but_stale_table_lives(tmp_path):
+    """meta embed_model 戳被旧逻辑删掉(本次 bug 现场:旧 clear 删了 meta
+    却没重建 vec0 表)→ 重开时 model 名检查无 meta 可比,漏判。故 _clear
+    必须直接读 vec0 表 schema 维度对比 self._dims,不靠 meta。"""
+    pytest.importorskip("sqlite_vec")
+    from twinkle.agentserver.memory.embeddings import MockEmbeddingProvider
+    # phase 1: 8 维 model-A,索引 → vec0 float[8] + meta embed_model='model-A'
+    mgr1 = MemoryManager(str(tmp_path),
+                         embed_provider=MockEmbeddingProvider(dims=8, model="model-A"),
+                         dims=8, enable_watcher=False)
+    mgr1.write("MEMORY.md", "用户偏好中文交流。", append=True)
+    mgr1._index_file("MEMORY.md")  # noqa: SLF001
+    # 模拟旧 buggy clear:删 meta 戳但不重建 vec0 表(旧逻辑的残留现场)
+    mgr1._db.execute("DELETE FROM meta WHERE key='embed_model'")  # noqa: SLF001
+    mgr1._db.commit()
+    mgr1.close()
+
+    # phase 2: 同目录换 4 维 model-B。meta 无 embed_model → 名检查漏判,
+    # 但 _vec0_table_dims() 读到 8 != 4 → 重建。
+    mgr2 = MemoryManager(str(tmp_path),
+                         embed_provider=MockEmbeddingProvider(dims=4, model="model-B"),
+                         dims=4, enable_watcher=False)
+    mgr2.write("MEMORY.md", "项目用两进程 WebSocket。", append=True)
+    mgr2._index_file("MEMORY.md")  # noqa: SLF001 — 改之前此处报 Expected 8 received 4
+    assert mgr2._db.execute(  # noqa: SLF001
+        "SELECT count(*) FROM chunks_vec").fetchone()[0] > 0
+    mgr2.close()
+
+
 def test_edit_replaces_and_reindexes(tmp_path):
     mgr = _mgr(tmp_path)
     mgr.write("MEMORY.md", "用户偏好英文。", append=True)

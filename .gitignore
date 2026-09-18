@@ -38,6 +38,9 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Local embedding model artifacts (downloaded, not committed)
+models/
 .venv/
 venv/
 env/
