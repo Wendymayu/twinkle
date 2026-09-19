@@ -51,9 +51,9 @@ memory:
   dir: ${TWINKLE_MEMORY_DIR:-}           # 空 → <workspace>/.twinkle_data/memory
   embed:
     provider: local                       # local(默认,进程内 sentence-transformers,离线零成本) | openai_compat(线上 HTTP /embeddings) | none(纯 FTS,不调 embed)
-    model: bge-small-zh-v1.5              # local: stamp 进 meta;openai_compat: 发给 API 的模型名
-    model_path: ${TWINKLE_EMBED_MODEL_PATH:-models/bge-small-zh-v1.5}  # local 用;相对 CWD(项目根);改 model 后同步改
-    dims: 512                             # vec0 维度;bge-small-zh-v1.5=512;改 model 须同步改+删 memory.db 重建
+    model: bge-m3                         # local: stamp 进 meta;openai_compat: 发给 API 的模型名;bge-m3 多语言(1024维)
+    model_path: ${TWINKLE_EMBED_MODEL_PATH:-models/bge-m3}  # local 用;相对 CWD(项目根);改 model 后同步改
+    dims: 1024                            # vec0 维度;bge-m3=1024;改 model 须同步改+删 memory.db 重建
     base_url: ${TWINKLE_EMBED_BASE_URL:-}  # openai_compat 用;空→复用 llm.base_url
     api_key: ${TWINKLE_EMBED_API_KEY:-}    # openai_compat 用;空→复用 llm.api_key
   query:
