@@ -280,25 +280,6 @@ def test_clear_rebuilds_vec0_when_meta_stamp_deleted_but_stale_table_lives(tmp_p
     mgr2.close()
 
 
-def test_edit_replaces_and_reindexes(tmp_path):
-    mgr = _mgr(tmp_path)
-    mgr.write("MEMORY.md", "用户偏好英文。", append=True)
-    mgr.edit("MEMORY.md", "英文", "中文")
-    mgr._mark_dirty("MEMORY.md")  # noqa: SLF001 — 模拟 watcher 标 dirty(edit 改了内容)
-    assert "用户偏好中文。" in mgr.read("MEMORY.md")
-    assert "英文" not in mgr.read("MEMORY.md")
-    # 旧文本不再可召回，新文本可召回
-    assert any("中文" in h["text"] for h in mgr.search("偏好"))
-    assert not any("英文" in h["text"] for h in mgr.search("偏好"))
-
-
-def test_edit_old_text_missing(tmp_path):
-    mgr = _mgr(tmp_path)
-    mgr.write("MEMORY.md", "hello", append=True)
-    out = mgr.edit("MEMORY.md", "nope", "x")
-    assert "not found" in out.lower()
-
-
 def test_replace_full_overwrite_and_reindexes(tmp_path):
     """replace 原子全量覆写:旧内容全清(非追加)、索引按新内容重建(旧 chunk
     不再可召回)、不留 .tmp 残留。dreaming 整合步用 replace 重写 MEMORY.md——
@@ -564,3 +545,83 @@ def test_interval_disabled_by_default(tmp_path):
     mgr = _mgr(tmp_path)  # enable_watcher=False, watch_interval_seconds 默认 0
     assert mgr._interval_timer is None  # noqa: SLF001
     mgr.close()
+
+
+def test_chunk_does_not_cross_section_header(tmp_path):
+    """_chunk 按节切:`## ` 标题行不落在 chunk 中间,是某 chunk 首行——
+    保证对话日期标题与该节事实同 chunk,召回不丢锚点。"""
+    mgr = _mgr(tmp_path)
+    content = "## 2023-08-23 — Conv\n- fact A\n- fact B\n## 2023-08-25 — Conv\n- fact C\n"
+    chunks = mgr._chunk(content)  # noqa: SLF001
+    for c in chunks:
+        lines = c.text.splitlines()
+        assert not any(ln.lstrip().startswith("## ") for ln in lines[1:]), \
+            f"chunk L{c.start}-{c.end} 内部含 ## 标题(非首行),切断锚点"
+    first_lines = [c.text.splitlines()[0] for c in chunks if c.text.splitlines()]
+    assert any("2023-08-23" in fl for fl in first_lines)
+    assert any("2023-08-25" in fl for fl in first_lines)
+
+
+def test_chunk_no_header_falls_back_to_original(tmp_path):
+    """无 `## ` 标题(USER.md 风格)走原 budget+overlap 逻辑,不丢 chunk。"""
+    mgr = _mgr(tmp_path)
+    content = "\n".join(f"- item {i} has unique content number {i}" for i in range(30))
+    chunks = mgr._chunk(content)  # noqa: SLF001
+    assert len(chunks) >= 2
+    assert all(not ln.lstrip().startswith("## ")
+               for c in chunks for ln in c.text.splitlines())
+
+
+def test_section_title_finds_recent_header():
+    """_section_title_from_lines:从 start_line 向上找最近 `## ` 标题行。"""
+    from twinkle.agentserver.memory.store import MemoryManager
+    lines = ["## 2023-08-23 — Conv", "- fact A", "- fact B"]
+    assert MemoryManager._section_title_from_lines(lines, 2, "MEMORY.md") == "## 2023-08-23 — Conv"
+    assert MemoryManager._section_title_from_lines(lines, 3, "MEMORY.md") == "## 2023-08-23 — Conv"
+
+
+def test_section_title_daily_filename_fallback():
+    """daily 文件无 `## ` → 用文件名日期作锚点。"""
+    from twinkle.agentserver.memory.store import MemoryManager
+    assert MemoryManager._section_title_from_lines(["- today fact"], 1,
+                                                    "daily_memory/2023-08-23.md") == "2023-08-23"
+
+
+def test_section_title_user_md_fallback():
+    """USER.md 无 `## ` → 返回 'User Profile'。"""
+    from twinkle.agentserver.memory.store import MemoryManager
+    assert MemoryManager._section_title_from_lines(["- x"], 1, "USER.md") == "User Profile"
+
+
+def test_section_title_empty_when_no_header_no_fallback():
+    """无 `## ` 且非 daily/USER.md → 空串。"""
+    from twinkle.agentserver.memory.store import MemoryManager
+    assert MemoryManager._section_title_from_lines(["- x"], 1, "MEMORY.md") == ""
+
+
+def test_search_returns_section_title_field(tmp_path):
+    """search 返回 hit 含 section_title 字段(MEMORY.md 命中时非空)。"""
+    mgr = _mgr(tmp_path)
+    mgr.write("MEMORY.md", "## 2023-08-23 — Conv\n- Caroline applied to adoption this week\n",
+              append=True)
+    mgr._mark_dirty("MEMORY.md")  # noqa: SLF001 — 模拟 watcher 标 dirty
+    hits = mgr.search("adoption")
+    assert hits
+    assert hits[0]["section_title"]
+    assert "2023-08-23" in hits[0]["section_title"]
+
+
+def test_section_title_returns_self_when_chunk_starts_at_header():
+    """chunk 首行即 `## ` 标题(Task 1 保证:标题行是某 chunk 首行)→ section_title
+    返回该标题自身,非上一节标题——锚点归属正确(Task1+Task2 相干性)。"""
+    from twinkle.agentserver.memory.store import MemoryManager
+    lines = ["## 2023-08-23 — Conv", "- fact A"]
+    assert MemoryManager._section_title_from_lines(lines, 1, "MEMORY.md") == "## 2023-08-23 — Conv"
+
+
+def test_section_title_finds_nearest_not_first_header():
+    """多节文件:从第 2 节内的行向上扫,返回第 2 节标题(最近),非第 1 节——
+    锁定"向上扫找最近"属性,区分于"返回首个标题"。"""
+    from twinkle.agentserver.memory.store import MemoryManager
+    lines = ["## 2023-08-23 — Conv A", "- fact A", "## 2023-08-25 — Conv B", "- fact B"]
+    assert MemoryManager._section_title_from_lines(lines, 4, "MEMORY.md") == "## 2023-08-25 — Conv B"

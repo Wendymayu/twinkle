@@ -37,7 +37,7 @@ log = logging.getLogger("twinkle.team")
 # ── Tool 白名单 ────────────────────────────────────────────
 # 对齐 jiuwenswarm TOOL_WHITELIST（team_runtime_inheritance.py）。
 # 所有 member 共享同一集合；差异来自 persona 而非 tool。
-# 排除：write_memory、edit_memory（只读 memory）、spawn_subagent
+# 排除：write_memory（只读 memory）、spawn_subagent
 # （不允许递归子派生）、delegate_to_member（不允许递归委派）、
 # execute_workflow。
 

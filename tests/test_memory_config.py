@@ -34,7 +34,7 @@ def test_memory_constants_flattened():
 
 def test_memory_tools_in_permissions_defaults():
     tools = settings.permissions.tools
-    for t in ("memory_search", "write_memory", "read_memory", "edit_memory"):
+    for t in ("memory_search", "write_memory", "read_memory"):
         assert tools.get(t) == "allow", f"{t} not allow in default permissions"
 
 

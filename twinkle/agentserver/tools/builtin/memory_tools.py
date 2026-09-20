@@ -5,8 +5,20 @@ get_memory_manager() 的薄封装,对照 skill_tools。全部返回字符串;
 """
 from __future__ import annotations
 
+import re
+
 from twinkle.agentserver.memory import get_memory_manager
 from twinkle.agentserver.tools.decorator import tool
+
+_CJK_RE = re.compile(r"[一-鿿]")  # U+4E00–U+9FFF CJK Unified Ideographs(语言检测);fts.py:_CJK_PAT 更宽含 ExtA/兼容字
+
+
+def _recall_header(query: str, n: int) -> str:
+    """返回头跟随 query 语言:CJK→中文,否则英文。避免英文数据评测时中文头
+    混入 context 诱导中文作答(治 #73)。"""
+    if _CJK_RE.search(query):
+        return f"## 记忆召回 ({n} 条)"
+    return f"## Memory Recall ({n} hit{'s' if n != 1 else ''})"
 
 
 @tool
@@ -16,9 +28,13 @@ async def memory_search(query: str, max_results: int | None = None) -> str:
     hits = get_memory_manager().search(query, max_results=max_results)
     if not hits:
         return "No relevant memories found."
-    lines = [f"## 记忆召回 ({len(hits)} 条)"]
+    lines = [_recall_header(query, len(hits))]
     for h in hits:
-        lines.append(f"### {h['path']} (score {h['score']})\n{h['text']}")
+        anchor = h.get("section_title", "")
+        anchor_tag = f" [§ {anchor}]" if anchor else ""
+        lines.append(
+            f"### {h['path']} L{h['start_line']}-{h['end_line']}{anchor_tag} "
+            f"(score {h['score']})\n{h['text']}")
     return "\n\n".join(lines)
 
 
@@ -36,10 +52,3 @@ async def read_memory(path: str, offset: int | None = None,
                       limit: int | None = None) -> str:
     """读取 memory 文件内容(按行的 offset/limit 分页)。"""
     return get_memory_manager().read(path, offset=offset, limit=limit)
-
-
-@tool
-async def edit_memory(path: str, old_text: str, new_text: str) -> str:
-    """编辑 memory 文件:把 old_text 的第一处出现替换为 new_text。
-    用于修正过时或被推翻的记忆。"""
-    return get_memory_manager().edit(path, old_text, new_text)

@@ -302,24 +302,6 @@ class MemoryManager:
         log.info("write_memory path=%s append=%s", relative_path, append)
         return f"Stored to {relative_path}."
 
-    def edit(self, path: str, old_text: str, new_text: str) -> str:
-        relative_path = self._validate_memory_path(path)
-        if relative_path is None:
-            return (f"Error: invalid memory path '{path}'. "
-                    "Allowed: USER.md, MEMORY.md, daily_memory/YYYY-MM-DD.md.")
-        fpath = self._dir / relative_path
-        if not fpath.is_file():
-            return f"Error: '{path}' not found."
-        try:
-            text = fpath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            return f"Error reading '{path}': {exc}"
-        if old_text not in text:
-            return f"Error: old_text not found in '{path}'."
-        fpath.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-        log.info("edit_memory path=%s", relative_path)
-        return f"Edited {relative_path}."
-
     def replace(self, path: str, content: str) -> str:
         """原子全量覆盖——写到临时文件再一步 rename 到目标(同文件系统上
         rename 是原子的)。供 dreaming 的整合步骤在读快照后重写 MEMORY.md
@@ -470,12 +452,20 @@ class MemoryManager:
         while i < n:
             size, j = 0, i
             while j < n and size < budget:
+                # 节边界:遇到 `## ` 标题且非当前 chunk 首行 → 截断,
+                # 标题行留给下一 chunk 作首行(不跨节,保对话日期锚点)。
+                if j > i and lines[j].lstrip().startswith("## "):
+                    break
                 size += len(lines[j]) + 1
                 j += 1
             out.append(Chunk(i + 1, j, "\n".join(lines[i:j])))
             if j >= n:
                 break
-            # 往回退进尾部做 overlap,使下一 chunk 共享行
+            # 若因 ## 截断 → 下一 chunk 从 ## 行起(无跨节 overlap)
+            if lines[j].lstrip().startswith("## "):
+                i = j
+                continue
+            # 节内 overlap 回退(原逻辑)
             overlap_bytes, backtrack_to = 0, j
             while backtrack_to > i + 1 and overlap_bytes < overlap:
                 backtrack_to -= 1
@@ -600,13 +590,32 @@ class MemoryManager:
         """混合检索,排序 + top-N 截断(无分数截断,对齐 jiuwenswarm 的无截断
         FTS)。纯 FTS(无 sqlite-vec 或无 provider):按 SQL bm25 顺序匹配
         (最优在前)。混合:融合向量相似度 + FTS bm25 分(两者越大越优)按
-        融合分排序。"""
+        融合分排序。每个 hit 带 section_title(所属 `## ` 对话日期锚点)。
+
+        按 path 缓存读盘:本次 search 的 hit 跨多 path 时,每 path 只读一次
+        文件文本,所有 hit 共用调 _section_title_from_lines。"""
         # 兜底:写入零索引后,刚写的内容可能还在 dirty 集未索引→搜不到。
         # search 前同步 flush 保证可见性(对齐 jiuwenswarm search 前确保索引最新)。
         if self._dirty_paths:
             self._flush_dirty()
         max_results = max_results or self._max_results
         candidates = min(200, max(1, int(max_results * self._candidate_multiplier)))
+        # 按 path 缓存文件行(避免每 hit read 一次盘)
+        file_lines_cache: dict[str, list[str]] = {}
+
+        def _lines_for(path: str) -> list[str]:
+            if path not in file_lines_cache:
+                text = self.read(path)
+                file_lines_cache[path] = [] if text.startswith("Error:") else text.splitlines()
+            return file_lines_cache[path]
+
+        def _hit_anchored(row, score: float) -> dict:
+            hit = MemoryManager._hit(row, score)
+            lines = _lines_for(row["path"])
+            hit["section_title"] = MemoryManager._section_title_from_lines(
+                lines, row["start_line"], row["path"])
+            return hit
+
         with self._db_lock:
             fts_rows = self._fts_search(query, candidates)  # ORDER BY bm -> 最优在前
             fts_by_rowid = {r["rowid"]: r for r in fts_rows}
@@ -614,33 +623,34 @@ class MemoryManager:
             if not (self._vec_enabled and self._provider is not None):
                 hits = fts_rows[:max_results]
                 log.info("memory_search query=%r hits=%d (fts-only)", query, len(hits))
-                return [self._hit(r, self._text_sim(r["bm"])) for r in hits]
+                scored = [(r, self._text_sim(r["bm"])) for r in hits]
+            else:
+                vec_sims = self._vec_search(query, candidates)  # {rowid: 相似度}
 
-            vec_sims = self._vec_search(query, candidates)  # {rowid: 相似度}
+                # 候选 = 两路并集;fts 行已带正文,vec-only 的去主表回填
+                candidate_rows = dict(fts_by_rowid)
+                for row_id in vec_sims:
+                    if row_id not in candidate_rows:
+                        cr = self._db.execute(
+                            "SELECT rowid, path, text, start_line, end_line "
+                            "FROM chunks WHERE rowid=?", (row_id,)).fetchone()
+                        if cr:
+                            candidate_rows[row_id] = cr
 
-            # 候选 = 两路并集;fts 行已带正文,vec-only 的去主表回填
-            candidate_rows = dict(fts_by_rowid)
-            for row_id in vec_sims:
-                if row_id not in candidate_rows:
-                    cr = self._db.execute(
-                        "SELECT rowid, path, text, start_line, end_line "
-                        "FROM chunks WHERE rowid=?", (row_id,)).fetchone()
-                    if cr:
-                        candidate_rows[row_id] = cr
+                # 融合打分:向量相似度 + 文本相似度,加权
+                scored = []
+                for row_id, row in candidate_rows.items():
+                    text_sim = self._text_sim(fts_by_rowid[row_id]["bm"]) if row_id in fts_by_rowid else 0.0
+                    vec_sim = vec_sims.get(row_id, 0.0)
+                    fused = self._vector_weight * vec_sim + self._text_weight * text_sim
+                    scored.append((row, fused))
 
-            # 融合打分:向量相似度 + 文本相似度,加权
-            scored = []
-            for row_id, row in candidate_rows.items():
-                text_sim = self._text_sim(fts_by_rowid[row_id]["bm"]) if row_id in fts_by_rowid else 0.0
-                vec_sim = vec_sims.get(row_id, 0.0)
-                fused = self._vector_weight * vec_sim + self._text_weight * text_sim
-                scored.append((row, fused))
-
-            # 排序、截断、格式化
-            scored.sort(key=lambda x: x[1], reverse=True)
-            scored = scored[:max_results]
-            log.info("memory_search query=%r hits=%d (hybrid)", query, len(scored))
-            return [self._hit(row, score) for row, score in scored]
+                # 排序、截断
+                scored.sort(key=lambda x: x[1], reverse=True)
+                scored = scored[:max_results]
+                log.info("memory_search query=%r hits=%d (hybrid)", query, len(scored))
+        # hit 构造(含 read 文件 I/O)移出 DB 锁,避免占锁做盘读
+        return [_hit_anchored(row, score) for row, score in scored]
 
     def _fts_search(self, query: str, limit: int):
         fts_query = build_fts_query(query)
@@ -672,6 +682,23 @@ class MemoryManager:
         return {"path": row["path"], "score": round(score, 4),
                 "text": row["text"], "start_line": row["start_line"],
                 "end_line": row["end_line"]}
+
+    @staticmethod
+    def _section_title_from_lines(lines: list[str], start_line: int, path: str) -> str:
+        """chunk 所属的最近上一个 `## ` 标题行(给召回补对话日期锚点)。
+
+        从 start_line(1-indexed)向上扫,返回首个 `## ` 行 strip;无则 fallback:
+        daily 文件用文件名日期(2023-08-23)、USER.md 返回 'User Profile'、其余空串。
+        lines 是已读的文件行列表(由 search 按 path 缓存传入,避免每 hit 读盘)。"""
+        for k in range(min(start_line - 1, len(lines) - 1), -1, -1):
+            if lines[k].lstrip().startswith("## "):
+                return lines[k].strip()
+        if path.startswith("daily_memory/"):
+            tail = path[len("daily_memory/"):]
+            return tail[:-3] if tail.endswith(".md") else tail
+        if path == "USER.md":
+            return "User Profile"
+        return ""
 
     @staticmethod
     def _text_sim(bm: float) -> float:

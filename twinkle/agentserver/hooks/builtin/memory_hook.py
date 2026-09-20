@@ -11,7 +11,7 @@ from twinkle.agentserver.hooks.base import AgentHook, HookContext
 from twinkle.agentserver.prompts import PromptSection
 
 _PROMPT_TEMPLATE = """## 长期记忆
-你有跨会话长期记忆,通过工具读写:memory_search(搜)/write_memory(写,append=True 追加)/read_memory(读)/edit_memory(改)。记忆文件在 {mem_dir}。
+你有跨会话长期记忆,通过工具读写:memory_search(搜)/write_memory(写,append=True 追加)/read_memory(读)。记忆文件在 {mem_dir}。
 
 何时搜:用户提及偏好/历史/之前说过/继续上次,或回答依赖跨会话事实时,先调 memory_search(query)。
 需要今日/昨日记录时,先 memory_search('daily_memory/<日期>')(今日日期见下方环境信息)。
@@ -24,7 +24,9 @@ _PROMPT_TEMPLATE = """## 长期记忆
 写时归一化时间:对话里的相对时间("last year"/"去年"/"昨天"/"上周"/"前年")必须结合下方环境信息的"当前日期"换算成绝对日期写入(如"2022 年画的湖边日出",不是"去年画的")。相对时间会随时间漂移成错误事实,只有绝对日期跨时间不变。
 
 不该写:临时数据、当前任务过程性状态(那是 todo 的活)、寒暄、本轮就过期的事。
-recall 到与当前信息矛盾的记忆时,用 edit_memory 修正它。"""
+recall 到与当前信息矛盾的记忆时,用 write_memory(append=True) 追加一条更正,dreaming 会整合旧记忆。
+
+作答语言:用用户提问的语言作答(英文问→英文答,中文问→中文答),不要固定用某种语言。"""
 
 
 class MemoryHook(AgentHook):

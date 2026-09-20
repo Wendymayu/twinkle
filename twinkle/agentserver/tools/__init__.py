@@ -35,7 +35,6 @@ def tool_manager() -> ToolManager:
     tm.register(memory_tools.memory_search)
     tm.register(memory_tools.write_memory)
     tm.register(memory_tools.read_memory)
-    tm.register(memory_tools.edit_memory)
     tm.register(cron_tools.cron_list_jobs)
     tm.register(cron_tools.cron_create_job)
     tm.register(cron_tools.cron_update_job)

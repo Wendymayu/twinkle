@@ -88,6 +88,14 @@ def test_strategy_prompt_normalizes_relative_time_to_absolute():
         "否则 agent 照搬 'last year',记忆跨时间漂移成错误事实")
 
 
+def test_memory_hook_prompt_has_answer_language_constraint():
+    """策略 prompt 含'作答跟随提问语言'约束——治 #73 中文作答英文 gold。"""
+    from twinkle.agentserver.hooks.builtin.memory_hook import _build_prompt
+    prompt = _build_prompt()
+    assert "作答" in prompt
+    assert "提问" in prompt
+
+
 def test_auto_inject_user_md(tmp_path, monkeypatch):
     """auto_inject 开 + USER.md → memory_static 含 USER.md 内容。"""
     import twinkle.config

@@ -8,7 +8,6 @@ from twinkle.agentserver.tools.builtin.subagent.models import (
 def test_excluded_tools_set():
     assert "spawn_subagent" in EXCLUDED_TOOLS
     assert "write_memory" in EXCLUDED_TOOLS
-    assert "edit_memory" in EXCLUDED_TOOLS
     assert "memory_search" not in EXCLUDED_TOOLS
     assert "read_memory" not in EXCLUDED_TOOLS
 

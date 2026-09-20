@@ -100,7 +100,6 @@ permissions:
     memory_search: allow
     write_memory: allow
     read_memory: allow
-    edit_memory: allow
   rules: []                               # 用户规则(同 jiuwenswarm rules[] 形状;v1 可空)
   approval_overrides: {}
   overrides_file: ${TWINKLE_PERMISSION_OVERRIDES_FILE:-}   # 空 → <workspace>/.twinkle_data/permission_overrides.json

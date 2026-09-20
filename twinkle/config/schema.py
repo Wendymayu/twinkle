@@ -191,7 +191,6 @@ class PermissionsConfig(_StrictModel):
         "memory_search": "allow",
         "write_memory": "allow",
         "read_memory": "allow",
-        "edit_memory": "allow",
     }
     rules: list[dict] = []  # jiuwenswarm rules[] 形状；v1 未校验内部
     approval_overrides: dict = {}

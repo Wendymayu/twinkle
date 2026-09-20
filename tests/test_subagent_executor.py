@@ -24,7 +24,6 @@ def test_build_tool_manager_excludes_subagent_and_memory_writes(session_store):
     names = {t.card.name for t in tool_manager.list()}
     assert "spawn_subagent" not in names
     assert "write_memory" not in names
-    assert "edit_memory" not in names
     # 只读 memory + 其他工具仍在
     assert "memory_search" in names
     assert "read_memory" in names
