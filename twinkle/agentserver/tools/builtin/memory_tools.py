@@ -26,7 +26,8 @@ async def memory_search(query: str, max_results: int | None = None) -> str:
 async def write_memory(path: str, content: str, append: bool = False) -> str:
     """向长期记忆写入一条事实。path: USER.md(用户画像)、MEMORY.md
     (决策/偏好/持久事实)或 daily_memory/YYYY-MM-DD.md(每日笔记 /
-    用户说"记住这个"时)。"""
+    用户说"记住这个"时)。相对时间(去年/昨天/last year)换算成绝对日期
+    写入,避免记忆随时间漂移成错误事实。"""
     return get_memory_manager().write(path, content, append=append)
 
 

@@ -61,5 +61,8 @@ logs/
 # Session persistence (disk-backed sessions, per-user local data)
 .twinkle_data/
 
+# LoCoMo memory eval output (generated artifacts, not project code)
+locomo_twinkle/
+
 # TS incremental build artifact
 web/tsconfig.tsbuildinfo

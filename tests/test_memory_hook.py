@@ -76,6 +76,18 @@ def test_strategy_only_when_auto_inject_disabled(tmp_path, monkeypatch):
         reset(None)
 
 
+def test_strategy_prompt_normalizes_relative_time_to_absolute():
+    """记忆存相对时间(last year / 去年 / 昨天)会随时间漂移成错误事实——
+    "last year" 写入时指 2022,一年后召回同串指 2024。策略 prompt 必须指导
+    把相对时间解析成绝对日期(结合环境信息里的当前日期锚点,RuntimeEnvHook
+    注入)。否则 agent 照搬对话原文措辞,记忆跨时间失效。"""
+    from twinkle.agentserver.hooks.builtin.memory_hook import _build_prompt
+    prompt = _build_prompt()
+    assert "相对" in prompt and "绝对" in prompt, (
+        "memory strategy prompt 缺相对时间→绝对日期归一化指令; "
+        "否则 agent 照搬 'last year',记忆跨时间漂移成错误事实")
+
+
 def test_auto_inject_user_md(tmp_path, monkeypatch):
     """auto_inject 开 + USER.md → memory_static 含 USER.md 内容。"""
     import twinkle.config
