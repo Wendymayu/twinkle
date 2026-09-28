@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from twinkle.agentserver.memory import get_memory_manager
+from twinkle.agentserver.memory.dreaming import DreamingOrchestrator
 from twinkle.agentserver.tools.decorator import tool
 
 _CJK_RE = re.compile(r"[一-鿿]")  # U+4E00–U+9FFF CJK Unified Ideographs(语言检测);fts.py:_CJK_PAT 更宽含 ExtA/兼容字
@@ -40,11 +41,22 @@ async def memory_search(query: str, max_results: int | None = None) -> str:
 
 @tool
 async def write_memory(path: str, content: str, append: bool = False) -> str:
-    """向长期记忆写入一条事实。path: USER.md(用户画像)、MEMORY.md
+    """向长期记忆写入事实。path: USER.md(用户画像)、MEMORY.md
     (决策/偏好/持久事实)或 daily_memory/YYYY-MM-DD.md(每日笔记 /
-    用户说"记住这个"时)。相对时间(去年/昨天/last year)换算成绝对日期
-    写入,避免记忆随时间漂移成错误事实。"""
-    return get_memory_manager().write(path, content, append=append)
+    用户说"记住这个"时)。每条事实写成一个 `- ` bullet(一行一个原子
+    事实点,不堆叠多事实/不写段落叙述/不复述对话),这样每条 bullet 独立
+    可检索。相对时间(去年/昨天/last year)换算成绝对日期写入,避免记忆
+    随时间漂移成错误事实。"""
+    mgr = get_memory_manager()
+    result = mgr.write(path, content, append=append)
+    if path == "MEMORY.md" and not result.startswith("Error"):
+        # 写后同步 compact:让 max_memory_chars 存储上限在 agent 写路径生效
+        # (dreaming 后台 task 受 busy-backoff/300s 首跑延迟,评测时常没跑→compact 没触发)。
+        # 复用 dreaming staticmethod:load sidecar(空则空 state)→ compact(自带 _save_state)。
+        sidecar = mgr.memory_dir / "dreaming_state.json"
+        state = DreamingOrchestrator._load_state(sidecar)
+        DreamingOrchestrator._compact_if_over_budget(mgr, state)
+    return result
 
 
 @tool

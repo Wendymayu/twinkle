@@ -859,3 +859,82 @@ def test_dream_strips_injected_promotion(tmp_path, monkeypatch):
         assert "用 Windows 系统" in result
     finally:
         reset(None)
+
+
+# --- 组M：write_memory @tool 写后同步 compact（让存储上限在 agent 写路径生效）---
+
+
+def test_write_memory_compacts_on_append_over_budget(tmp_path, monkeypatch):
+    """write_memory append 超 max_memory_chars → 写后同步 compact;无 promotion
+    (sidecar 空)走阶段2 丢非 promotion 头部最老先。治「dreaming 后台没跑 →
+    compact 没触发 → MEMORY.md 无限涨」(评测 conv-26 涨到 28587 超 10000 近 3 倍)。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 30)
+    mgr = _mgr(tmp_path)
+    reset = _with_mgr(mgr)
+    try:
+        from twinkle.agentserver.tools.builtin.memory_tools import write_memory
+        asyncio.run(write_memory.func(
+            "MEMORY.md",
+            "- 最早一条事实\n- 第二条事实\n- 第三条事实\n- 最新一条事实",
+            True))
+        result = mgr.read("MEMORY.md")
+        assert "- 最新一条事实" in result       # 尾部(最新)留
+        assert "- 最早一条事实" not in result   # 头部(最老)丢
+        assert result.count("- ") < 4           # compact 丢了行
+        assert (mgr.memory_dir / "dreaming_state.json").exists()  # sidecar 落盘
+    finally:
+        reset(None)
+
+
+def test_write_memory_compacts_on_overwrite_over_budget(tmp_path, monkeypatch):
+    """append=False 覆盖写超预算同样触发 compact(覆盖也可能写超大内容,机械兜底一致)。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 30)
+    mgr = _mgr(tmp_path)
+    reset = _with_mgr(mgr)
+    try:
+        from twinkle.agentserver.tools.builtin.memory_tools import write_memory
+        asyncio.run(write_memory.func(
+            "MEMORY.md",
+            "- 最早一条事实\n- 第二条事实\n- 第三条事实\n- 最新一条事实",
+            False))
+        result = mgr.read("MEMORY.md")
+        assert "- 最新一条事实" in result
+        assert "- 最早一条事实" not in result
+        assert result.count("- ") < 4
+    finally:
+        reset(None)
+
+
+def test_write_memory_under_budget_noop(tmp_path, monkeypatch):
+    """未超预算 → 不丢行、文件原样。防 regression:compact 误删未超文件。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 1000)
+    mgr = _mgr(tmp_path)
+    reset = _with_mgr(mgr)
+    try:
+        from twinkle.agentserver.tools.builtin.memory_tools import write_memory
+        asyncio.run(write_memory.func("MEMORY.md", "- 短条目1\n- 短条目2", True))
+        assert mgr.read("MEMORY.md") == "- 短条目1\n- 短条目2"
+    finally:
+        reset(None)
+
+
+def test_write_memory_non_memory_path_skips_compact(tmp_path, monkeypatch):
+    """写 USER.md 不触发 compact(compact 只管 MEMORY.md);USER.md 全保留、不产生 sidecar。"""
+    import twinkle.config
+    monkeypatch.setattr(twinkle.config, "MEMORY_DREAMING_MAX_MEMORY_CHARS", 10)
+    mgr = _mgr(tmp_path)
+    reset = _with_mgr(mgr)
+    try:
+        from twinkle.agentserver.tools.builtin.memory_tools import write_memory
+        asyncio.run(write_memory.func(
+            "USER.md",
+            "- 用户画像A\n- 用户画像B\n- 用户画像C\n- 用户画像D",
+            True))
+        result = mgr.read("USER.md")
+        assert result.count("- 用户画像") == 4   # 全保留,compact 没动 USER.md
+        assert not (mgr.memory_dir / "dreaming_state.json").exists()  # 不产生 sidecar
+    finally:
+        reset(None)

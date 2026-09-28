@@ -548,11 +548,12 @@ def test_interval_disabled_by_default(tmp_path):
 
 
 def test_chunk_does_not_cross_section_header(tmp_path):
-    """_chunk 按节切:`## ` 标题行不落在 chunk 中间,是某 chunk 首行——
-    保证对话日期标题与该节事实同 chunk,召回不丢锚点。"""
+    """per_entry 切分(MEMORY.md 实际路径):`## ` 标题是 entry 边界,
+    不落在 chunk 中间——标题与各 bullet 各自独立成 chunk(向量聚焦);
+    日期锚点靠 section_title 机制附到 fact chunk,不靠标题与事实同 chunk。"""
     mgr = _mgr(tmp_path)
     content = "## 2023-08-23 — Conv\n- fact A\n- fact B\n## 2023-08-25 — Conv\n- fact C\n"
-    chunks = mgr._chunk(content)  # noqa: SLF001
+    chunks = mgr._chunk(content, per_entry=True)  # noqa: SLF001  MEMORY.md 走 per_entry
     for c in chunks:
         lines = c.text.splitlines()
         assert not any(ln.lstrip().startswith("## ") for ln in lines[1:]), \

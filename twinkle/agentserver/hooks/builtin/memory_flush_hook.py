@@ -28,7 +28,7 @@ _FLUSH_PROMPT = (
     "有漏则输出要写的条目（JSON 数组），无漏则输出空数组 []。\n"
     "只输出 JSON，禁止非 JSON 文本（不要代码块、不要解释）：\n"
     '[{"path":"MEMORY.md|USER.md|daily_memory/YYYY-MM-DD.md","content":"要写的内容","append":true}]\n'
-    "path 必须是 USER.md / MEMORY.md / daily_memory/YYYY-MM-DD.md 之一。"
+    "path 路由:USER.md=用户稳定身份属性(姓名/职业/长期取向);MEMORY.md=持久事实(决策/偏好/不随时间变、无具体日期的事);daily_memory/YYYY-MM-DD.md=具体事件/当日发生的事(某天的一次性活动/遭遇/作品)。带‘某天/上周/去年某时’的一次性动作 → daily,别进 USER 或 MEMORY。"
 )
 
 

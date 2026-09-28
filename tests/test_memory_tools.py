@@ -73,7 +73,7 @@ def test_memory_search_returns_anchor_and_line_range(isolated_memory):
     out = asyncio.run(memory_search.func("adoption"))
     assert "§" in out, "返回应含 [§ anchor] 锚点"
     assert "2023-08-23" in out, "锚点应含对话日期"
-    assert "L1-" in out, "返回应含行号范围"
+    assert "L2-" in out, "返回应含行号范围(per_entry 切分:- bullet 在 L2 独立成 chunk)"
 
 
 def test_memory_search_header_english_for_english_query(isolated_memory):

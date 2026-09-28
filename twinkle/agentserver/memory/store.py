@@ -28,6 +28,9 @@ log = logging.getLogger("twinkle.memory")
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 _ROOT_FILES = ("USER.md", "MEMORY.md")
+# Markdown 标题行(#{1-6}+空格/行尾),curated 文件 perEntry 切分用它识别
+# entry/section 边界(学 openclaw splitCuratedMarkdownEntries 的 nextKind 判定)。
+_RE_HEADING = re.compile(r"^#{1,6}(?:\s|$)")
 
 
 def _now_iso() -> str:
@@ -133,6 +136,10 @@ class MemoryManager:
         if enable_watcher:
             self._start_watcher()
         self._ensure_interval_sync()
+        # 启动扫已有 md 建索引:复用 memory dir / twinkle 重启时恢复索引;
+        # fresh dir 无 md → no-op。只读 md → 不触发 watchdog(对齐 jiuwenswarm
+        # Manager 启动扫 + openclaw ensureSynced)。
+        self._reindex_existing()
 
     def _start_watcher(self) -> None:
         """起 watchdog Observer 监听 memory_dir 递归。失败降级无 watcher
@@ -180,6 +187,14 @@ class MemoryManager:
         self._interval_timer = threading.Timer(self._watch_interval, _interval_loop)
         self._interval_timer.daemon = True
         self._interval_timer.start()
+
+    def _reindex_existing(self) -> None:
+        """启动时扫已有 md 建索引。复用 memory dir(sqlite 空或指纹失效)→
+        重建;fresh dir 无 md → no-op。只读 md + 写 sqlite,不改 md → 不触发
+        watchdog 事件。twinkle 重启恢复索引(通用,非 eval 专用),对齐
+        jiuwenswarm Manager 启动扫 + openclaw ensureSynced。"""
+        for rel in self.list_files():
+            self._index_file(rel)
 
     def close(self) -> None:
         """停 Observer + 取消 timer + 最终 flush。幂等可重入。
@@ -386,7 +401,8 @@ class MemoryManager:
                         self._db.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", stale_row_ids)
 
                 want_vec = self._vec_enabled and self._provider is not None
-                chunks = self._chunk(content)
+                # daily_memory/ 也 perEntry(配合 prompt 约束 agent 写 bullet 条目式)
+                chunks = self._chunk(content, per_entry=relative_path in _ROOT_FILES or relative_path.startswith("daily_memory/"))
                 texts = [c.text for c in chunks]
                 embeddings = self._embed_chunks(texts) if want_vec else [None] * len(chunks)
                 now = _now_iso()
@@ -441,37 +457,74 @@ class MemoryManager:
             self._db.execute("DELETE FROM files WHERE path=?", (relative_path,))
             self._db.commit()
 
-    def _chunk(self, content: str) -> list[Chunk]:
+    def _chunk(self, content: str, per_entry: bool = False) -> list[Chunk]:
         lines = content.splitlines()
         if not lines:
             return []
         budget = max(1, self._chunk_tokens) * 3
         overlap = max(0, self._chunk_overlap) * 3
+        if per_entry:
+            return self._chunk_per_entry(lines, budget, overlap)
+        return self._chunk_token_window(lines, 0, budget, overlap)
+
+    def _chunk_token_window(self, lines: list[str], offset: int,
+                            budget: int, overlap: int) -> list[Chunk]:
+        """按行贪心累加到 budget,尾部 overlap 回退使下一 chunk 共享行。
+        offset 是 lines[0] 对应的 1-indexed 起始行号(供 per_entry 内部切分
+        时定位块在原文的行号)。对齐 jiuwenswarm chunk_markdown / openclaw
+        chunkMarkdown(perEntry=false,daily 段落式)。"""
         out: list[Chunk] = []
         i, n = 0, len(lines)
         while i < n:
             size, j = 0, i
             while j < n and size < budget:
-                # 节边界:遇到 `## ` 标题且非当前 chunk 首行 → 截断,
-                # 标题行留给下一 chunk 作首行(不跨节,保对话日期锚点)。
-                if j > i and lines[j].lstrip().startswith("## "):
-                    break
                 size += len(lines[j]) + 1
                 j += 1
-            out.append(Chunk(i + 1, j, "\n".join(lines[i:j])))
+            out.append(Chunk(offset + i + 1, offset + j, "\n".join(lines[i:j])))
             if j >= n:
                 break
-            # 若因 ## 截断 → 下一 chunk 从 ## 行起(无跨节 overlap)
-            if lines[j].lstrip().startswith("## "):
-                i = j
-                continue
-            # 节内 overlap 回退(原逻辑)
+            # 往回退进尾部做 overlap,使下一 chunk 共享行
             overlap_bytes, backtrack_to = 0, j
             while backtrack_to > i + 1 and overlap_bytes < overlap:
                 backtrack_to -= 1
                 overlap_bytes += len(lines[backtrack_to]) + 1
             i = backtrack_to if backtrack_to > i else j
         return out
+
+    @staticmethod
+    def _is_entry_boundary(line: str) -> bool:
+        """curated 条目/章节边界:`- ` bullet 或 `#{1-6}` 标题行。
+        学 openclaw splitCuratedMarkdownEntries 的 nextKind 判定。"""
+        return line.startswith("- ") or _RE_HEADING.match(line) is not None
+
+    def _chunk_per_entry(self, lines: list[str], budget: int,
+                        overlap: int) -> list[Chunk]:
+        """按 curated 条目切分(学 openclaw perEntry=true):遇 `- ` bullet 或
+        `#` 标题边界 flush,不跨 entry 拼接——每条 bullet 独立成 chunk,向量
+        语义聚焦,避免 token 窗口把多条不相关事实拼一个 chunk 导致语义分散。
+        单 entry 超长时内部按 token 窗口切(不跨 entry)。daily 段落式文件
+        不走此路(用 _chunk_token_window)。"""
+        out: list[Chunk] = []
+        n = len(lines)
+        cur_start = 0
+        for i in range(1, n):
+            if self._is_entry_boundary(lines[i]):
+                out.extend(self._flush_entry_block(lines, cur_start, i - 1,
+                                                   budget, overlap))
+                cur_start = i
+        out.extend(self._flush_entry_block(lines, cur_start, n - 1,
+                                           budget, overlap))
+        return out
+
+    def _flush_entry_block(self, lines: list[str], start: int, end: int,
+                           budget: int, overlap: int) -> list[Chunk]:
+        """把一个 entry/section 块(lines[start..end])切成 chunk。块文本
+        ≤ budget 则整块一个 chunk;超长则内部 token 窗口切(不跨 entry)。"""
+        block = lines[start:end + 1]
+        text = "\n".join(block)
+        if len(text) <= budget or len(block) <= 1:
+            return [Chunk(start + 1, end + 1, text)]
+        return self._chunk_token_window(block, start, budget, overlap)
 
     def _embed_chunks(self, texts: list[str]) -> list:
         out: list = []

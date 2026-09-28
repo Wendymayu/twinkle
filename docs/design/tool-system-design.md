@@ -54,6 +54,95 @@ Twinkle 的工具系统是「四层模型 + 单一入口 + 横切安全」：`To
 
 ---
 
+## 工具渐进式加载（eager / deferred）
+
+MCP 接入后工具 schema 随服务器数量线性膨胀——每轮全量塞模型既费 token，又破坏 system prefix 字节稳定（provider prefix cache 失效）。渐进式加载把工具分两档：
+
+- **eager**：schema 常驻喂模型，可直接调用。
+- **deferred**：schema 不进模型，经两个 meta-tool 间接访问——先 `tools_search` 拿完整 input_schema，再 `invoke_tool` 调用。
+
+默认关（`ProgressiveToolConfig.enabled=false`）→ 行为等同现状（全量塞）；opt-in 开启后内置工具默认全 eager，MCP 工具自动落 deferred。
+
+### 流程
+
+```
+tool_schemas = tm.schemas()                    ◄── 一次冻结(invoke 内不变)
+ctx.inputs.tools = tool_schemas                ◄── 每步赋全量
+ProgressiveToolHook.before_model_call          ◄── 过滤为 eager 名 + meta 名(重赋,非原地改)
+        ▼
+llm.stream(tools=ctx.inputs.tools)             ◄── 模型只见 eager + tools_search + invoke_tool
+        │
+调 deferred 工具 ─► tools_search(tool_name) ─► 返回 input_schema(JSON,走 tool_result 消息)
+                 └► invoke_tool(tool_name, arguments) ─► tm.execute(tool_name, args) ─► 结果串
+```
+
+deferred 工具 schema 全程不进模型上下文——模型只从导航提示知道"有这些工具"，必须经 meta-tool 两步访问。
+
+### 核心权衡：search 结果走消息，不进 tools 参数
+
+`tools_search` 返回 JSON 字符串（`{"success","matches","count","message"}`），`matches` 是按 `tool_name` 精确匹配的 deferred 工具 `name`/`description`/`input_schema`（通常 0 或 1 条，是"查一个工具的 schema"，不是工具清单）。该结果走**标准 tool_result 路径**（[agent.py:703](../../twinkle/agentserver/agent.py#L703)）回灌为 `{"role":"tool","content":<JSON串>}`，模型在下一轮 messages 里读到 `input_schema`，自己构造 `arguments` 调 `invoke_tool`。**它不进 LLM API 的 `tools` 参数——是给模型看的数据，不是工具声明。**
+
+为何不把 search 命中的 schema 动态加进 `tools` 参数（让模型用原生 function call 直接调）？对比：
+
+| | 动态加进 `tools`（方案 B） | 当消息文本（方案 A·当前） |
+|---|---|---|
+| deferred 走原生 function call | ✅ 直接 `tool_call(foo, args)` | ❌ 只能经 `invoke_tool` 间接调 |
+| args 有 schema-guided decoding | ✅ provider 强约束 | ❌ `invoke_tool.arguments` 裸 object，无字段约束 |
+| tools 列表字节稳定 | ❌ 每步漂移 | ✅ 跨步逐字节相同 |
+| prefix cache | ❌ 从 tools 起失效 | ✅ 命中 |
+
+OpenAI 协议族（DeepSeek 兼容）里 `tools` 参数是 prompt 一部分，内容变即从该处后缀缓存全失效——方案 B 直接违背渐进式加载的首要目标。方案 A 用"deferred args 失去强保证"换"tools 字节稳定 + cache 命中 + 省 token"：cache 是每步每请求都付的高频税，deferred 出错是低频事件，划得来。
+
+**澄清**：方案 A 并未放弃 function call——`tools_search`/`invoke_tool` 本身就在 tools 参数里，走原生 function call + schema-guided decoding。被牺牲的仅限 deferred 工具那一次 args 生成。
+
+### deferred args 的可靠性代价
+
+"按文本 schema 生成 `invoke_tool` 的 arguments"比 schema-guided decoding 弱一档，但并非不可靠——读 schema 生成结构化 JSON 本就是 function-calling 模型的基础能力（该协议出现前所有 tool use 都这样），schema-guided decoding 只是推理时加约束再提一档。出错分类与兜底：
+
+| 错误类型 | 兜得住 | 机制 |
+|---|---|---|
+| 非合法 JSON | ⚠️ 半兜 | `json.loads` 失败 → 静默 `args={}`（[agent.py:640](../../twinkle/agentserver/agent.py#L640)）→ 工具缺参报错 → 回灌 |
+| 字段名拼错 / 多字段 / 漏 required / 类型错 | ✅ | `func(**args)` 抛 `TypeError` → `format_tool_error` 回灌 → 模型修正重试 |
+| 合法但语义错 | ❌ | 工具执行了，结果可能不对（如该传路径传了文件名） |
+
+前两类靠 meta-tool **不吞异常**（`invoke_tool` 转调 `tm.execute` 的异常透传到 `format_tool_error` + `RetryHook.ON_TOOL_EXCEPTION`，对齐直接调用失败语义）+ ReAct 循环自我修正兜底。第三类兜不住，但这不是本机制独有——原生 function-calling 也兜不住"模型理解错意图"，schema 只保证结构合规不保证语义对。
+
+兜底成立依赖：错误信息清晰、模型读得懂并修正、模型自觉重试（`TypeError` 是软失败，`RetryHook` 只重试瞬时异常，靠模型下轮主动再调）。**轻量模型（如 `deepseek-flash`）风险更高**：复杂 schema 出错率高、修正能力弱，软失败可能多轮才收敛。可选加固（未落地）：强化 `invoke_tool` description 引导、导航加 few-shot 示例、`invoke_tool` 内加 args 结构校验层前移报错。
+
+### #1 权限守卫：防 invoke_tool 绕过审批门
+
+**背景：审批门挂在"工具名"上。** 正常路径下，模型每发一个 tool_call，agent_loop 都走 `_tool_call`——它带 `@hook(BEFORE_TOOL_CALL)`，`PermissionHook` 在此按**工具名**查权限档位（allow / require-approval → ASK / deny），审批通过才 `tm.execute`：
+
+```
+模型 tool_call(command_exec) ─► _tool_call ─► [before_tool_call: PermissionHook 查 "command_exec" 档位]
+                                                            │ require-approval → ASK → 等用户批
+                                                            ▼ 通过才 tm.execute("command_exec")
+                                              ✅ 审批门拦在 command_exec 上
+```
+
+**invoke_tool 打破了这个路径。** 模型调 `invoke_tool` 时，外层仍走 `_tool_call`，`PermissionHook` 查的是 "invoke_tool"（meta-tool，默认放行）；但 `InvokeToolTool.invoke` 内部直接 `tm.execute("foo", args)` 调内层 deferred 工具——**这一步不经 `_tool_call`，没有 `before_tool_call` 钩子**：
+
+```
+模型 tool_call(invoke_tool, {tool_name:"foo",...})
+   ─► _tool_call ─► [PermissionHook 查 "invoke_tool" → 放行] ─► tm.execute("invoke_tool")
+                                                                     │ InvokeToolTool.invoke 内部
+                                                                     └► tm.execute("foo", args)  ❌ 无钩子,foo 直接执行
+                                              PermissionHook 只看到外层 "invoke_tool",看不到内层 "foo"
+```
+
+后果：若 `foo` 本是审批级工具（如 `command_exec`），它的审批门被 invoke_tool 这条间接路径整个跳过了——foo 既不会被 ASK，deny 规则也不查。
+
+**化解：审批级工具不许 defer。** `_force_protected_eager`（[progressive.py](../../twinkle/agentserver/tools/progressive.py)）把所有静态档位非 allow（`require-approval`/`deny`）的工具强制拉回 eager。eager 工具在 tools 参数里，模型**直接调它**（走 `_tool_call` → 审批门），不走 invoke_tool 间接路径——审批门自然 intact：
+
+- `command_exec` 静态 `require-approval` → 强制 eager → 模型直接调 → 审批门 + `COMMAND_DENY_PATTERNS` 都拦得住。
+- 静态档位 = `permissions.tools.get(name, global_default)`；`before_invoke` 每请求重算一次（幂等），运行期改的权限档位即时生效。
+
+### builder 与接入
+
+`apply_progressive_tools(tm, config, permissions)`（[tools/progressive.py](../../twinkle/agentserver/tools/progressive.py)）在 `server.py` create_agent 的 MCP `register_into` 之后调（[server.py:108-111](../../twinkle/agentserver/server.py#L108-L111)）：`enabled=false` 返回 `None`（no-op）；`enabled=true` 注册两 meta-tool + 返回 `ProgressiveToolHook`（priority=70）。默认 eager 用纯内置名（新 `tool_manager()` 工厂拿，不含 MCP）+ `META_NAMES` → MCP 工具名不在 → 自动落 deferred。请求边界 MCP 刷新在 `before_invoke` 之前跑，progressive 看到的是刷新后清单，新增 MCP 工具自动落 deferred、已删的不再出现。hook 两个事件：`before_invoke` 重算 eager + 注 deferred 导航 frozen_section（列工具名 + 截断描述，提示"不可直接调用，先 search 再 invoke"）；`before_model_call` 过滤 `ctx.inputs.tools` 为 eager 名单。
+
+---
+
 ## 执行流：从模型 tool_calls 到 tool_result
 
 ```
@@ -75,7 +164,7 @@ LLM Finish(tool_calls)  ──agent_loop._inner_run_stream──┐
         └─► SessionStore.append ─► _reask=True ─► 重调模型（ReAct 续循环）
 ```
 
-- **schemas → 模型**：每轮调模型前，`ctx.inputs.tools = self._tool_manager.schemas()`（[agent_loop.py](../../twinkle/agentserver/agent_loop.py) 模型段），模型据此决定调哪些工具。
+- **schemas → 模型**：每轮调模型前，`ctx.inputs.tools = self._tool_manager.schemas()`（[agent_loop.py](../../twinkle/agentserver/agent_loop.py) 模型段），模型据此决定调哪些工具。渐进式加载开启时，`ProgressiveToolHook.before_model_call` 会把此过滤为 eager 名单（见上节「工具渐进式加载」）。
 - **单一执行入口**：`ToolManager.execute` 是所有工具调用的唯一入口（[manager.py:44-52](../../twinkle/agentserver/tools/manager.py#L44-L52)）。未知工具返回 `[error] unknown tool: {name}` 串（是结果不是异常）；已知工具 `await t.invoke(args)`——异常**上抛不吞**，让 `@hook` 的 `ON_TOOL_EXCEPTION` 触发、`RetryHook` 能重试。
 - **横切挂在 `_hooked_tool_call`**：[agent_loop.py](../../twinkle/agentserver/agent_loop.py) 的 `_hooked_tool_call` 用 `@hook(..., on_exception=HookEvent.ON_TOOL_EXCEPTION)` 装饰。`before_tool_call`（权限拦截）、`after_tool_call`、`on_tool_exception`（重试）全在这层，`ToolManager` 和 `LocalFunction` 对此一无所知。
 - **结果恒为字符串**：`invoke` 契约是 `-> str`。无论成功（工具自己返回的串）还是失败（`[tool error]` 兜底串 / 权限 deny 串 / 用户拒绝串），都作为 `tool_result.content` 回灌模型。OpenAI tool 协议的 `tool` 消息 `content` 本就是字符串——不用结构化对象逼模型学读 `is_error` 字段。
@@ -213,6 +302,9 @@ _SHELL_METACHARS = frozenset(";&|<>`$\n")
 | [permissions/audit.py](../../twinkle/agentserver/permissions/audit.py) | `ToolPermissionLog`：JSONL 审计，fail-soft |
 | [hooks/builtin/permission_hook.py](../../twinkle/agentserver/hooks/builtin/permission_hook.py) | `PermissionHook`（priority=100）：bypass / check / 三决策分派 |
 | [hooks/builtin/retry_hook.py](../../twinkle/agentserver/hooks/builtin/retry_hook.py) | `RetryHook`：瞬时异常重试一次（工具 + 模型） |
+| [tools/progressive.py](../../twinkle/agentserver/tools/progressive.py) | `apply_progressive_tools` builder + `_force_protected_eager`（eager/deferred 叠加层,opt-in,默认关） |
+| [tools/builtin/progressive_tools.py](../../twinkle/agentserver/tools/builtin/progressive_tools.py) | `tools_search` + `invoke_tool` meta-tool（手写 Tool,持 tm 引用）+ `deferred_schemas` + `META_NAMES` |
+| [hooks/builtin/progressive_tool_hook.py](../../twinkle/agentserver/hooks/builtin/progressive_tool_hook.py) | `ProgressiveToolHook`（priority=70）：before_invoke 重算 eager + 注导航 / before_model_call 过滤 schemas |
 | [tools/builtin/subagent/models.py](../../twinkle/agentserver/tools/builtin/subagent/models.py) | `EXCLUDED_TOOLS`（递归 + 能力守卫）+ `SubagentResult` + `SoftTimeoutError` |
 | [tools/builtin/subagent/executor.py](../../twinkle/agentserver/tools/builtin/subagent/executor.py) | `SubagentExecutor`：隔离子 loop + 软/硬/abort 超时 + 异常全包不抛 |
 | [observability/instrumentors/tool.py](../../twinkle/observability/instrumentors/tool.py) | `gen_ai.tool` span 插桩 |
@@ -244,3 +336,15 @@ _SHELL_METACHARS = frozenset(";&|<>`$\n")
 ### 为什么 `allow_always` 拒绝 shell 元字符
 
 bless 是把「命令头 + ` *`」glob 写进覆盖表，下次同头命令直接放行。若允许 bless 含 `;&|` 的命令，`"npm run *"` 会 bless `"npm run build && rm -rf /"`——glob 匹配到，后半段危险链却绕过 deny 规则。元字符命令 fall through 重新判定，是这个「永久放行」便利与安全冲突的唯一闸门。
+
+### 为什么工具分 eager / deferred 两档而非全量塞
+
+MCP 接入后工具 schema 线性膨胀，全量塞模型两害：每轮 token 膨胀 + system prefix 字节漂移使 provider prefix cache 失效。分两档把「常要用」的内置工具留 eager 直接可调，「按需」的 MCP 工具藏 deferred 经 meta-tool 访问——schema 不进模型上下文，只在用 `tools_search` 时按名取一次。代价是调 deferred 工具要两步（先 search 拿 schema 再 invoke），但 deferred 工具本就不高频，两步换 token + cache 双省值得。默认关 = opt-in，未开 MCP 或工具数少时无需启用，行为等同现状。
+
+### 为什么 invoke_tool 强制非 allow 档工具留 eager
+
+`invoke_tool` 直调 `tm.execute` 不经 `_tool_call` 的 `before_tool_call`，PermissionHook 只看到 "invoke_tool" 而非内层 deferred 工具——若把 `command_exec` 这类审批级工具 defer，它的审批门就绕过了（deny 规则也不读，因 `_check_command_safety` 在工具内、`PermissionPolicy` 在 hook 层，两处都不经）。`_force_protected_eager` 在 builder + `before_invoke` 两道把静态非 allow 档工具钉死在 eager，使其仍走 `_tool_call` → 审批门 intact。这是「meta-tool 间接调用」便利与「权限横切」冲突的唯一闸门——靠把审批级工具排除出 defer 机制化解，而非给 `invoke_tool` 内层再挂一次 hook（那会双重判定 + 语义混乱）。
+
+### 为什么 search 结果当消息文本而非动态加进 tools 参数
+
+把 `tools_search` 命中的 schema 追加进 `tools` 参数（让模型用原生 function call 直接调 deferred 工具）能拿到 schema-guided decoding 的 args 强保证，但 `tools` 列表每步随 search 结果漂移 → 从 tools 起的 prefix cache 后缀全失效——违背渐进式加载的首要目标。当前把 search 结果当 `tool_result.content`（消息文本）回灌，模型读完 schema 再经 `invoke_tool` 间接调，tools 列表保持字节稳定。代价是 `invoke_tool.arguments`（裸 object 声明）失去字段级 schema-guided decoding，靠模型读文本自觉构造 + 软失败（`TypeError` 回灌）兜底。选「tools 字节稳定」（高频每步都付的 cache 税）舍「deferred args 强保证」（低频、有兜底）——`tools_search`/`invoke_tool` 自身仍走原生 function call，只 deferred 工具那一次 args 生成弱一档；轻量模型（如 `deepseek-flash`）结构复杂 schema 下出错率与兜底轮数都偏高，选模型时须权衡。对齐 jiuwenswarm 同机制同取舍。
